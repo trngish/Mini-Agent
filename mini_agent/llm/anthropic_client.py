@@ -1,6 +1,10 @@
 """Anthropic LLM client implementation."""
 
+import asyncio
+import json
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
@@ -10,6 +14,19 @@ from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
 from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StreamedResponse:
+    """Accumulated data from streaming response."""
+    text: str = ""
+    thinking: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
+    stop_reason: str = "stop"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
 
 
 class AnthropicClient(LLMClientBase):
@@ -50,24 +67,29 @@ class AnthropicClient(LLMClientBase):
         system_message: str | None,
         api_messages: list[dict[str, Any]],
         tools: list[Any] | None = None,
-    ) -> anthropic.types.Message:
-        """Execute API request (core method that can be retried).
+        on_text: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
+    ) -> StreamedResponse:
+        """Execute API request with streaming (core method that can be retried).
 
         Args:
             system_message: Optional system message
             api_messages: List of messages in Anthropic format
             tools: Optional list of tools
+            on_text: Optional callback for incremental text content
+            on_thinking: Optional callback for incremental thinking content
 
         Returns:
-            Anthropic Message response
+            StreamedResponse containing accumulated response data
 
         Raises:
             Exception: API call failed
         """
         params = {
             "model": self.model,
-            "max_tokens": 16384,
+            "max_tokens": self._get_max_tokens(),
             "messages": api_messages,
+            "stream": True,
         }
 
         if system_message:
@@ -76,9 +98,116 @@ class AnthropicClient(LLMClientBase):
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        # Use Anthropic SDK's async messages.create
-        response = await self.client.messages.create(**params)
-        return response
+        if self._is_m27_model():
+            thinking_config = self._get_thinking_config()
+            if thinking_config:
+                params["thinking"] = thinking_config
+
+        result = StreamedResponse()
+        current_tool_name = None
+        current_tool_input = ""
+        current_tool_id = None
+        tool_call_index = 0
+
+        try:
+            stream = await self.client.messages.create(**params)
+            async with asyncio.timeout(300):
+                async for event in stream:
+                    try:
+                        if event.type == "content_block_delta":
+                            delta = event.delta
+                            if delta.type == "text_delta":
+                                result.text += delta.text
+                                if on_text:
+                                    on_text(delta.text)
+                            elif delta.type == "thinking_delta":
+                                result.thinking += delta.thinking
+                                if on_thinking:
+                                    on_thinking(delta.thinking)
+                            elif delta.type == "input_json_delta":
+                                current_tool_input += getattr(delta, 'partial_json', "")
+                        elif event.type == "message_delta":
+                            if event.usage:
+                                result.input_tokens = (event.usage.input_tokens or 0)
+                                result.output_tokens = (event.usage.output_tokens or 0)
+                                result.cache_read_input_tokens = (event.usage.cache_read_input_tokens or 0)
+                                result.cache_creation_input_tokens = (event.usage.cache_creation_input_tokens or 0)
+                            if hasattr(event, 'delta') and hasattr(event.delta, 'stop_reason'):
+                                result.stop_reason = event.delta.stop_reason or "stop"
+                        elif event.type == "content_block_start":
+                            if hasattr(event, 'content_block'):
+                                cb = event.content_block
+                                if cb.type == "tool_use":
+                                    tool_call_index += 1
+                                    current_tool_id = str(tool_call_index)
+                                    current_tool_name = cb.name
+                                    current_tool_input = ""
+                        elif event.type == "content_block_stop" or event.type == "message_stop":
+                            if current_tool_name is not None:
+                                try:
+                                    tool_input = json.loads(current_tool_input) if current_tool_input else {}
+                                except json.JSONDecodeError:
+                                    tool_input = current_tool_input
+                                result.tool_calls.append({
+                                    "id": current_tool_id,
+                                    "name": current_tool_name,
+                                    "input": tool_input
+                                })
+                                current_tool_name = None
+                                current_tool_id = None
+                                current_tool_input = ""
+                    except (AttributeError, KeyError, TypeError, ValueError) as e:
+                        logger.warning("Error processing stream event: %s", e)
+                        continue
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            logger.error("Stream timed out after 300s")
+            raise
+        except Exception as e:
+            logger.error("Stream iteration error: %s", e)
+            raise
+
+        return result
+
+    def _is_m27_model(self) -> bool:
+        """Check if current model is M2.7 variant."""
+        model_upper = self.model.upper()
+        return any(
+            identifier in model_upper
+            for identifier in ("MINIMAX-M2.7", "MINIMAX-M2", "MINIMAX-M2.5")
+        )
+
+    def _get_max_tokens(self) -> int:
+        """Get max tokens based on model type.
+
+        M2.7 supports up to 32768 output tokens (32K).
+        """
+        if self._is_m27_model():
+            return 32768
+        return 8192
+
+    def _get_thinking_config(self) -> dict | None:
+        """Get extended thinking configuration for M2.7.
+
+        M2.7 supports extended thinking with budget up to 32K tokens.
+        Reference: https://www.minimaxi.com/models/text/m27
+
+        Returns:
+            Thinking configuration dict or None if disabled
+        """
+        if not self._is_m27_model():
+            return None
+
+        enable_thinking = getattr(self, '_enable_extended_thinking', True)
+        if not enable_thinking:
+            return None
+
+        budget_tokens = getattr(self, '_thinking_budget_tokens', 8192)
+        budget_tokens = min(budget_tokens, 32768)
+
+        return {
+            "type": "enabled",
+            "budget_tokens": budget_tokens,
+        }
 
     def _convert_tools(self, tools: list[Any]) -> list[dict[str, Any]]:
         """Convert tools to Anthropic format.
@@ -105,7 +234,6 @@ class AnthropicClient(LLMClientBase):
             if isinstance(tool, dict):
                 result.append(tool)
             elif hasattr(tool, "to_schema"):
-                # Tool object with to_schema method
                 result.append(tool.to_schema())
             else:
                 raise TypeError(f"Unsupported tool type: {type(tool)}")
@@ -128,22 +256,16 @@ class AnthropicClient(LLMClientBase):
                 system_message = msg.content
                 continue
 
-            # For user and assistant messages
             if msg.role in ["user", "assistant"]:
-                # Handle assistant messages with thinking or tool calls
                 if msg.role == "assistant" and (msg.thinking or msg.tool_calls):
-                    # Build content blocks for assistant with thinking and/or tool calls
                     content_blocks = []
 
-                    # Add thinking block if present
                     if msg.thinking:
                         content_blocks.append({"type": "thinking", "thinking": msg.thinking})
 
-                    # Add text content if present
                     if msg.content:
                         content_blocks.append({"type": "text", "text": msg.content})
 
-                    # Add tool use blocks
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
                             content_blocks.append(
@@ -159,9 +281,7 @@ class AnthropicClient(LLMClientBase):
                 else:
                     api_messages.append({"role": msg.role, "content": msg.content})
 
-            # For tool result messages
             elif msg.role == "tool":
-                # Anthropic uses user role with tool_result content blocks
                 api_messages.append(
                     {
                         "role": "user",
@@ -199,16 +319,43 @@ class AnthropicClient(LLMClientBase):
             "tools": tools,
         }
 
-    def _parse_response(self, response: anthropic.types.Message) -> LLMResponse:
+    def _parse_response(self, response: anthropic.types.Message | StreamedResponse) -> LLMResponse:
         """Parse Anthropic response into LLMResponse.
 
         Args:
-            response: Anthropic Message response
+            response: StreamedResponse (from streaming) or anthropic.types.Message (legacy)
 
         Returns:
             LLMResponse object
         """
-        # Extract text content, thinking, and tool calls
+        if isinstance(response, StreamedResponse):
+            tool_calls = [
+                ToolCall(
+                    id=tc["id"],
+                    type="function",
+                    function=FunctionCall(
+                        name=tc["name"],
+                        arguments=tc["input"],
+                    ),
+                )
+                for tc in response.tool_calls
+            ]
+
+            total_input = response.input_tokens + response.cache_read_input_tokens + response.cache_creation_input_tokens
+            usage = TokenUsage(
+                prompt_tokens=total_input,
+                completion_tokens=response.output_tokens,
+                total_tokens=total_input + response.output_tokens,
+            ) if (response.input_tokens or response.output_tokens) else None
+
+            return LLMResponse(
+                content=response.text,
+                thinking=response.thinking or None,
+                tool_calls=tool_calls if tool_calls else None,
+                finish_reason=response.stop_reason or "stop",
+                usage=usage,
+            )
+
         text_content = ""
         thinking_content = ""
         tool_calls = []
@@ -219,7 +366,6 @@ class AnthropicClient(LLMClientBase):
             elif block.type == "thinking":
                 thinking_content += block.thinking
             elif block.type == "tool_use":
-                # Parse Anthropic tool_use block
                 tool_calls.append(
                     ToolCall(
                         id=block.id,
@@ -231,8 +377,6 @@ class AnthropicClient(LLMClientBase):
                     )
                 )
 
-        # Extract token usage from response
-        # Anthropic usage includes: input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
         usage = None
         if hasattr(response, "usage") and response.usage:
             input_tokens = response.usage.input_tokens or 0
@@ -258,36 +402,39 @@ class AnthropicClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        on_text: Callable[[str], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
     ) -> LLMResponse:
         """Generate response from Anthropic LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            on_text: Optional callback called incrementally with text content
+            on_thinking: Optional callback called incrementally with thinking content
 
         Returns:
             LLMResponse containing the generated content
         """
-        # Prepare request
         request_params = self._prepare_request(messages, tools)
 
-        # Make API request with retry logic
         if self.retry_config.enabled:
-            # Apply retry logic
             retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
             api_call = retry_decorator(self._make_api_request)
             response = await api_call(
                 request_params["system_message"],
                 request_params["api_messages"],
                 request_params["tools"],
+                on_text,
+                on_thinking,
             )
         else:
-            # Don't use retry
             response = await self._make_api_request(
                 request_params["system_message"],
                 request_params["api_messages"],
                 request_params["tools"],
+                on_text,
+                on_thinking,
             )
 
-        # Parse and return response
         return self._parse_response(response)

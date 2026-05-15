@@ -1,6 +1,7 @@
 """Base class for LLM clients."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 from ..retry import RetryConfig
@@ -34,7 +35,6 @@ class LLMClientBase(ABC):
         self.model = model
         self.retry_config = retry_config or RetryConfig()
 
-        # Callback for tracking retry count
         self.retry_callback = None
 
     @abstractmethod
@@ -42,12 +42,15 @@ class LLMClientBase(ABC):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        **kwargs: Any,
     ) -> LLMResponse:
         """Generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            **kwargs: Additional implementation-specific options
+                     (e.g., on_text, on_thinking callbacks for streaming)
 
         Returns:
             LLMResponse containing the generated content, thinking, and tool calls

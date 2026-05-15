@@ -1,11 +1,47 @@
 """File operation tools."""
 
+import platform
 from pathlib import Path
 from typing import Any
 
-import tiktoken
-
 from .base import Tool, ToolResult
+from ..utils.token_utils import get_encoder
+
+
+def normalize_path_separators(path: str, platform_mode: str = "auto") -> str:
+    """Normalize path separators for the target platform.
+    
+    On Windows, converts forward slashes to backslashes for better compatibility
+    with native tools and PowerShell commands.
+    On Linux, keeps forward slashes as-is.
+    
+    Args:
+        path: Path string that may contain mixed separators
+        platform_mode: Target platform mode - "windows", "linux", or "auto" (auto-detect)
+        
+    Returns:
+        Normalized path string with appropriate separators for target platform
+    """
+    if platform_mode == "auto":
+        is_windows = platform.system() == "Windows"
+    else:
+        is_windows = platform_mode.lower() == "windows"
+    
+    if is_windows:
+        return path.replace("/", "\\")
+    return path  # Linux keeps forward slashes
+
+
+def get_platform_path_display(path: str) -> str:
+    """Get platform-appropriate path display string.
+    
+    Args:
+        path: Path string to display
+        
+    Returns:
+        Path string formatted for current platform display
+    """
+    return normalize_path_separators(path)
 
 
 def truncate_text_by_tokens(
@@ -29,8 +65,8 @@ def truncate_text_by_tokens(
         >>> truncated = truncate_text_by_tokens(text, 64000)
         >>> print(truncated)
     """
-    encoding = tiktoken.get_encoding("cl100k_base")
-    token_count = len(encoding.encode(text))
+    encoder = get_encoder("cl100k_base")
+    token_count = len(encoder.encode(text))
 
     # Return original text if under limit
     if token_count <= max_tokens:
@@ -108,6 +144,8 @@ class ReadTool(Tool):
     async def execute(self, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
         """Execute read file."""
         try:
+            # Normalize path separators for current platform
+            path = normalize_path_separators(path)
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():
@@ -195,6 +233,8 @@ class WriteTool(Tool):
     async def execute(self, path: str, content: str) -> ToolResult:
         """Execute write file."""
         try:
+            # Normalize path separators for current platform
+            path = normalize_path_separators(path)
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():
@@ -256,6 +296,8 @@ class EditTool(Tool):
     async def execute(self, path: str, old_str: str, new_str: str) -> ToolResult:
         """Execute edit file."""
         try:
+            # Normalize path separators for current platform
+            path = normalize_path_separators(path)
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():

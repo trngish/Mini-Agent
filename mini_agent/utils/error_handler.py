@@ -1,0 +1,333 @@
+"""LLM API error handling and classification.
+
+Provides detailed error classification and user-friendly error messages
+for various API error types.
+"""
+
+import re
+from enum import Enum
+from typing import Optional
+
+from .display import Colors
+
+
+class LLMErrorType(str, Enum):
+    """LLM API error types."""
+
+    # Authentication & Authorization
+    AUTHENTICATION_ERROR = "authentication_error"  # 401
+    PERMISSION_DENIED = "permission_denied"  # 403
+
+    # Rate Limiting
+    RATE_LIMIT_ERROR = "rate_limit_error"  # 429
+    QUOTA_EXCEEDED = "quota_exceeded"  # 429 with specific message
+
+    # Server Errors
+    SERVER_ERROR = "server_error"  # 500-599
+    SERVICE_UNAVAILABLE = "service_unavailable"  # 503
+    GATEWAY_TIMEOUT = "gateway_timeout"  # 504
+
+    # Client Errors
+    BAD_REQUEST = "bad_request"  # 400
+    INVALID_REQUEST = "invalid_request"  # 400 with specific message
+    CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"  # 400 with specific message
+    UNPROCESSABLE_ENTITY = "unprocessable_entity"  # 422
+
+    # Network Errors
+    NETWORK_ERROR = "network_error"
+    TIMEOUT_ERROR = "timeout_error"
+    CONNECTION_ERROR = "connection_error"
+
+    # Unknown
+    UNKNOWN_ERROR = "unknown_error"
+
+
+class LLMError(Exception):
+    """Base exception for LLM errors with error classification."""
+
+    def __init__(
+        self,
+        message: str,
+        error_type: LLMErrorType = LLMErrorType.UNKNOWN_ERROR,
+        status_code: Optional[int] = None,
+        details: Optional[str] = None,
+        retry_after: Optional[int] = None,
+    ):
+        self.message = message
+        self.error_type = error_type
+        self.status_code = status_code
+        self.details = details
+        self.retry_after = retry_after  # Seconds to wait before retry (for rate limit)
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        parts = [self.message]
+        if self.status_code:
+            parts.append(f"(Status: {self.status_code})")
+        if self.details:
+            parts.append(f"Details: {self.details}")
+        return " ".join(parts)
+
+    @property
+    def is_retryable(self) -> bool:
+        """Check if this error type should be retried."""
+        retryable_types = {
+            LLMErrorType.RATE_LIMIT_ERROR,
+            LLMErrorType.SERVER_ERROR,
+            LLMErrorType.SERVICE_UNAVAILABLE,
+            LLMErrorType.GATEWAY_TIMEOUT,
+            LLMErrorType.NETWORK_ERROR,
+            LLMErrorType.TIMEOUT_ERROR,
+            LLMErrorType.CONNECTION_ERROR,
+        }
+        return self.error_type in retryable_types
+
+    @property
+    def user_guidance(self) -> str:
+        """Get user guidance for this error type."""
+        guidance = {
+            LLMErrorType.AUTHENTICATION_ERROR: (
+                "Please check your API key is valid and has not expired. "
+                "Verify your API key in the configuration file."
+            ),
+            LLMErrorType.PERMISSION_DENIED: (
+                "Your API key does not have permission to perform this operation. "
+                "Please check your account permissions."
+            ),
+            LLMErrorType.RATE_LIMIT_ERROR: (
+                f"Rate limit exceeded. " + (
+                    f"Please wait {self.retry_after} seconds before retrying." 
+                    if self.retry_after else "Please wait a moment before retrying."
+                )
+            ),
+            LLMErrorType.QUOTA_EXCEEDED: (
+                "Your API quota has been exceeded. "
+                "Please check your usage limits or upgrade your plan."
+            ),
+            LLMErrorType.SERVER_ERROR: (
+                "The server encountered an internal error. "
+                "This is usually temporary. Please retry in a few moments."
+            ),
+            LLMErrorType.SERVICE_UNAVAILABLE: (
+                "The service is temporarily unavailable. "
+                "Please retry in a few moments."
+            ),
+            LLMErrorType.GATEWAY_TIMEOUT: (
+                "The request timed out. "
+                "Please retry with a shorter prompt or fewer tools."
+            ),
+            LLMErrorType.BAD_REQUEST: (
+                "Invalid request format. Please check your input."
+            ),
+            LLMErrorType.INVALID_REQUEST: (
+                "The request was invalid. Please check the input format."
+            ),
+            LLMErrorType.CONTEXT_LENGTH_EXCEEDED: (
+                "The conversation is too long and exceeded the context limit. "
+                "Consider starting a new conversation or reducing the task size."
+            ),
+            LLMErrorType.UNPROCESSABLE_ENTITY: (
+                "The request could not be processed. "
+                "Please check your input format and parameters."
+            ),
+            LLMErrorType.NETWORK_ERROR: (
+                "Network connection failed. "
+                "Please check your internet connection."
+            ),
+            LLMErrorType.TIMEOUT_ERROR: (
+                "The request timed out. "
+                "Please try again or reduce the request size."
+            ),
+            LLMErrorType.CONNECTION_ERROR: (
+                "Could not connect to the server. "
+                "Please check your network and try again."
+            ),
+            LLMErrorType.UNKNOWN_ERROR: (
+                "An unexpected error occurred. Please try again later."
+            ),
+        }
+        return guidance.get(self.error_type, "An unknown error occurred.")
+
+
+class LLMErrorClassifier:
+    """Classifies LLM API errors from exception objects or HTTP responses."""
+
+    # Pattern matchers for specific error messages
+    RATE_LIMIT_PATTERNS = [
+        re.compile(r"rate.?limit", re.IGNORECASE),
+        re.compile(r"too.?many.?requests", re.IGNORECASE),
+        re.compile(r"quota.?exceeded", re.IGNORECASE),
+        re.compile(r"api.?rate", re.IGNORECASE),
+    ]
+
+    CONTEXT_LENGTH_PATTERNS = [
+        re.compile(r"context.?length", re.IGNORECASE),
+        re.compile(r"token.?limit", re.IGNORECASE),
+        re.compile(r"too.?long", re.IGNORECASE),
+        re.compile(r"maximum.?context", re.IGNORECASE),
+        re.compile(r"max_tokens", re.IGNORECASE),
+    ]
+
+    AUTH_PATTERNS = [
+        re.compile(r"invalid.?api.?key", re.IGNORECASE),
+        re.compile(r"authentication.?failed", re.IGNORECASE),
+        re.compile(r"unauthorized", re.IGNORECASE),
+        re.compile(r"api.?key.?invalid", re.IGNORECASE),
+    ]
+
+    TIMEOUT_PATTERNS = [
+        re.compile(r"timeout", re.IGNORECASE),
+        re.compile(r"timed.?out", re.IGNORECASE),
+        re.compile(r"request.?timeout", re.IGNORECASE),
+    ]
+
+    CONNECTION_PATTERNS = [
+        re.compile(r"connection.*refused", re.IGNORECASE),
+        re.compile(r"connection.*reset", re.IGNORECASE),
+        re.compile(r"network.*unreachable", re.IGNORECASE),
+        re.compile(r"could.*not.*connect", re.IGNORECASE),
+    ]
+
+    @classmethod
+    def classify(
+        cls,
+        error: Exception,
+        status_code: Optional[int] = None,
+        response_body: Optional[str] = None,
+    ) -> LLMError:
+        """Classify an exception and return an LLMError.
+
+        Args:
+            error: The original exception
+            status_code: HTTP status code if available
+            response_body: Response body text if available
+
+        Returns:
+            LLMError with classified error type
+        """
+        error_str = str(error)
+        body_str = response_body or ""
+
+        # Combine for pattern matching
+        combined_text = f"{error_str} {body_str}"
+
+        # Classify by status code first
+        if status_code:
+            error_type = cls._classify_by_status(status_code, combined_text)
+            if error_type != LLMErrorType.UNKNOWN_ERROR:
+                retry_after = cls._extract_retry_after(response_body)
+                return LLMError(
+                    message=error_str,
+                    error_type=error_type,
+                    status_code=status_code,
+                    details=body_str[:500] if body_str else None,
+                    retry_after=retry_after,
+                )
+
+        # Classify by error message patterns
+        error_type = cls._classify_by_message(combined_text)
+        return LLMError(
+            message=error_str,
+            error_type=error_type,
+            status_code=status_code,
+            details=body_str[:500] if body_str else None,
+        )
+
+    @classmethod
+    def _classify_by_status(cls, status_code: int, message: str) -> LLMErrorType:
+        """Classify error by HTTP status code."""
+        if status_code == 400:
+            # Check for specific 400 errors
+            if cls._matches_patterns(message, cls.CONTEXT_LENGTH_PATTERNS):
+                return LLMErrorType.CONTEXT_LENGTH_EXCEEDED
+            return LLMErrorType.BAD_REQUEST
+
+        elif status_code == 401:
+            return LLMErrorType.AUTHENTICATION_ERROR
+
+        elif status_code == 403:
+            return LLMErrorType.PERMISSION_DENIED
+
+        elif status_code == 422:
+            return LLMErrorType.UNPROCESSABLE_ENTITY
+
+        elif status_code == 429:
+            if cls._matches_patterns(message, cls.RATE_LIMIT_PATTERNS):
+                return LLMErrorType.RATE_LIMIT_ERROR
+            return LLMErrorType.QUOTA_EXCEEDED
+
+        elif 500 <= status_code < 600:
+            if status_code == 503:
+                return LLMErrorType.SERVICE_UNAVAILABLE
+            elif status_code == 504:
+                return LLMErrorType.GATEWAY_TIMEOUT
+            return LLMErrorType.SERVER_ERROR
+
+        return LLMErrorType.UNKNOWN_ERROR
+
+    @classmethod
+    def _classify_by_message(cls, message: str) -> LLMErrorType:
+        """Classify error by error message patterns."""
+        if cls._matches_patterns(message, cls.AUTH_PATTERNS):
+            return LLMErrorType.AUTHENTICATION_ERROR
+
+        if cls._matches_patterns(message, cls.CONTEXT_LENGTH_PATTERNS):
+            return LLMErrorType.CONTEXT_LENGTH_EXCEEDED
+
+        if cls._matches_patterns(message, cls.RATE_LIMIT_PATTERNS):
+            return LLMErrorType.RATE_LIMIT_ERROR
+
+        if cls._matches_patterns(message, cls.TIMEOUT_PATTERNS):
+            return LLMErrorType.TIMEOUT_ERROR
+
+        if cls._matches_patterns(message, cls.CONNECTION_PATTERNS):
+            return LLMErrorType.CONNECTION_ERROR
+
+        return LLMErrorType.UNKNOWN_ERROR
+
+    @classmethod
+    def _matches_patterns(cls, text: str, patterns: list[re.Pattern]) -> bool:
+        """Check if text matches any of the patterns."""
+        return any(p.search(text) for p in patterns)
+
+    @classmethod
+    def _extract_retry_after(cls, response_body: Optional[str]) -> Optional[int]:
+        """Extract retry-after value from response body."""
+        if not response_body:
+            return None
+
+        # Try to find retry-after in JSON
+        match = re.search(r'"retry_after"\s*:\s*(\d+)', response_body)
+        if match:
+            return int(match.group(1))
+
+        # Try to find retry-after in header format
+        match = re.search(r"retry.?after[:\s]+(\d+)", response_body, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+
+        return None
+
+
+def format_llm_error(error: Exception, status_code: Optional[int] = None) -> str:
+    """Format an LLM error into a user-friendly message.
+
+    Args:
+        error: The exception to format
+        status_code: HTTP status code if available
+
+    Returns:
+        Formatted error message with guidance
+    """
+    llm_error = LLMErrorClassifier.classify(error, status_code)
+
+    parts = [
+        f"{Colors.BRIGHT_RED}Error: {llm_error.message}{Colors.RESET}",
+    ]
+
+    if llm_error.status_code:
+        parts.append(f"{Colors.DIM}Status Code: {llm_error.status_code}{Colors.RESET}")
+
+    parts.append(f"{Colors.BRIGHT_YELLOW}Guidance: {llm_error.user_guidance}{Colors.RESET}")
+
+    return "\n".join(parts)

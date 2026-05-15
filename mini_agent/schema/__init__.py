@@ -1,6 +1,7 @@
 """Schema definitions for Mini-Agent."""
 
 from .schema import (
+    AgentMode,
     FunctionCall,
     LLMProvider,
     LLMResponse,
@@ -10,6 +11,7 @@ from .schema import (
 )
 
 __all__ = [
+    "AgentMode",
     "FunctionCall",
     "LLMProvider",
     "LLMResponse",

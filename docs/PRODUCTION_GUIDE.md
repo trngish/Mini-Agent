@@ -34,9 +34,10 @@ This project is a **teaching-level demo** that demonstrates the core concepts an
 
 ### 2.2 Model Fallback Mechanism
 
-Currently using a single fixed model (MiniMax-M2.5), which will directly report errors on failure.
+Currently using a single fixed model (MiniMax-M2.7), which will directly report errors on failure.
 
 - Introduce a model pool by configuring multiple model accounts to improve availability
+- M2.7 supports up to 1M context window, so model switching should consider context compatibility
 - Introduce automatic health checks, failure removal, circuit breaker strategies for the model pool
 
 ### 2.3 Model Hallucination Detection and Correction

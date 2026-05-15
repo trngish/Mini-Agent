@@ -15,15 +15,56 @@
 # MiniMax provides both global and China platforms:
 # - Global: https://platform.minimax.io -> api_base: https://api.minimax.io
 # - China: https://platform.minimaxi.com -> api_base: https://api.minimaxi.com
-# Please choose based on your network environment and get API key from corresponding platform
 api_key: "YOUR_API_KEY_HERE"  # Replace with your MiniMax API Key
 api_base: "https://api.minimax.io"   # Global users (default)
 # api_base: "https://api.minimaxi.com"  # China users
-model: "MiniMax-M2.5"
+model: "MiniMax-M2.7"  # Recommended: MiniMax-M2.7 for best performance with extended thinking
 # LLM provider: "anthropic" or "openai"
 # For MiniMax API, the suffix (/anthropic or /v1) is auto-appended based on provider.
 # For third-party APIs (e.g., https://api.siliconflow.cn/v1), api_base is used as-is.
 provider: "anthropic"  # Default: anthropic
+
+# ===== M2.7 Specific Configuration =====
+# MiniMax M2.7 model optimization settings
+# Reference: https://www.minimaxi.com/models/text/m27
+# 
+# M2.7 Specifications:
+# - Context Window: 1M (1,000,000) tokens
+# - Max Output: 32K (32,768) tokens
+# - Extended Thinking: Up to 32K tokens budget
+# - Parallel Tool Calls: Native support (97% following rate on 40 complex skills)
+# - Agent Teams: Native multi-agent collaboration
+#
+# M2.7 Benchmarks:
+# - SWE-Pro: 56.22% (comparable to GPT-5.3-Codex)
+# - Terminal Bench 2: 57.0%
+# - GDPval-AA ELO: 1500 (2nd tier after Opus-4.6, Sonnet-4.6, GPT-5.4)
+# - Toolathon: 46.3% (global top tier)
+# - MMClaw: 97% skills following rate on 40 complex skills (>2000 tokens each)
+m27:
+  # Enable extended thinking for complex problem solving (default: true)
+  enable_extended_thinking: true
+  
+  # Thinking budget in tokens (M2.7 supports up to 32K)
+  # Higher values = more reasoning capacity, but uses more output tokens
+  # Recommended: 16384 for complex reasoning, 8192 for general tasks, 4096 for simple
+  thinking_budget_tokens: 16384
+  
+  # Enable parallel tool calls for better performance (default: true)
+  enable_parallel_tool_calls: true
+  
+  # Maximum concurrent tool executions when parallel is enabled (default: 5)
+  max_concurrent_tools: 5
+  
+  # Enable message caching for cost optimization (default: true)
+  enable_message_cache: true
+  
+  # Token limit before summarization (M2.7 supports 1M context)
+  # Keep at 800K (80% of max) to leave room for system prompt and tools
+  token_limit: 800000
+  
+  # Maximum output tokens (M2.7 supports up to 32K)
+  max_output_tokens: 32768
 
 # ===== Retry Configuration =====
 retry:
@@ -37,6 +78,13 @@ retry:
 max_steps: 100  # Maximum execution steps
 workspace_dir: "./workspace"  # Working directory
 system_prompt_path: "system_prompt.md"  # System prompt file (same config directory)
+
+# ===== Platform Configuration =====
+# Target platform: "windows" or "linux" or "auto"
+# This setting affects shell behavior, path handling, and default configurations
+# Options: "windows" (use PowerShell), "linux" (use bash), "auto" (auto-detect from OS)
+platform:
+  mode: "auto"
 
 # ===== Tools Configuration =====
 tools:

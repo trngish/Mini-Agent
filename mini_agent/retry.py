@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+# Exceptions that should never be retried (fatal/non-recoverable)
+NON_RETRYABLE = (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit)
+
 
 class RetryConfig:
     """Retry configuration class"""
@@ -30,7 +33,7 @@ class RetryConfig:
         initial_delay: float = 1.0,
         max_delay: float = 60.0,
         exponential_base: float = 2.0,
-        retryable_exceptions: tuple[Type[Exception], ...] = (Exception,),
+        retryable_exceptions: tuple[Type[Exception], ...] | None = None,
     ):
         """
         Args:
@@ -39,14 +42,27 @@ class RetryConfig:
             initial_delay: Initial delay time (seconds)
             max_delay: Maximum delay time (seconds)
             exponential_base: Exponential backoff base
-            retryable_exceptions: Tuple of retryable exception types
+            retryable_exceptions: Tuple of retryable exception types (defaults to Exception minus fatal types)
         """
         self.enabled = enabled
         self.max_retries = max_retries
         self.initial_delay = initial_delay
         self.max_delay = max_delay
         self.exponential_base = exponential_base
-        self.retryable_exceptions = retryable_exceptions
+        self.retryable_exceptions = retryable_exceptions or self._default_retryable()
+
+    @staticmethod
+    def _default_retryable() -> tuple[Type[Exception], ...]:
+        """Return default retryable exceptions (all exceptions except fatal types)."""
+        # Exclude CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit
+        import builtins
+        result = []
+        for name in dir(builtins):
+            obj = getattr(builtins, name)
+            if isinstance(obj, type) and issubclass(obj, Exception):
+                if not issubclass(obj, NON_RETRYABLE):
+                    result.append(obj)
+        return tuple(result)
 
     def calculate_delay(self, attempt: int) -> float:
         """Calculate delay time (exponential backoff)
@@ -101,8 +117,11 @@ def async_retry(
 
             for attempt in range(config.max_retries + 1):
                 try:
-                    # Try to execute function
                     return await func(*args, **kwargs)
+
+                except NON_RETRYABLE:
+                    # Never retry fatal exceptions
+                    raise
 
                 except config.retryable_exceptions as e:
                     last_exception = e

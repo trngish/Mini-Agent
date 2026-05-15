@@ -5,6 +5,7 @@ This module provides a unified interface for different LLM providers
 """
 
 import logging
+from typing import Any
 
 from ..retry import RetryConfig
 from ..schema import LLMProvider, LLMResponse, Message
@@ -110,18 +111,31 @@ class LLMClient:
         """Set retry callback."""
         self._client.retry_callback = value
 
+    def configure_m27(self, config: dict) -> None:
+        """Configure M2.7 specific settings on the underlying LLM client.
+
+        Args:
+            config: M2.7 configuration dictionary
+        """
+        if config.get("enable_extended_thinking") is not None:
+            setattr(self._client, '_enable_extended_thinking', config["enable_extended_thinking"])
+        if config.get("thinking_budget_tokens") is not None:
+            setattr(self._client, '_thinking_budget_tokens', config["thinking_budget_tokens"])
+
     async def generate(
         self,
         messages: list[Message],
         tools: list | None = None,
+        **kwargs: Any,
     ) -> LLMResponse:
         """Generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            **kwargs: Additional options (e.g., on_text, on_thinking)
 
         Returns:
             LLMResponse containing the generated content
         """
-        return await self._client.generate(messages, tools)
+        return await self._client.generate(messages, tools, **kwargs)

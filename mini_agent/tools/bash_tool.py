@@ -1,11 +1,15 @@
 """Shell command execution tool with background process management.
 
 Supports both bash (Unix/Linux/macOS) and PowerShell (Windows).
+Platform mode can be configured via platform_mode parameter or auto-detected.
 """
 
 import asyncio
+import os
 import platform
 import re
+import subprocess
+import sys
 import time
 import uuid
 from typing import Any
@@ -13,6 +17,43 @@ from typing import Any
 from pydantic import Field, model_validator
 
 from .base import Tool, ToolResult
+
+
+def get_platform_shell_args(platform_mode: str = "auto") -> tuple[str, list[str], str]:
+    """Get platform-appropriate shell configuration.
+    
+    Args:
+        platform_mode: "windows", "linux", or "auto" (auto-detect)
+        
+    Returns:
+        Tuple of (shell_executable, shell_args, shell_name)
+    """
+    if platform_mode == "auto":
+        is_windows = platform.system() == "Windows"
+    else:
+        is_windows = platform_mode.lower() == "windows"
+    
+    if is_windows:
+        return ("powershell.exe", ["-NoProfile", "-Command"], "PowerShell")
+    else:
+        return ("bash", [], "bash")
+
+
+def get_subprocess_env() -> dict[str, str]:
+    """Get platform-appropriate environment variables for subprocess.
+    
+    On Windows, ensures proper encoding (UTF-8) for better compatibility.
+    """
+    env = os.environ.copy()
+    
+    if platform.system() == "Windows":
+        # Ensure UTF-8 encoding on Windows for better Unicode support
+        env["PYTHONIOENCODING"] = "utf-8:replace"
+        # Set console encoding to UTF-8
+        if "PYTHONLEGACYWINDOWSIOENCODING" not in env:
+            env["PYTHONLEGACYWINDOWSIOENCODING"] = "utf-8"
+    
+    return env
 
 
 class BashOutputResult(ToolResult):
@@ -217,22 +258,31 @@ class BackgroundShellManager:
 class BashTool(Tool):
     """Execute shell commands in foreground or background.
 
-    Automatically detects OS and uses appropriate shell:
-    - Windows: PowerShell
-    - Unix/Linux/macOS: bash
+    Automatically uses appropriate shell based on platform_mode:
+    - Windows mode: PowerShell
+    - Linux mode: bash
     """
 
-    def __init__(self, workspace_dir: str | None = None):
-        """Initialize BashTool with OS-specific shell detection.
+    def __init__(self, workspace_dir: str | None = None, platform_mode: str = "auto", default_timeout: int = 120):
+        """Initialize BashTool with platform-specific shell.
 
         Args:
             workspace_dir: Working directory for command execution.
                            If provided, all commands run in this directory.
                            If None, commands run in the process's cwd.
+            platform_mode: Platform mode - "windows", "linux", or "auto" (auto-detect from OS)
+            default_timeout: Default timeout in seconds for foreground commands (default: 120)
         """
-        self.is_windows = platform.system() == "Windows"
-        self.shell_name = "PowerShell" if self.is_windows else "bash"
         self.workspace_dir = workspace_dir
+        self.default_timeout = default_timeout
+        
+        # Determine platform mode
+        if platform_mode == "auto":
+            self.is_windows = platform.system() == "Windows"
+        else:
+            self.is_windows = platform_mode.lower() == "windows"
+        
+        self.shell_name = "PowerShell" if self.is_windows else "bash"
 
     @property
     def name(self) -> str:
@@ -330,10 +380,18 @@ Examples:
             elif timeout < 1:
                 timeout = 120
 
+            # Get shell configuration based on platform mode
+            shell_exe, shell_args, shell_name = get_platform_shell_args(
+                "windows" if self.is_windows else "linux"
+            )
+            
+            # Get platform-appropriate environment
+            env = get_subprocess_env()
+
             # Prepare shell-specific command execution
             if self.is_windows:
                 # Windows: Use PowerShell with appropriate encoding
-                shell_cmd = ["powershell.exe", "-NoProfile", "-Command", command]
+                shell_cmd = [shell_exe] + shell_args + [command]
             else:
                 # Unix/Linux/macOS: Use bash
                 shell_cmd = command
@@ -349,6 +407,7 @@ Examples:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.STDOUT,
                         cwd=self.workspace_dir,
+                        env=env,
                     )
                 else:
                     process = await asyncio.create_subprocess_shell(
@@ -356,6 +415,7 @@ Examples:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.STDOUT,
                         cwd=self.workspace_dir,
+                        env=env,
                     )
 
                 # Create background shell and add to manager
@@ -386,6 +446,7 @@ Examples:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         cwd=self.workspace_dir,
+                        env=env,
                     )
                 else:
                     process = await asyncio.create_subprocess_shell(
@@ -393,6 +454,7 @@ Examples:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         cwd=self.workspace_dir,
+                        env=env,
                     )
 
                 try:
