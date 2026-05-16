@@ -8,7 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .agent import Agent
-from .utils import Colors, calculate_display_width
+from .utils import Colors
+from .utils.terminal_utils import calculate_display_width
 
 SEP = f"{Colors.DIM}┄{'─' * 56}┄{Colors.RESET}"
 
@@ -108,17 +109,19 @@ def read_log_file(filename: str) -> None:
         print(f"\n{Colors.RED}❌ Error reading file: {e}{Colors.RESET}\n")
 
 
-def print_banner():
-    """Print welcome banner — Claude Code style."""
+def print_banner() -> None:
+    """Print welcome banner — Claude Code style with gradient M logo."""
     W = 78
 
+    # Gradient M logo with ANSI color escape sequences
+    # Each line has multiple color segments for gradient effect
     logo = [
-        " ███╗   ███╗",
-        " ████╗ ████║",
-        " ██╔████╔██║",
-        " ██║╚██╔╝██║",
-        " ██║ ╚═╝ ██║",
-        " ╚═╝     ╚═╝",
+        f"{Colors.CYAN}███╗   ███╗███╗   ███╗██╗  ██╗",
+        f"{Colors.BRIGHT_CYAN}████╗ ████║████╗ ████║╚██╗██╔╝",
+        f"{Colors.BRIGHT_CYAN}██╔████╔██║██╔████╔██║ ╚███╔╝",
+        f"{Colors.CYAN}██║╚██╔╝██║██║╚██╔╝██║ ██╔██╗",
+        f"{Colors.CYAN}██║ ╚═╝ ██║██║ ╚═╝ ██║██╔╝ ██╗",
+        f"{Colors.CYAN}╚═╝     ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝",
     ]
     tips = [
         "Type a task to begin",
@@ -127,29 +130,36 @@ def print_banner():
         "Ctrl+C to exit",
     ]
 
-    def pad(n):
+    def pad(n: int) -> str:
         return f"{'':>{n}}"
 
+    # Calculate actual display width of title (excluding ANSI codes)
     title = f"{Colors.BOLD}{Colors.BRIGHT_WHITE} Mini Agent {Colors.RESET}"
-    tv = " Mini Agent "
+    tv_display_width = calculate_display_width(" Mini Agent ")
     ld = 4
-    rd = W - ld - len(tv)
+    rd = W - ld - tv_display_width
     print(f"\n  {Colors.DIM}╭{'─' * ld}{Colors.RESET}{title}{Colors.DIM}{'─' * rd}╮{Colors.RESET}")
     print(f"  {Colors.DIM}│{Colors.RESET}  {pad(W-2)}{Colors.DIM}│{Colors.RESET}")
 
     rows = max(len(logo), len(tips) + 1)
     for i in range(rows):
-        left = logo[i] if i < len(logo) else pad(14)
+        left = logo[i] if i < len(logo) else pad(60)
         if i == 0:
             right = f"{Colors.BOLD}{Colors.BRIGHT_WHITE}Welcome!{Colors.RESET}"
         elif i - 1 < len(tips):
             right = f"{Colors.DIM}{tips[i-1]}{Colors.RESET}"
         else:
             right = ""
-        rv = len("Welcome!") if i == 0 else (len(tips[i-1]) if 0 < i <= len(tips) else 0)
-        lv = len(logo[i]) if i < len(logo) else 14
-        cv = 2 + lv + 4 + rv
-        rp = W - cv
+        
+        # Calculate display widths instead of raw string lengths
+        lv = calculate_display_width(left) if i < len(logo) else 60
+        rv = calculate_display_width(right)
+        
+        # Calculate remaining space for padding
+        # Layout: left content + 4 spaces + right content + padding + borders
+        content_width = lv + 4 + rv
+        rp = W - 2 - content_width  # -2 for left and right border characters
+        
         print(f"  {Colors.DIM}│{Colors.RESET}  {left}    {right}{pad(max(0, rp))}{Colors.DIM}│{Colors.RESET}")
 
     print(f"  {Colors.DIM}│{Colors.RESET}  {pad(W-2)}{Colors.DIM}│{Colors.RESET}")
@@ -157,7 +167,7 @@ def print_banner():
     print()
 
 
-def print_help():
+def print_help() -> None:
     """Print help information."""
     print(f"\n  {Colors.BOLD}{Colors.BRIGHT_WHITE}Commands{Colors.RESET}")
     print(f"  {Colors.DIM}╌{'╌' * 40}╌{Colors.RESET}")
@@ -173,6 +183,9 @@ def print_help():
         ("/load <id>", "Load a saved session"),
         ("/list", "List saved sessions"),
         ("/subagent <task>", "Run background task"),
+        ("/skills", "List all available skills"),
+        ("/brainstorm", "Learn about brainstorming workflow"),
+        ("/plan", "Learn about planning workflow"),
         ("/exit", "Exit the program"),
     ]:
         print(f"  {Colors.GREEN}{cmd:<20}{Colors.RESET} {Colors.DIM}{desc}{Colors.RESET}")
@@ -189,14 +202,14 @@ def print_help():
     print()
 
 
-def print_session_info(agent: Agent, workspace_dir: Path, model: str):
+def print_session_info(agent: Agent, workspace_dir: Path, model: str) -> None:
     """Print session information in a compact line."""
     pm = "Windows" if platform.system() == "Windows" else "Unix"
     print(f"  {Colors.GREEN}{model}{Colors.RESET}  {Colors.DIM}·{Colors.RESET}  {workspace_dir.absolute()}  {Colors.DIM}·{Colors.RESET}  mode: {Colors.BOLD}{agent.mode.value.upper()}{Colors.RESET}  {Colors.DIM}·{Colors.RESET}  {pm}")
     print()
 
 
-def print_stats(agent: Agent, session_start: datetime):
+def print_stats(agent: Agent, session_start: datetime) -> None:
     """Print session statistics."""
     duration = datetime.now() - session_start
     minutes = int(duration.total_seconds() // 60)

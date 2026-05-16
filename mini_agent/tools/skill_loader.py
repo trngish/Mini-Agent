@@ -56,6 +56,7 @@ class SkillLoader:
         """
         self.skills_dir = Path(skills_dir)
         self.loaded_skills: Dict[str, Skill] = {}
+        self._discovered_paths: Optional[List[Path]] = None  # Cache for discovered skill paths
 
     def load_skill(self, skill_path: Path) -> Optional[Skill]:
         """
@@ -130,11 +131,9 @@ class SkillLoader:
         Returns:
             Processed content with absolute paths
         """
-        import re
-
         # Pattern 1: Directory-based paths (scripts/, references/, assets/)
         # See https://agentskills.io/specification#optional-directories
-        def replace_dir_path(match):
+        def replace_dir_path(match: re.Match) -> str:
             prefix = match.group(1)  # e.g., "python " or "`"
             rel_path = match.group(2)  # e.g., "scripts/with_server.py"
 
@@ -148,7 +147,7 @@ class SkillLoader:
 
         # Pattern 2: Direct markdown/document references (forms.md, reference.md, etc.)
         # Matches phrases like "see reference.md" or "read forms.md"
-        def replace_doc_path(match):
+        def replace_doc_path(match: re.Match) -> str:
             prefix = match.group(1)  # e.g., "see ", "read "
             filename = match.group(2)  # e.g., "reference.md"
             suffix = match.group(3)  # e.g., punctuation
@@ -168,7 +167,7 @@ class SkillLoader:
         # - [text](./reference/file.md) - relative path with ./
         # - [text](scripts/file.js) - directory-based path
         # Matches patterns like: "Read [`docx-js.md`](docx-js.md)" or "Load [Guide](./reference/guide.md)"
-        def replace_markdown_link(match):
+        def replace_markdown_link(match: re.Match) -> str:
             prefix = match.group(1) if match.group(1) else ""  # e.g., "Read ", "Load ", or empty
             link_text = match.group(2)  # e.g., "`docx-js.md`" or "Guide"
             filepath = match.group(3)  # e.g., "docx-js.md", "./reference/file.md", "scripts/file.js"
@@ -198,6 +197,10 @@ class SkillLoader:
         Returns:
             List of Skills
         """
+        # Return cached results if already discovered
+        if self._discovered_paths is not None:
+            return [self.loaded_skills[skill.name] for skill in self.loaded_skills.values()]
+        
         skills = []
 
         if not self.skills_dir.exists():
@@ -205,7 +208,10 @@ class SkillLoader:
             return skills
 
         # Recursively find all SKILL.md files
-        for skill_file in self.skills_dir.rglob("SKILL.md"):
+        skill_files = list(self.skills_dir.rglob("SKILL.md"))
+        self._discovered_paths = skill_files
+        
+        for skill_file in skill_files:
             skill = self.load_skill(skill_file)
             if skill:
                 skills.append(skill)

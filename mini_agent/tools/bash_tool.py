@@ -2,257 +2,26 @@
 
 Supports both bash (Unix/Linux/macOS) and PowerShell (Windows).
 Platform mode can be configured via platform_mode parameter or auto-detected.
+
+Modules:
+- bash_shared: Platform-specific shell configuration utilities
+- bash_result: BashOutputResult result type
+- bash_background: BackgroundShell and BackgroundShellManager
 """
 
 import asyncio
-import os
-import platform
-import re
-import subprocess
-import sys
 import time
 import uuid
 from typing import Any
 
-from pydantic import Field, model_validator
+from .base import Tool
+from .bash_shared import get_platform_shell_args, get_subprocess_env
+from .bash_result import BashOutputResult
+from .bash_background import BackgroundShell, BackgroundShellManager
+from ..utils.platform_utils import PlatformUtils
 
-from .base import Tool, ToolResult
-
-
-def get_platform_shell_args(platform_mode: str = "auto") -> tuple[str, list[str], str]:
-    """Get platform-appropriate shell configuration.
-    
-    Args:
-        platform_mode: "windows", "linux", or "auto" (auto-detect)
-        
-    Returns:
-        Tuple of (shell_executable, shell_args, shell_name)
-    """
-    if platform_mode == "auto":
-        is_windows = platform.system() == "Windows"
-    else:
-        is_windows = platform_mode.lower() == "windows"
-    
-    if is_windows:
-        return ("powershell.exe", ["-NoProfile", "-Command"], "PowerShell")
-    else:
-        return ("bash", [], "bash")
-
-
-def get_subprocess_env() -> dict[str, str]:
-    """Get platform-appropriate environment variables for subprocess.
-    
-    On Windows, ensures proper encoding (UTF-8) for better compatibility.
-    """
-    env = os.environ.copy()
-    
-    if platform.system() == "Windows":
-        # Ensure UTF-8 encoding on Windows for better Unicode support
-        env["PYTHONIOENCODING"] = "utf-8:replace"
-        # Set console encoding to UTF-8
-        if "PYTHONLEGACYWINDOWSIOENCODING" not in env:
-            env["PYTHONLEGACYWINDOWSIOENCODING"] = "utf-8"
-    
-    return env
-
-
-class BashOutputResult(ToolResult):
-    """Bash command execution result with separated stdout and stderr.
-
-    Inherits from ToolResult which provides:
-    - success: bool
-    - content: str (used for formatted output message, auto-generated from stdout/stderr)
-    - error: str | None (used for error messages)
-    """
-
-    stdout: str = Field(description="The command's standard output")
-    stderr: str = Field(description="The command's standard error output")
-    exit_code: int = Field(description="The command's exit code")
-    bash_id: str | None = Field(default=None, description="Shell process ID (only when run_in_background=True)")
-
-    @model_validator(mode="after")
-    def format_content(self) -> "BashOutputResult":
-        """Auto-format content from stdout and stderr if content is empty."""
-        output = ""
-        if self.stdout:
-            output += self.stdout
-        if self.stderr:
-            output += f"\n[stderr]:\n{self.stderr}"
-        if self.bash_id:
-            output += f"\n[bash_id]:\n{self.bash_id}"
-        if self.exit_code:
-            output += f"\n[exit_code]:\n{self.exit_code}"
-
-        if not output:
-            output = "(no output)"
-
-        self.content = output
-        return self
-
-
-class BackgroundShell:
-    """Background shell data container.
-
-    Pure data class that only stores state and output.
-    IO operations are managed externally by BackgroundShellManager.
-    """
-
-    def __init__(self, bash_id: str, command: str, process: "asyncio.subprocess.Process", start_time: float):
-        self.bash_id = bash_id
-        self.command = command
-        self.process = process
-        self.start_time = start_time
-        self.output_lines: list[str] = []
-        self.last_read_index = 0
-        self.status = "running"
-        self.exit_code: int | None = None
-
-    def add_output(self, line: str):
-        """Add new output line."""
-        self.output_lines.append(line)
-
-    def get_new_output(self, filter_pattern: str | None = None) -> list[str]:
-        """Get new output since last check, optionally filtered by regex."""
-        new_lines = self.output_lines[self.last_read_index :]
-        self.last_read_index = len(self.output_lines)
-
-        if filter_pattern:
-            try:
-                pattern = re.compile(filter_pattern)
-                new_lines = [line for line in new_lines if pattern.search(line)]
-            except re.error:
-                # Invalid regex, return all lines
-                pass
-
-        return new_lines
-
-    def update_status(self, is_alive: bool, exit_code: int | None = None):
-        """Update process status."""
-        if not is_alive:
-            self.status = "completed" if exit_code == 0 else "failed"
-            self.exit_code = exit_code
-        else:
-            self.status = "running"
-
-    async def terminate(self):
-        """Terminate the background process."""
-        if self.process.returncode is None:
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                self.process.kill()
-        self.status = "terminated"
-        self.exit_code = self.process.returncode
-
-
-class BackgroundShellManager:
-    """Manager for all background shell processes."""
-
-    _shells: dict[str, BackgroundShell] = {}
-    _monitor_tasks: dict[str, asyncio.Task] = {}
-
-    @classmethod
-    def add(cls, shell: BackgroundShell) -> None:
-        """Add a background shell to management."""
-        cls._shells[shell.bash_id] = shell
-
-    @classmethod
-    def get(cls, bash_id: str) -> BackgroundShell | None:
-        """Get a background shell by ID."""
-        return cls._shells.get(bash_id)
-
-    @classmethod
-    def get_available_ids(cls) -> list[str]:
-        """Get all available bash IDs."""
-        return list(cls._shells.keys())
-
-    @classmethod
-    def _remove(cls, bash_id: str) -> None:
-        """Remove a background shell from management (internal use only)."""
-        if bash_id in cls._shells:
-            del cls._shells[bash_id]
-
-    @classmethod
-    async def start_monitor(cls, bash_id: str) -> None:
-        """Start monitoring a background shell's output."""
-        shell = cls.get(bash_id)
-        if not shell:
-            return
-
-        async def monitor():
-            try:
-                process = shell.process
-                # Continuously read output until process ends
-                while process.returncode is None:
-                    try:
-                        if process.stdout:
-                            line = await asyncio.wait_for(process.stdout.readline(), timeout=0.1)
-                            if line:
-                                decoded_line = line.decode("utf-8", errors="replace").rstrip("\n")
-                                shell.add_output(decoded_line)
-                            else:
-                                break
-                    except asyncio.TimeoutError:
-                        await asyncio.sleep(0.1)
-                        continue
-                    except Exception:
-                        await asyncio.sleep(0.1)
-                        continue
-
-                # Process ended, wait for exit code
-                try:
-                    returncode = await process.wait()
-                except Exception:
-                    returncode = -1
-
-                shell.update_status(is_alive=False, exit_code=returncode)
-
-            except Exception as e:
-                if bash_id in cls._shells:
-                    cls._shells[bash_id].status = "error"
-                    cls._shells[bash_id].add_output(f"Monitor error: {str(e)}")
-            finally:
-                if bash_id in cls._monitor_tasks:
-                    del cls._monitor_tasks[bash_id]
-
-        task = asyncio.create_task(monitor())
-        cls._monitor_tasks[bash_id] = task
-
-    @classmethod
-    def _cancel_monitor(cls, bash_id: str) -> None:
-        """Cancel and remove a monitoring task (internal use only)."""
-        if bash_id in cls._monitor_tasks:
-            task = cls._monitor_tasks[bash_id]
-            if not task.done():
-                task.cancel()
-            del cls._monitor_tasks[bash_id]
-
-    @classmethod
-    async def terminate(cls, bash_id: str) -> BackgroundShell:
-        """Terminate a background shell and clean up all resources.
-
-        Args:
-            bash_id: The unique identifier of the background shell
-
-        Returns:
-            The terminated BackgroundShell object
-
-        Raises:
-            ValueError: If shell not found
-        """
-        shell = cls.get(bash_id)
-        if not shell:
-            raise ValueError(f"Shell not found: {bash_id}")
-
-        # Terminate the process
-        await shell.terminate()
-
-        # Clean up monitoring and remove from manager
-        cls._cancel_monitor(bash_id)
-        cls._remove(bash_id)
-
-        return shell
+# Default streaming buffer size (can be configured via environment)
+STREAM_BUFFER_SIZE = int(__import__("os").environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "5"))
 
 
 class BashTool(Tool):
@@ -276,12 +45,8 @@ class BashTool(Tool):
         self.workspace_dir = workspace_dir
         self.default_timeout = default_timeout
         
-        # Determine platform mode
-        if platform_mode == "auto":
-            self.is_windows = platform.system() == "Windows"
-        else:
-            self.is_windows = platform_mode.lower() == "windows"
-        
+        # Use unified PlatformUtils for platform detection
+        self.is_windows = PlatformUtils.is_windows(platform_mode)
         self.shell_name = "PowerShell" if self.is_windows else "bash"
 
     @property
@@ -361,7 +126,7 @@ Examples:
         command: str,
         timeout: int = 120,
         run_in_background: bool = False,
-    ) -> ToolResult:
+    ) -> BashOutputResult:
         """Execute shell command with optional background execution.
 
         Args:
@@ -370,9 +135,8 @@ Examples:
             run_in_background: Set true to run command in background
 
         Returns:
-            BashExecutionResult with command output and status
+            BashOutputResult with command output and status
         """
-
         try:
             # Validate timeout
             if timeout > 600:
@@ -397,98 +161,9 @@ Examples:
                 shell_cmd = command
 
             if run_in_background:
-                # Background execution: Create isolated process
-                bash_id = str(uuid.uuid4())[:8]
-
-                # Start background process with combined stdout/stderr
-                if self.is_windows:
-                    process = await asyncio.create_subprocess_exec(
-                        *shell_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.STDOUT,
-                        cwd=self.workspace_dir,
-                        env=env,
-                    )
-                else:
-                    process = await asyncio.create_subprocess_shell(
-                        shell_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.STDOUT,
-                        cwd=self.workspace_dir,
-                        env=env,
-                    )
-
-                # Create background shell and add to manager
-                bg_shell = BackgroundShell(bash_id=bash_id, command=command, process=process, start_time=time.time())
-                BackgroundShellManager.add(bg_shell)
-
-                # Start monitoring task
-                await BackgroundShellManager.start_monitor(bash_id)
-
-                # Return immediately with bash_id
-                message = f"Command started in background. Use bash_output to monitor (bash_id='{bash_id}')."
-                formatted_content = f"{message}\n\nCommand: {command}\nBash ID: {bash_id}"
-
-                return BashOutputResult(
-                    success=True,
-                    content=formatted_content,
-                    stdout=f"Background command started with ID: {bash_id}",
-                    stderr="",
-                    exit_code=0,
-                    bash_id=bash_id,
-                )
-
+                return await self._execute_background(shell_cmd, command, env)
             else:
-                # Foreground execution: Create isolated process
-                if self.is_windows:
-                    process = await asyncio.create_subprocess_exec(
-                        *shell_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=self.workspace_dir,
-                        env=env,
-                    )
-                else:
-                    process = await asyncio.create_subprocess_shell(
-                        shell_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=self.workspace_dir,
-                        env=env,
-                    )
-
-                try:
-                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-                except asyncio.TimeoutError:
-                    process.kill()
-                    error_msg = f"Command timed out after {timeout} seconds"
-                    return BashOutputResult(
-                        success=False,
-                        error=error_msg,
-                        stdout="",
-                        stderr=error_msg,
-                        exit_code=-1,
-                    )
-
-                # Decode output
-                stdout_text = stdout.decode("utf-8", errors="replace")
-                stderr_text = stderr.decode("utf-8", errors="replace")
-
-                # Create result (content auto-formatted by model_validator)
-                is_success = process.returncode == 0
-                error_msg = None
-                if not is_success:
-                    error_msg = f"Command failed with exit code {process.returncode}"
-                    if stderr_text:
-                        error_msg += f"\n{stderr_text.strip()}"
-
-                return BashOutputResult(
-                    success=is_success,
-                    error=error_msg,
-                    stdout=stdout_text,
-                    stderr=stderr_text,
-                    exit_code=process.returncode or 0,
-                )
+                return await self._execute_foreground(shell_cmd, command, env, timeout)
 
         except Exception as e:
             return BashOutputResult(
@@ -498,6 +173,111 @@ Examples:
                 stderr=str(e),
                 exit_code=-1,
             )
+
+    async def _execute_background(
+        self,
+        shell_cmd: list[str] | str,
+        original_command: str,
+        env: dict[str, str],
+    ) -> BashOutputResult:
+        """Execute command in background mode."""
+        bash_id = str(uuid.uuid4())[:8]
+
+        # Start background process with combined stdout/stderr
+        if self.is_windows:
+            process = await asyncio.create_subprocess_exec(
+                *shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=self.workspace_dir,
+                env=env,
+            )
+        else:
+            process = await asyncio.create_subprocess_shell(
+                shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=self.workspace_dir,
+                env=env,
+            )
+
+        # Create background shell and add to manager
+        bg_shell = BackgroundShell(bash_id=bash_id, command=original_command, process=process, start_time=time.time())
+        BackgroundShellManager.add(bg_shell)
+
+        # Start monitoring task
+        await BackgroundShellManager.start_monitor(bash_id)
+
+        # Return immediately with bash_id
+        message = f"Command started in background. Use bash_output to monitor (bash_id='{bash_id}')."
+        formatted_content = f"{message}\n\nCommand: {original_command}\nBash ID: {bash_id}"
+
+        return BashOutputResult(
+            success=True,
+            content=formatted_content,
+            stdout=f"Background command started with ID: {bash_id}",
+            stderr="",
+            exit_code=0,
+            bash_id=bash_id,
+        )
+
+    async def _execute_foreground(
+        self,
+        shell_cmd: list[str] | str,
+        original_command: str,
+        env: dict[str, str],
+        timeout: int,
+    ) -> BashOutputResult:
+        """Execute command in foreground mode."""
+        if self.is_windows:
+            process = await asyncio.create_subprocess_exec(
+                *shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self.workspace_dir,
+                env=env,
+            )
+        else:
+            process = await asyncio.create_subprocess_shell(
+                shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self.workspace_dir,
+                env=env,
+            )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            error_msg = f"Command timed out after {timeout} seconds"
+            return BashOutputResult(
+                success=False,
+                error=error_msg,
+                stdout="",
+                stderr=error_msg,
+                exit_code=-1,
+            )
+
+        # Decode output
+        stdout_text = stdout.decode("utf-8", errors="replace")
+        stderr_text = stderr.decode("utf-8", errors="replace")
+
+        # Create result (content auto-formatted by model_validator)
+        is_success = process.returncode == 0
+        error_msg = None
+        if not is_success:
+            error_msg = f"Command failed with exit code {process.returncode}"
+            if stderr_text:
+                error_msg += f"\n{stderr_text.strip()}"
+
+        return BashOutputResult(
+            success=is_success,
+            error=error_msg,
+            stdout=stdout_text,
+            stderr=stderr_text,
+            exit_code=process.returncode or 0,
+        )
 
 
 class BashOutputTool(Tool):
@@ -558,7 +338,6 @@ class BashOutputTool(Tool):
         Returns:
             BashOutputResult with shell output including stdout, stderr, status, and success flag
         """
-
         try:
             # Get background shell from manager
             bg_shell = BackgroundShellManager.get(bash_id)
@@ -636,7 +415,6 @@ class BashKillTool(Tool):
         Returns:
             BashOutputResult with termination status and remaining output
         """
-
         try:
             # Get remaining output before termination
             bg_shell = BackgroundShellManager.get(bash_id)

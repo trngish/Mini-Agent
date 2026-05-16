@@ -33,12 +33,30 @@ from .error_handler import (
     format_llm_error,
 )
 from .m27_optimization import (
-    M27Config,
     M27PromptOptimizer,
     M27ContextManager,
     M27ToolOptimizer,
+    M27AgentTeams,
+)
+from .model_utils import (
+    is_m27_model,
+    is_minimax_model,
+    get_model_specs,
+    get_thinking_budget,
+    get_max_output_tokens,
+    get_token_limit_for_model,
+    ModelSpecs,
+    # Legacy alias for backwards compatibility
     is_m27_enabled,
 )
+from .platform_utils import (
+    PlatformUtils,
+    PlatformInfo,
+    get_platform_shell_args,
+    get_subprocess_env,
+    normalize_path_separators,
+)
+from .config_validator import ConfigValidator, ConfigValidationError
 
 __all__ = [
     # Display utilities
@@ -74,10 +92,26 @@ __all__ = [
     "LLMErrorType",
     "format_llm_error",
     # M2.7 optimizations
-    "M27Config",
     "M27PromptOptimizer",
     "M27ContextManager",
     "M27ToolOptimizer",
-    "is_m27_enabled",
+    "M27AgentTeams",
+    # Model utilities (single source of truth)
+    "is_m27_model",
+    "is_minimax_model",
+    "get_model_specs",
+    "get_thinking_budget",
+    "get_max_output_tokens",
+    "get_token_limit_for_model",
+    "is_m27_enabled",  # Legacy alias
+    "ModelSpecs",
+    # Platform utilities (single source of truth)
+    "PlatformUtils",
+    "PlatformInfo",
+    "get_platform_shell_args",
+    "get_subprocess_env",
+    "normalize_path_separators",
+    # Config validation
+    "ConfigValidator",
+    "ConfigValidationError",
 ]
-

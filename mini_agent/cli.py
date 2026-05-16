@@ -19,7 +19,6 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import List
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -40,7 +39,6 @@ from .config import Config, CLIOverrideConfig
 from .schema import AgentMode
 from .subagent import SubAgent
 from .ui import (
-    get_log_directory,
     print_banner,
     print_help,
     print_session_info,
@@ -178,7 +176,7 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOve
         history=FileHistory(str(history_file)),
         auto_suggest=AutoSuggestFromHistory(),
         completer=WordCompleter(
-            ["/help", "/clear", "/history", "/stats", "/log", "/mode", "/save", "/load", "/list", "/subagent", "/debug", "/exit"],
+            ["/help", "/clear", "/history", "/stats", "/log", "/mode", "/save", "/load", "/list", "/subagent", "/skills", "/brainstorm", "/plan", "/debug", "/exit"],
             ignore_case=True,
         ),
         style=Style.from_dict({"prompt": "#00ff00 bold", "separator": "#666666"}),
@@ -234,10 +232,47 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOve
                     task = " ".join(cmd[1:])
                     print(f"\n  {Colors.BRIGHT_YELLOW}⚡ Sub-agent: {task[:60]}{Colors.RESET}")
                     try:
-                        r = await SubAgent(llm_client=agent.llm, tools=list(agent.tools.values())).run(task)
+                        # Use agent's m27_config (built at line 115)
+                        r = await SubAgent(llm_client=agent.llm, tools=list(agent.tools.values()), m27_config=m27_config).run(task)
                         print(f"  {Colors.GREEN}✓ ({r.elapsed:.1f}s): {r.content[:200]}{Colors.RESET}\n" if r.success else f"  {Colors.RED}✗ {r.error[:200]}{Colors.RESET}\n")
                     except Exception as e:
                         print(f"  {Colors.RED}✗ {e}{Colors.RESET}\n")
+                elif cmd[0] == "/skills":
+                    if skill_loader:
+                        skills = skill_loader.list_skills()
+                        print(f"\n{Colors.BRIGHT_CYAN}Available Skills ({len(skills)}):{Colors.RESET}")
+                        for name in sorted(skills):
+                            skill = skill_loader.get_skill(name)
+                            desc = skill.description[:60] if skill else ""
+                            print(f"  {Colors.GREEN}{name}{Colors.RESET} - {desc}...")
+                        print()
+                    else:
+                        print(f"{Colors.DIM}⏭️  Skills not loaded{Colors.RESET}\n")
+                elif cmd[0] == "/brainstorm":
+                    if skill_loader:
+                        skill = skill_loader.get_skill("brainstorming")
+                        if skill:
+                            print(f"\n{Colors.BRIGHT_CYAN}🧠 Brainstorming Skill{Colors.RESET}")
+                            print(f"  {Colors.DIM}Use this skill before any creative work - creating features,")
+                            print(f"  building components, adding functionality, or modifying behavior.{Colors.RESET}")
+                            print(f"\n  To start brainstorming, simply describe what you want to build!")
+                            print(f"  {Colors.DIM}(The agent will invoke the brainstorming skill automatically){Colors.RESET}\n")
+                        else:
+                            print(f"{Colors.RED}❌ Brainstorming skill not found{Colors.RESET}\n")
+                    else:
+                        print(f"{Colors.DIM}⏭️  Skills not loaded{Colors.RESET}\n")
+                elif cmd[0] == "/plan":
+                    if skill_loader:
+                        skill = skill_loader.get_skill("writing-plans")
+                        if skill:
+                            print(f"\n{Colors.BRIGHT_CYAN}📋 Writing Plans Skill{Colors.RESET}")
+                            print(f"  {Colors.DIM}Use when you have a spec or requirements for a multi-step task.{Colors.RESET}")
+                            print(f"\n  Workflow: brainstorm → writing-plans → executing-plans → finishing-a-development-branch")
+                            print(f"  {Colors.DIM}(Start with /brainstorm to define the design first){Colors.RESET}\n")
+                        else:
+                            print(f"{Colors.RED}❌ Writing plans skill not found{Colors.RESET}\n")
+                    else:
+                        print(f"{Colors.DIM}⏭️  Skills not loaded{Colors.RESET}\n")
                 elif cmd[0] == "/debug":
                     print(f"\n  Log: {agent.logger.get_log_file_path()}\n")
                 else:
@@ -253,7 +288,7 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOve
             esc_stop = threading.Event()
             esc_cancelled = [False]
 
-            def esc_listener():
+            def esc_listener() -> None:
                 if platform.system() == "Windows":
                     try:
                         import ctypes
@@ -313,7 +348,7 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOve
     await cleanup_mcp()
 
 
-def main():
+def main() -> None:
     """Main entry point for CLI."""
     args = parse_args()
 

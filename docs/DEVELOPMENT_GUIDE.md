@@ -265,23 +265,23 @@ class MilvusNoteTool(Tool):
         )
 ```
 
-### 3.4 Initialize Claude Skills (Recommended) 
+### 3.4 Claude Skills Integration
 
-This project integrates Claude's official skills repository via git submodule. Initialize it after first clone:
+This project includes 30 professional skills for documents, design, testing, and development workflows. Skills are loaded from the `skills/` directory:
 
 ```bash
-# Initialize submodule
-git submodule update --init --recursive
+# Skills are pre-installed in mini_agent/skills/
+# No submodule initialization needed
+ls mini_agent/skills/
 ```
 
-Skills provide 20+ professional capabilities, making the Agent work like a professional:
+Skills provide capabilities in these areas:
 
 - 📄 **Document Processing**: Create and edit PDF, DOCX, XLSX, PPTX
 - 🎨 **Design Creation**: Generate artwork, posters, GIF animations
 - 🧪 **Development & Testing**: Web automation testing (Playwright), MCP server development
+- 🔧 **Development Workflows**: Brainstorming, planning, TDD, systematic debugging, subagent-driven development
 - 🏢 **Enterprise Applications**: Internal communication, brand guidelines, theme customization
-
-✨ **This is one of the core highlights of this project.** For details, see the "Configure Skills" section below.
 
 **More information:**
 

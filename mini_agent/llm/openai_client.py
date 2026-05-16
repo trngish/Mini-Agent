@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from ..retry import RetryConfig, async_retry
 from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
 from .base import LLMClientBase
+from ..utils.model_utils import get_max_output_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class OpenAIClient(LLMClientBase):
             "messages": api_messages,
             # Enable reasoning_split to separate thinking content
             "extra_body": {"reasoning_split": True},
+            "max_tokens": get_max_output_tokens(self.model),
         }
 
         if tools:
@@ -135,7 +137,7 @@ class OpenAIClient(LLMClientBase):
 
             # For assistant messages
             elif msg.role == "assistant":
-                assistant_msg = {"role": "assistant"}
+                assistant_msg: dict[str, Any] = {"role": "assistant"}
 
                 # Add content if present
                 if msg.content:

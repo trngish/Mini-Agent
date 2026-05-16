@@ -95,7 +95,7 @@ tools:
   
   # Claude Skills
   enable_skills: true      # Enable Skills
-  skills_dir: "./skills"   # Skills directory path
+  skills_dir: "./mini_agent/skills"   # Skills directory path
   
   # MCP Tools
   enable_mcp: true         # Enable MCP tools

@@ -1,52 +1,22 @@
 """File operation tools."""
 
-import platform
 from pathlib import Path
 from typing import Any
 
 from .base import Tool, ToolResult
 from ..utils.token_utils import get_encoder
+from ..utils.model_utils import get_model_specs, is_minimax_model
+from ..utils.platform_utils import normalize_path_separators as normalize_path
 
-
-def normalize_path_separators(path: str, platform_mode: str = "auto") -> str:
-    """Normalize path separators for the target platform.
-    
-    On Windows, converts forward slashes to backslashes for better compatibility
-    with native tools and PowerShell commands.
-    On Linux, keeps forward slashes as-is.
-    
-    Args:
-        path: Path string that may contain mixed separators
-        platform_mode: Target platform mode - "windows", "linux", or "auto" (auto-detect)
-        
-    Returns:
-        Normalized path string with appropriate separators for target platform
-    """
-    if platform_mode == "auto":
-        is_windows = platform.system() == "Windows"
-    else:
-        is_windows = platform_mode.lower() == "windows"
-    
-    if is_windows:
-        return path.replace("/", "\\")
-    return path  # Linux keeps forward slashes
-
-
-def get_platform_path_display(path: str) -> str:
-    """Get platform-appropriate path display string.
-    
-    Args:
-        path: Path string to display
-        
-    Returns:
-        Path string formatted for current platform display
-    """
-    return normalize_path_separators(path)
+# Centralized token limits for file content truncation
+DEFAULT_FILE_TOKEN_LIMIT = 32000
+M27_FILE_TOKEN_LIMIT = 64000
 
 
 def truncate_text_by_tokens(
     text: str,
     max_tokens: int,
+    model_name: str | None = None,
 ) -> str:
     """Truncate text by token count if it exceeds the limit.
 
@@ -56,15 +26,15 @@ def truncate_text_by_tokens(
     Args:
         text: Text to be truncated
         max_tokens: Maximum token limit
-
+        model_name: Optional model name for model-specific limits
+        
     Returns:
         str: Truncated text if it exceeds the limit, otherwise the original text.
-
-    Example:
-        >>> text = "very long text..." * 10000
-        >>> truncated = truncate_text_by_tokens(text, 64000)
-        >>> print(truncated)
     """
+    # Get model-specific limit if model_name provided
+    if model_name and is_minimax_model(model_name):
+        max_tokens = M27_FILE_TOKEN_LIMIT
+    
     encoder = get_encoder("cl100k_base")
     token_count = len(encoder.encode(text))
 
@@ -94,6 +64,20 @@ def truncate_text_by_tokens(
     # Combine result
     truncation_note = f"\n\n... [Content truncated: {token_count} tokens -> ~{max_tokens} tokens limit] ...\n\n"
     return head_part + truncation_note + tail_part
+
+
+def get_file_token_limit(model_name: str | None = None) -> int:
+    """Get the appropriate token limit for file content.
+    
+    Args:
+        model_name: Optional model name for model-specific limits
+        
+    Returns:
+        Token limit for file content
+    """
+    if model_name and is_minimax_model(model_name):
+        return M27_FILE_TOKEN_LIMIT
+    return DEFAULT_FILE_TOKEN_LIMIT
 
 
 class ReadTool(Tool):
@@ -145,7 +129,7 @@ class ReadTool(Tool):
         """Execute read file."""
         try:
             # Normalize path separators for current platform
-            path = normalize_path_separators(path)
+            path = normalize_path(path)
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():
@@ -181,8 +165,8 @@ class ReadTool(Tool):
 
             content = "\n".join(numbered_lines)
 
-            # Apply token truncation if needed
-            max_tokens = 32000
+            # Apply token truncation with centralized limit
+            max_tokens = get_file_token_limit()
             content = truncate_text_by_tokens(content, max_tokens)
 
             return ToolResult(success=True, content=content)
@@ -234,7 +218,7 @@ class WriteTool(Tool):
         """Execute write file."""
         try:
             # Normalize path separators for current platform
-            path = normalize_path_separators(path)
+            path = normalize_path(path)
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():
@@ -297,7 +281,7 @@ class EditTool(Tool):
         """Execute edit file."""
         try:
             # Normalize path separators for current platform
-            path = normalize_path_separators(path)
+            path = normalize_path(path)
             file_path = Path(path)
             # Resolve relative paths relative to workspace_dir
             if not file_path.is_absolute():

@@ -3,15 +3,24 @@
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
 
+# Default streaming buffer size (can be configured via environment)
+STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "5"))
+
 from ..retry import RetryConfig, async_retry
 from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
 from .base import LLMClientBase
+from ..utils.model_utils import (
+    is_m27_model,
+    get_max_output_tokens,
+    get_thinking_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +70,19 @@ class AnthropicClient(LLMClientBase):
             api_key=api_key,
             default_headers={"Authorization": f"Bearer {api_key}"},
         )
+        
+        # M2.7 configuration attributes
+        self._enable_extended_thinking = True
+        self._thinking_budget_tokens = 8192
+
+    def configure_m27(self, config: dict) -> None:
+        """Configure M2.7 specific settings.
+        
+        Args:
+            config: M2.7 configuration dict from Config.m27
+        """
+        self._enable_extended_thinking = config.get("enable_extended_thinking", True)
+        self._thinking_budget_tokens = config.get("thinking_budget_tokens", 8192)
 
     async def _make_api_request(
         self,
@@ -98,7 +120,7 @@ class AnthropicClient(LLMClientBase):
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        if self._is_m27_model():
+        if is_m27_model(self.model):
             thinking_config = self._get_thinking_config()
             if thinking_config:
                 params["thinking"] = thinking_config
@@ -109,6 +131,11 @@ class AnthropicClient(LLMClientBase):
         current_tool_id = None
         tool_call_index = 0
 
+        # Buffer for batching streaming callbacks
+        text_buffer = []
+        thinking_buffer = []
+        buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
+
         try:
             stream = await self.client.messages.create(**params)
             async with asyncio.timeout(300):
@@ -118,12 +145,16 @@ class AnthropicClient(LLMClientBase):
                             delta = event.delta
                             if delta.type == "text_delta":
                                 result.text += delta.text
-                                if on_text:
-                                    on_text(delta.text)
+                                text_buffer.append(delta.text)
+                                if len(text_buffer) >= buffer_size and on_text:
+                                    on_text("".join(text_buffer))
+                                    text_buffer.clear()
                             elif delta.type == "thinking_delta":
                                 result.thinking += delta.thinking
-                                if on_thinking:
-                                    on_thinking(delta.thinking)
+                                thinking_buffer.append(delta.thinking)
+                                if len(thinking_buffer) >= buffer_size and on_thinking:
+                                    on_thinking("".join(thinking_buffer))
+                                    thinking_buffer.clear()
                             elif delta.type == "input_json_delta":
                                 current_tool_input += getattr(delta, 'partial_json', "")
                         elif event.type == "message_delta":
@@ -159,6 +190,13 @@ class AnthropicClient(LLMClientBase):
                     except (AttributeError, KeyError, TypeError, ValueError) as e:
                         logger.warning("Error processing stream event: %s", e)
                         continue
+            
+            # Flush remaining buffers
+            if text_buffer and on_text:
+                on_text("".join(text_buffer))
+            if thinking_buffer and on_thinking:
+                on_thinking("".join(thinking_buffer))
+                
         except (TimeoutError, asyncio.TimeoutError) as e:
             logger.error("Stream timed out after 300s")
             raise
@@ -168,22 +206,12 @@ class AnthropicClient(LLMClientBase):
 
         return result
 
-    def _is_m27_model(self) -> bool:
-        """Check if current model is M2.7 variant."""
-        model_upper = self.model.upper()
-        return any(
-            identifier in model_upper
-            for identifier in ("MINIMAX-M2.7", "MINIMAX-M2", "MINIMAX-M2.5")
-        )
-
     def _get_max_tokens(self) -> int:
         """Get max tokens based on model type.
 
-        M2.7 supports up to 32768 output tokens (32K).
+        Uses unified model utilities for consistent configuration.
         """
-        if self._is_m27_model():
-            return 32768
-        return 8192
+        return get_max_output_tokens(self.model)
 
     def _get_thinking_config(self) -> dict | None:
         """Get extended thinking configuration for M2.7.
@@ -194,19 +222,19 @@ class AnthropicClient(LLMClientBase):
         Returns:
             Thinking configuration dict or None if disabled
         """
-        if not self._is_m27_model():
+        if not is_m27_model(self.model):
             return None
 
-        enable_thinking = getattr(self, '_enable_extended_thinking', True)
-        if not enable_thinking:
+        if not self._enable_extended_thinking:
             return None
 
-        budget_tokens = getattr(self, '_thinking_budget_tokens', 8192)
-        budget_tokens = min(budget_tokens, 32768)
+        budget = get_thinking_budget(self.model, self._thinking_budget_tokens)
+        if budget <= 0:
+            return None
 
         return {
             "type": "enabled",
-            "budget_tokens": budget_tokens,
+            "budget_tokens": budget,
         }
 
     def _convert_tools(self, tools: list[Any]) -> list[dict[str, Any]]:

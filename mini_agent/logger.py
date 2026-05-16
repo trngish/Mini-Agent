@@ -1,7 +1,13 @@
-"""Agent run logger"""
+"""Agent run logger with rotation support.
+
+Responsible for recording the complete interaction process of each agent run, including:
+- LLM requests and responses
+- Tool calls and results
+- Log rotation based on size or date
+"""
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -9,44 +15,127 @@ from .schema import Message, ToolCall
 
 
 class AgentLogger:
-    """Agent run logger
+    """Agent run logger with log rotation support.
 
-    Responsible for recording the complete interaction process of each agent run, including:
-    - LLM requests and responses
-    - Tool calls and results
+    Logs are stored in ~/.mini-agent/log/ directory with:
+    - Automatic rotation when file exceeds MAX_SIZE bytes
+    - Automatic cleanup of logs older than MAX_AGE days
+    - JSON format for easy parsing
     """
 
-    def __init__(self):
-        """Initialize logger
+    # Log rotation settings
+    MAX_LOG_SIZE_BYTES: int = 10 * 1024 * 1024  # 10MB per file
+    MAX_LOG_AGE_DAYS: int = 7  # Keep logs for 7 days
+    LOG_DIR: Path = Path.home() / ".mini-agent" / "log"
 
-        Logs are stored in ~/.mini-agent/log/ directory
-        """
-        # Use ~/.mini-agent/log/ directory for logs
-        self.log_dir = Path.home() / ".mini-agent" / "log"
+    def __init__(self):
+        """Initialize logger with rotation settings."""
+        self.log_dir = self.LOG_DIR
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_file: Path | None = None
+        self.log_index = 0
+        self._current_size = 0
+        self._rotation_check_done = False
+
+    def _should_rotate(self) -> bool:
+        """Check if log rotation is needed."""
+        if self.log_file is None:
+            return False
+        return self._current_size >= self.MAX_LOG_SIZE_BYTES
+
+    def _rotate_log(self) -> None:
+        """Rotate log file if size limit exceeded."""
+        if self.log_file is None:
+            return
+        
+        # Check file size
+        if self.log_file.exists():
+            self._current_size = self.log_file.stat().st_size
+        else:
+            self._current_size = 0
+        
+        if self._current_size < self.MAX_LOG_SIZE_BYTES:
+            return
+        
+        # Rename current log with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        rotated_name = f"{self.log_file.stem}_{timestamp}.rotated"
+        rotated_path = self.log_dir / rotated_name
+        
+        try:
+            self.log_file.rename(rotated_path)
+        except OSError:
+            # If rename fails, just delete and start fresh
+            self.log_file.unlink(missing_ok=True)
+        
         self.log_file = None
         self.log_index = 0
+        self._current_size = 0
 
-    def start_new_run(self):
-        """Start new run, create new log file"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    def _cleanup_old_logs(self) -> None:
+        """Remove log files older than MAX_LOG_AGE_DAYS."""
+        if not self.log_dir.exists():
+            return
+        
+        cutoff = datetime.now() - timedelta(days=self.MAX_LOG_AGE_DAYS)
+        
+        for path in self.log_dir.glob("*.log"):
+            try:
+                mtime = datetime.fromtimestamp(path.stat().st_mtime)
+                if mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
+        
+        # Also clean up rotated files
+        for path in self.log_dir.glob("*.rotated"):
+            try:
+                mtime = datetime.fromtimestamp(path.stat().st_mtime)
+                if mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
+
+    def _ensure_log_file(self) -> None:
+        """Ensure log file exists and is ready for writing."""
+        if self._rotation_check_done and self.log_file is not None:
+            return
+        
+        # Run cleanup on first log access
+        if not self._rotation_check_done:
+            self._cleanup_old_logs()
+            self._rotation_check_done = True
+        
+        if self.log_file is None:
+            self.start_new_run()
+
+    def start_new_run(self) -> None:
+        """Start new run, create new log file."""
+        # Check rotation before creating new file
+        if self.log_file is not None:
+            self._rotate_log()
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         log_filename = f"agent_run_{timestamp}.log"
         self.log_file = self.log_dir / log_filename
         self.log_index = 0
+        self._current_size = 0
 
         # Write log header
         with open(self.log_file, "w", encoding="utf-8") as f:
             f.write("=" * 80 + "\n")
             f.write(f"Agent Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 80 + "\n\n")
+        self._current_size = self.log_file.stat().st_size
 
-    def log_request(self, messages: list[Message], tools: list[Any] | None = None):
-        """Log LLM request
+    def log_request(self, messages: list[Message], tools: list[Any] | None = None) -> None:
+        """Log LLM request.
 
         Args:
             messages: Message list
             tools: Tool list (optional)
         """
+        self._ensure_log_file()
         self.log_index += 1
 
         # Build complete request data structure
@@ -57,7 +146,7 @@ class AgentLogger:
 
         # Convert messages to JSON serializable format
         for msg in messages:
-            msg_dict = {
+            msg_dict: dict[str, Any] = {
                 "role": msg.role,
                 "content": msg.content,
             }
@@ -88,8 +177,8 @@ class AgentLogger:
         thinking: str | None = None,
         tool_calls: list[ToolCall] | None = None,
         finish_reason: str | None = None,
-    ):
-        """Log LLM response
+    ) -> None:
+        """Log LLM response.
 
         Args:
             content: Response content
@@ -97,10 +186,11 @@ class AgentLogger:
             tool_calls: Tool call list (optional)
             finish_reason: Finish reason (optional)
         """
+        self._ensure_log_file()
         self.log_index += 1
 
         # Build complete response data structure
-        response_data = {
+        response_data: dict[str, Any] = {
             "content": content,
         }
 
@@ -126,8 +216,8 @@ class AgentLogger:
         result_success: bool,
         result_content: str | None = None,
         result_error: str | None = None,
-    ):
-        """Log tool execution result
+    ) -> None:
+        """Log tool execution result.
 
         Args:
             tool_name: Tool name
@@ -136,10 +226,11 @@ class AgentLogger:
             result_content: Result content (on success)
             result_error: Error message (on failure)
         """
+        self._ensure_log_file()
         self.log_index += 1
 
         # Build complete tool execution result data structure
-        tool_result_data = {
+        tool_result_data: dict[str, Any] = {
             "tool_name": tool_name,
             "arguments": arguments,
             "success": result_success,
@@ -156,8 +247,8 @@ class AgentLogger:
 
         self._write_log("TOOL_RESULT", content)
 
-    def _write_log(self, log_type: str, content: str):
-        """Write log entry
+    def _write_log(self, log_type: str, content: str) -> None:
+        """Write log entry.
 
         Args:
             log_type: Log type (REQUEST, RESPONSE, TOOL_RESULT)
@@ -166,13 +257,60 @@ class AgentLogger:
         if self.log_file is None:
             return
 
+        entry = "\n" + "-" * 80 + "\n"
+        entry += f"[{self.log_index}] {log_type}\n"
+        entry += f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}\n"
+        entry += "-" * 80 + "\n"
+        entry += content + "\n"
+
         with open(self.log_file, "a", encoding="utf-8") as f:
-            f.write("\n" + "-" * 80 + "\n")
-            f.write(f"[{self.log_index}] {log_type}\n")
-            f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}\n")
-            f.write("-" * 80 + "\n")
-            f.write(content + "\n")
+            f.write(entry)
+        
+        self._current_size += len(entry.encode("utf-8"))
 
     def get_log_file_path(self) -> Path:
-        """Get current log file path"""
-        return self.log_file
+        """Get current log file path."""
+        return self.log_file or self.LOG_DIR / "placeholder.log"
+    
+    def flush(self) -> None:
+        """Flush any pending writes to disk."""
+        if self.log_file is not None:
+            # Open and close to flush
+            with open(self.log_file, "a", encoding="utf-8"):
+                pass
+    
+    def get_log_stats(self) -> dict[str, Any]:
+        """Get statistics about logs.
+        
+        Returns:
+            Dict with log statistics
+        """
+        if not self.log_dir.exists():
+            return {"total_logs": 0, "total_size": 0, "oldest_log": None, "newest_log": None}
+        
+        log_files = list(self.log_dir.glob("*.log"))
+        rotated_files = list(self.log_dir.glob("*.rotated"))
+        
+        total_size = sum(f.stat().st_size for f in log_files)
+        
+        oldest = None
+        newest = None
+        for f in log_files:
+            try:
+                mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                if oldest is None or mtime < oldest:
+                    oldest = mtime
+                if newest is None or mtime > newest:
+                    newest = mtime
+            except OSError:
+                continue
+        
+        return {
+            "total_logs": len(log_files),
+            "rotated_logs": len(rotated_files),
+            "total_size": total_size,
+            "oldest_log": oldest.isoformat() if oldest else None,
+            "newest_log": newest.isoformat() if newest else None,
+            "max_age_days": self.MAX_LOG_AGE_DAYS,
+            "max_size_mb": self.MAX_LOG_SIZE_BYTES / (1024 * 1024),
+        }

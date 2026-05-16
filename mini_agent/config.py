@@ -4,6 +4,7 @@ Provides unified configuration loading and management functionality with support
 - YAML configuration files
 - Environment variable overrides
 - CLI argument merging
+- Config validation
 """
 
 import os
@@ -81,32 +82,8 @@ class PlatformConfig(BaseModel):
         default="auto",
         description="Platform mode: 'windows', 'linux', or 'auto' (auto-detect from OS)"
     )
-
-    @property
-    def is_windows(self) -> bool:
-        """Check if running on Windows platform (from config or auto-detect)"""
-        if self.mode == "auto":
-            import platform
-            return platform.system() == "Windows"
-        return self.mode.lower() == "windows"
-
-    @property
-    def is_linux(self) -> bool:
-        """Check if running on Linux platform (from config or auto-detect)"""
-        if self.mode == "auto":
-            import platform
-            return platform.system() == "Linux"
-        return self.mode.lower() == "linux"
-
-    @property
-    def shell_name(self) -> str:
-        """Get the appropriate shell name for current platform"""
-        return "PowerShell" if self.is_windows else "bash"
-
-    @property
-    def path_separator(self) -> str:
-        """Get the appropriate path separator"""
-        return "\\" if self.is_windows else "/"
+    
+    # Use PlatformUtils for platform detection - no redundant properties needed
 
 
 class M27Config(BaseModel):
@@ -119,11 +96,6 @@ class M27Config(BaseModel):
     enable_message_cache: bool = True
     token_limit: int = 800_000  # 800K tokens for 1M context window
     max_output_tokens: int = 32768  # M2.7 supports up to 32K output
-
-    @property
-    def is_m27_model(self) -> bool:
-        """Check if configuration is for M2.7 model (helper method)"""
-        return True  # This is M2.7 specific config class
 
 
 class CLIOverrideConfig(BaseModel):
@@ -243,12 +215,19 @@ class Config(BaseModel):
             sse_read_timeout=mcp_data.get("sse_read_timeout", 120.0),
         )
 
+        # Resolve skills_dir relative to project root (config is in mini_agent/config/)
+        # Project root = config_path.parent.parent
+        skills_dir_raw = tools_data.get("skills_dir", "./mini_agent/skills")
+        skills_dir_path = Path(skills_dir_raw)
+        if not skills_dir_path.is_absolute():
+            project_root = config_path.parent.parent
+            skills_dir_path = (project_root / skills_dir_path).resolve()
         tools_config = ToolsConfig(
             enable_file_tools=tools_data.get("enable_file_tools", True),
             enable_bash=tools_data.get("enable_bash", True),
             enable_note=tools_data.get("enable_note", True),
             enable_skills=tools_data.get("enable_skills", True),
-            skills_dir=tools_data.get("skills_dir", "./skills"),
+            skills_dir=str(skills_dir_path),
             enable_mcp=tools_data.get("enable_mcp", True),
             mcp_config_path=tools_data.get("mcp_config_path", "mcp.json"),
             mcp=mcp_config,
@@ -445,13 +424,13 @@ class Config(BaseModel):
 Environment Variable Configuration:
   MINI_AGENT_API_KEY       - Override API key
   MINI_AGENT_API_BASE      - Override API base URL
-  MINI_AGENT_MODEL          - Override model name
-  MINI_AGENT_PROVIDER       - Override provider (anthropic/openai)
-  MINI_AGENT_MAX_STEPS      - Override maximum execution steps
-  MINI_AGENT_WORKSPACE_DIR  - Override workspace directory
-  MINI_AGENT_PLATFORM_MODE  - Override platform mode (windows/linux/auto)
-  MINI_AGENT_ENABLE_SKILLS  - Override skills enable (true/false)
-  MINI_AGENT_ENABLE_MCP     - Override MCP enable (true/false)
+  MINI_AGENT_MODEL         - Override model name
+  MINI_AGENT_PROVIDER      - Override provider (anthropic/openai)
+  MINI_AGENT_MAX_STEPS     - Override maximum execution steps
+  MINI_AGENT_WORKSPACE_DIR - Override workspace directory
+  MINI_AGENT_PLATFORM_MODE - Override platform mode (windows/linux/auto)
+  MINI_AGENT_ENABLE_SKILLS - Override skills enable (true/false)
+  MINI_AGENT_ENABLE_MCP    - Override MCP enable (true/false)
 
 Environment variables take precedence over config.yaml values.
 """

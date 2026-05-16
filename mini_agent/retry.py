@@ -11,6 +11,7 @@ Features:
 """
 
 import asyncio
+import builtins
 import functools
 import logging
 from typing import Any, Callable, Type, TypeVar
@@ -21,6 +22,26 @@ T = TypeVar("T")
 
 # Exceptions that should never be retried (fatal/non-recoverable)
 NON_RETRYABLE = (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit)
+
+# Pre-computed set of retryable exception types (cached at module load)
+_RETRYABLE_EXCEPTIONS: tuple[Type[Exception], ...] | None = None
+
+
+def _get_retryable_exceptions() -> tuple[Type[Exception], ...]:
+    """Return default retryable exceptions (all exceptions except fatal types).
+    
+    Cached at module level for performance.
+    """
+    global _RETRYABLE_EXCEPTIONS
+    if _RETRYABLE_EXCEPTIONS is None:
+        result = []
+        for name in dir(builtins):
+            obj = getattr(builtins, name)
+            if isinstance(obj, type) and issubclass(obj, Exception):
+                if not issubclass(obj, NON_RETRYABLE):
+                    result.append(obj)
+        _RETRYABLE_EXCEPTIONS = tuple(result)
+    return _RETRYABLE_EXCEPTIONS
 
 
 class RetryConfig:
@@ -42,27 +63,14 @@ class RetryConfig:
             initial_delay: Initial delay time (seconds)
             max_delay: Maximum delay time (seconds)
             exponential_base: Exponential backoff base
-            retryable_exceptions: Tuple of retryable exception types (defaults to Exception minus fatal types)
+            retryable_exceptions: Tuple of retryable exception types (defaults to all non-fatal)
         """
         self.enabled = enabled
         self.max_retries = max_retries
         self.initial_delay = initial_delay
         self.max_delay = max_delay
         self.exponential_base = exponential_base
-        self.retryable_exceptions = retryable_exceptions or self._default_retryable()
-
-    @staticmethod
-    def _default_retryable() -> tuple[Type[Exception], ...]:
-        """Return default retryable exceptions (all exceptions except fatal types)."""
-        # Exclude CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit
-        import builtins
-        result = []
-        for name in dir(builtins):
-            obj = getattr(builtins, name)
-            if isinstance(obj, type) and issubclass(obj, Exception):
-                if not issubclass(obj, NON_RETRYABLE):
-                    result.append(obj)
-        return tuple(result)
+        self.retryable_exceptions = retryable_exceptions or _get_retryable_exceptions()
 
     def calculate_delay(self, attempt: int) -> float:
         """Calculate delay time (exponential backoff)

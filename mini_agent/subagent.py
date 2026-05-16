@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Optional
 
 from .llm import LLMClient
-from .schema import LLMResponse, Message
+from .schema import Message
 from .tools.base import Tool, ToolResult
 
 
@@ -24,6 +24,7 @@ class SubAgent:
     """Standalone agent for background sub-tasks.
 
     Has its own LLM client and tool set, runs independently from the parent agent.
+    Supports M2.7 parallel tool execution when enabled.
     """
 
     def __init__(
@@ -32,12 +33,14 @@ class SubAgent:
         tools: list[Tool],
         system_prompt: str = "You are a helpful assistant. Complete the assigned task concisely.",
         max_steps: int = 10,
+        m27_config: Optional[dict] = None,
     ):
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
         self.tool_list = list(tools)
         self.system_prompt = system_prompt
         self.max_steps = max_steps
+        self.m27_config = m27_config or {}
 
     async def run(self, task: str) -> SubAgentResult:
         """Execute a sub-task and return the result."""
@@ -54,17 +57,18 @@ class SubAgent:
                 )
 
             if response.tool_calls:
-                for tc in response.tool_calls:
-                    tool = self.tools.get(tc.function.name)
-                    if tool:
-                        try:
-                            result = await tool.execute(**tc.function.arguments)
-                        except Exception as e:
-                            result = ToolResult(success=False, content="", error=str(e))
-                        messages.append(Message(
-                            role="tool", content=result.content if result.success else f"Error: {result.error}",
-                            tool_call_id=tc.id, name=tc.function.name,
-                        ))
+                # M2.7: execute tools in parallel if enabled and multiple tools
+                parallel_enabled = self.m27_config.get("enable_parallel_tool_calls", True)
+                max_concurrent = self.m27_config.get("max_concurrent_tools", 5)
+
+                if parallel_enabled and len(response.tool_calls) > 1:
+                    results = await self._execute_tools_parallel(response.tool_calls, max_concurrent)
+                else:
+                    results = await self._execute_tools_sequential(response.tool_calls)
+
+                # Add tool messages in order
+                for _, tool_msg in results:
+                    messages.append(tool_msg)
                 continue
 
             return SubAgentResult(
@@ -76,6 +80,54 @@ class SubAgent:
             task=task, content="", success=False,
             elapsed=perf_counter() - start, error="Max steps reached",
         )
+
+    async def _execute_tools_sequential(self, tool_calls: list) -> list[tuple]:
+        """Execute tools one at a time."""
+        results = []
+        for tc in tool_calls:
+            result = await self._execute_single_tool(tc)
+            results.append(result)
+        return results
+
+    async def _execute_tools_parallel(self, tool_calls: list, max_concurrent: int = 5) -> list[tuple]:
+        """Execute tools in parallel using a semaphore to limit concurrency."""
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def bounded_execute(tc):
+            async with semaphore:
+                return await self._execute_single_tool(tc)
+
+        task_results = await asyncio.gather(*[bounded_execute(tc) for tc in tool_calls])
+        return list(task_results)
+
+    async def _execute_single_tool(self, tool_call) -> tuple:
+        """Execute a single tool and return (tool_call, tool_msg)."""
+        tool_call_id = tool_call.id
+        function_name = tool_call.function.name
+        arguments = tool_call.function.arguments
+
+        tool = self.tools.get(function_name)
+        if not tool:
+            tool_msg = Message(
+                role="tool",
+                content=f"Error: Unknown tool: {function_name}",
+                tool_call_id=tool_call_id,
+                name=function_name,
+            )
+            return (tool_call, tool_msg)
+
+        try:
+            result = await tool.execute(**arguments)
+        except Exception as e:
+            result = ToolResult(success=False, content="", error=str(e))
+
+        tool_msg = Message(
+            role="tool",
+            content=result.content if result.success else f"Error: {result.error}",
+            tool_call_id=tool_call_id,
+            name=function_name,
+        )
+        return (tool_call, tool_msg)
 
 
 async def run_sub_agents(

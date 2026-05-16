@@ -10,84 +10,20 @@ M2.7 Specifications (from https://www.minimaxi.com/models/text/m27):
 - Parallel Tool Calls: Native support (97% following rate on 40 complex skills)
 - Agent Teams: Native multi-agent collaboration capability
 
-M2.7 Benchmarks:
-- SWE-Pro: 56.22% (comparable to GPT-5.3-Codex)
-- Terminal Bench 2: 57.0%
-- VIBE-Pro: 55.6% (end-to-end project delivery)
-- GDPval-AA ELO: 1500 (2nd tier after Opus-4.6, Sonnet-4.6, GPT-5.4)
-- Toolathon: 46.3% (global top tier)
-- MMClaw: 97% skills following rate on 40 complex skills (>2000 tokens each)
+Note: M27Config has been moved to model_utils.py as is_m27_model().
+      Use model_utils.get_model_specs() for model specifications.
 """
 
 from typing import Any
 
-
-class M27Config:
-    """MiniMax M2.7 model-specific configuration and optimizations."""
-
-    # Model identifiers for M2.7
-    MODEL_IDENTIFIERS = (
-        "MiniMax-M2.7",
-        "MiniMax-M2.7",
-        "MiniMax-M2",
-        "MiniMax-M2.5",
-    )
-
-    # Token limits specific to M2.7 (from official specs)
-    DEFAULT_TOKEN_LIMIT = 800_000  # 800K tokens before summarization (80% of 1M)
-    MAX_CONTEXT_TOKENS = 1_000_000  # 1M context window
-    MAX_OUTPUT_TOKENS = 32768  # 32K max output (M2.7 supports up to 32K)
-    MAX_THINKING_BUDGET = 32768  # M2.7 supports up to 32K thinking budget
-
-    # Extended thinking configuration
-    ENABLE_EXTENDED_THINKING = True
-    DEFAULT_THINKING_BUDGET_TOKENS = 16384  # Increased from 8192 for M2.7's enhanced reasoning
-
-    # Tool calling optimizations
-    ENABLE_PARALLEL_TOOL_CALLS = True
-    MAX_CONCURRENT_TOOLS = 5  # M2.7 can handle 5 parallel tools with 97% following rate
-
-    # Cache optimization
-    ENABLE_MESSAGE_CACHE = True
-    CACHE_PROMPT_RATIO = 0.9  # Use 90% of budget for cached prompt
-
-    # Agent Teams support
-    ENABLE_AGENT_TEAMS = True
-    SUPPORTED_COMPLEX_SKILLS = 40  # M2.7 maintains 97% following rate on 40 complex skills
-
-    @classmethod
-    def is_m27_model(cls, model_name: str) -> bool:
-        """Check if the given model name is an M2.7 variant.
-
-        Args:
-            model_name: The model name to check
-
-        Returns:
-            True if the model is an M2.7 variant
-        """
-        model_upper = model_name.upper()
-        return any(identifier.upper() in model_upper for identifier in cls.MODEL_IDENTIFIERS)
-
-    @classmethod
-    def get_optimized_params(cls, model_name: str) -> dict[str, Any]:
-        """Get M2.7 optimized parameters for LLM API calls.
-
-        Args:
-            model_name: The model name
-
-        Returns:
-            Dictionary of optimized parameters
-        """
-        if not cls.is_m27_model(model_name):
-            return {}
-
-        return {
-            "max_tokens": cls.MAX_OUTPUT_TOKENS,
-            "thinking": {
-                "type": "enabled",
-                "budget_tokens": cls.DEFAULT_THINKING_BUDGET_TOKENS,
-            },
-        }
+# Re-export from model_utils for backwards compatibility
+from .model_utils import (
+    is_m27_model as is_m27_enabled,
+    get_model_specs,
+    M27_MODEL_IDENTIFIERS,
+    MINIMAX_MODEL_IDENTIFIERS,
+)
+from .model_utils import ModelSpecs
 
 
 class M27PromptOptimizer:
@@ -384,16 +320,3 @@ Team Guidelines:
 
 M2.7 supports native Agent Teams with these capabilities built-in.
 """
-
-
-# Convenience function to check if current config is M2.7
-def is_m27_enabled(model_name: str) -> bool:
-    """Check if M2.7 optimizations should be enabled.
-
-    Args:
-        model_name: The model name to check
-
-    Returns:
-        True if M2.7 optimizations should be applied
-    """
-    return M27Config.is_m27_model(model_name)

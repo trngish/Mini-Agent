@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import Tool, ToolResult
-from .file_tools import normalize_path_separators
+from ..utils.platform_utils import normalize_path_separators
 
 
 class GrepTool(Tool):

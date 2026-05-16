@@ -3,9 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import List, Optional
 
-from .agent import Agent
 from .config import Config
 from .llm import LLMClient
 from .retry import RetryConfig
@@ -17,7 +15,6 @@ from .tools.search_tools import GrepTool, FindTool, TreeTool
 from .tools.git_tool import GitTool, GitStatusTool
 from .tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
 from .tools.note_tool import SessionNoteTool
-from .tools.skill_tool import create_skill_tools
 from .tools.skill_tool import create_skill_tools
 from .utils import Colors
 
@@ -65,7 +62,7 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
     return tools, skill_loader
 
 
-def add_workspace_tools(tools: list, config: Config, workspace_dir: Path):
+def add_workspace_tools(tools: list, config: Config, workspace_dir: Path) -> None:
     """Add workspace-dependent tools."""
     if config.tools.enable_mcp:
         print(f"{Colors.DIM}⏳ Loading MCP tools...{Colors.RESET}")

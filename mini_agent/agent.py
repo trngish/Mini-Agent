@@ -2,29 +2,33 @@
 
 import asyncio
 import json
+import os
 import traceback
 from pathlib import Path
 from time import perf_counter
-from typing import Optional
+from typing import Any, Optional
 
 from .llm import LLMClient
 from .logger import AgentLogger
 from .schema import AgentMode, Message
 from .session import SessionManager
-from .subagent import SubAgent, run_sub_agents
 from .tools.base import Tool, ToolResult
 from .utils import Colors, calculate_display_width
 from .utils.token_utils import get_encoder
-from .utils.logging_config import get_logger
-from .utils.message_validator import MessageValidator, ValidationError
-from .utils.error_handler import LLMErrorClassifier, LLMErrorType, format_llm_error
-from .utils.m27_optimization import M27Config as M27UtilsConfig, M27PromptOptimizer, M27ContextManager, is_m27_enabled
+from .utils.error_handler import LLMErrorClassifier, format_llm_error
+from .utils.model_utils import is_m27_model, get_token_limit_for_model
+
+# Default streaming buffer size (can be configured via environment)
+STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
 
 
 class Agent:
     """Single agent with basic tools and MCP support."""
 
     WRITE_TOOLS = {"write_file", "edit_file", "bash", "git"}
+    
+    # Class-level tiktoken encoder cache for reuse
+    _encoder_cache: dict[str, Any] = {}
 
     def __init__(
         self,
@@ -48,14 +52,13 @@ class Agent:
 
         # M2.7 specific configuration
         self.m27_config = m27_config or {}
-        self.is_m27 = is_m27_enabled(llm_client.model) if hasattr(llm_client, 'model') else False
+        self.is_m27 = is_m27_model(llm_client.model)
         
-        # Use M2.7 token limit if configured, otherwise use provided limit
-        # M2.7 has 1M context window, so we use 800K as default (80% safety margin)
-        if self.is_m27 and self.m27_config.get("token_limit"):
-            self.token_limit = self.m27_config["token_limit"]
-        else:
-            self.token_limit = token_limit
+        # Use unified token limit calculation
+        self.token_limit = get_token_limit_for_model(
+            llm_client.model,
+            self.m27_config.get("token_limit") if self.is_m27 else token_limit
+        )
         
         # M2.7 supports up to 32K output tokens, store for reference
         self.max_output_tokens = self.m27_config.get("max_output_tokens", 16384) if self.is_m27 else 8192
@@ -102,7 +105,21 @@ class Agent:
         self._cached_token_count: int = 0
         self._cached_token_index: int = 0
 
-    def add_user_message(self, content: str):
+    @classmethod
+    def _get_cached_encoder(cls, encoding_name: str = "cl100k_base"):
+        """Get cached tiktoken encoder or create new one.
+        
+        Args:
+            encoding_name: Name of the encoding (default: cl100k_base)
+            
+        Returns:
+            Cached encoder instance
+        """
+        if encoding_name not in cls._encoder_cache:
+            cls._encoder_cache[encoding_name] = get_encoder(encoding_name)
+        return cls._encoder_cache[encoding_name]
+
+    def add_user_message(self, content: str) -> None:
         """Add a user message to history."""
         self.messages.append(Message(role="user", content=content))
 
@@ -146,7 +163,8 @@ class Agent:
         Full recalculation after summarization (when message list is rebuilt).
         """
         try:
-            encoding = get_encoder("cl100k_base")
+            # Use cached encoder instead of creating new one
+            encoding = self._get_cached_encoder("cl100k_base")
         except Exception:
             return self._estimate_tokens_fallback()
 
@@ -387,23 +405,34 @@ Requirements:
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
             try:
-                # Setup streaming callbacks for real-time output
+                # Setup streaming callbacks for real-time output with buffering
                 thinking_first = True
                 content_first = True
+                
+                # Buffer for batching output
+                thinking_buffer = []
+                content_buffer = []
+                buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
 
-                def on_thinking(text: str):
-                    nonlocal thinking_first
+                def on_thinking(text: str) -> None:
+                    nonlocal thinking_first, thinking_buffer
                     if thinking_first:
                         print(f"\n  {Colors.BOLD}{Colors.MAGENTA}🧠 Think{Colors.RESET}")
                         thinking_first = False
-                    print(f"  {Colors.DIM}{text}{Colors.RESET}", end="", flush=True)
+                    thinking_buffer.append(text)
+                    if len(thinking_buffer) >= buffer_size:
+                        print(f"{Colors.DIM}{''.join(thinking_buffer)}{Colors.RESET}", end="", flush=True)
+                        thinking_buffer.clear()
 
-                def on_text(text: str):
-                    nonlocal content_first
+                def on_text(text: str) -> None:
+                    nonlocal content_first, content_buffer
                     if content_first:
                         print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
                         content_first = False
-                    print(text, end="", flush=True)
+                    content_buffer.append(text)
+                    if len(content_buffer) >= buffer_size:
+                        print(''.join(content_buffer), end="", flush=True)
+                        content_buffer.clear()
 
                 response = await self.llm.generate(
                     messages=self.messages,
@@ -411,14 +440,19 @@ Requirements:
                     on_text=on_text,
                     on_thinking=on_thinking,
                 )
+                
+                # Flush any remaining buffer content
+                if thinking_buffer:
+                    print(f"{Colors.DIM}{''.join(thinking_buffer)}{Colors.RESET}", end="", flush=True)
+                if content_buffer:
+                    print(''.join(content_buffer), end="", flush=True)
 
                 # Print newline after streaming output if any was streamed
                 if not content_first or not thinking_first:
                     print()
+
             except Exception as e:
                 # Use structured error handling
-                from .utils.error_handler import LLMErrorClassifier, format_llm_error
-
                 llm_error = LLMErrorClassifier.classify(e)
 
                 if llm_error.is_retryable and llm_error.retry_after:
@@ -597,16 +631,31 @@ Requirements:
             self._print_tool_call(tc.function.name, tc.function.arguments)
 
         # Execute all tools concurrently
-        task_results = await asyncio.gather(*[bounded_execute(tc) for tc in tool_calls])
+        task_results = await asyncio.gather(*[bounded_execute(tc) for tc in tool_calls], return_exceptions=True)
+        
+        # Handle any exceptions that occurred
+        processed_results = []
+        for i, (tc, result) in enumerate(zip(tool_calls, task_results)):
+            if isinstance(result, Exception):
+                # Create error result for failed tool
+                tool_msg = Message(
+                    role="tool",
+                    content=f"Error: {type(result).__name__}: {str(result)}",
+                    tool_call_id=tc.id,
+                    name=tc.function.name,
+                )
+                processed_results.append((tc, tool_msg))
+            else:
+                processed_results.append(result)
 
         # Append results in original order
-        for tool_call, tool_msg in task_results:
+        for tool_call, tool_msg in processed_results:
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
-                return task_results
+                return processed_results
             self.messages.append(tool_msg)
 
-        return task_results
+        return processed_results
 
     def _check_approved(self, function_name: str) -> bool:
         """Prompt user to approve a tool call in Agent mode.
@@ -617,14 +666,18 @@ Requirements:
             return True
         try:
             import threading
+            import os
             result = [None]
+            
+            # Configurable timeout via environment (default 10 seconds)
+            approval_timeout = int(os.environ.get("MINI_AGENT_APPROVAL_TIMEOUT", "10"))
 
-            def get_input():
+            def get_input() -> None:
                 result[0] = input(f"  {Colors.BRIGHT_YELLOW}Approve {function_name}? [Y/n/q]{Colors.RESET} ").strip().lower()
 
             thread = threading.Thread(target=get_input, daemon=True)
             thread.start()
-            thread.join(timeout=30)
+            thread.join(timeout=approval_timeout)
 
             if result[0] is None:
                 return False
@@ -636,7 +689,7 @@ Requirements:
         except Exception:
             return True
 
-    def set_mode(self, mode: AgentMode):
+    def set_mode(self, mode: AgentMode) -> None:
         """Switch agent mode."""
         old_mode = self.mode
         self.mode = mode
@@ -662,7 +715,35 @@ Requirements:
     def list_sessions(self) -> list[dict]:
         """List all saved sessions."""
         return self.session_manager.list_sessions()
-
+    
     def get_history(self) -> list[Message]:
         """Get message history."""
         return self.messages.copy()
+    
+    def cleanup(self) -> None:
+        """Clean up resources held by the agent.
+        
+        Should be called when agent is no longer needed to ensure
+        proper cleanup of background processes and connections.
+        """
+        # Flush logger
+        if hasattr(self, 'logger'):
+            self.logger.flush()
+        
+        # Clear cancel event
+        self.cancel_event = None
+        
+        # Reset token cache
+        self._cached_token_count = 0
+        self._cached_token_index = 0
+        
+        # Clear encoder cache to free memory
+        self._encoder_cache.clear()
+        
+        # Clean up background shells
+        from .tools.bash_background import BackgroundShellManager
+        for bash_id in BackgroundShellManager.get_available_ids():
+            try:
+                BackgroundShellManager.terminate(bash_id)
+            except Exception:
+                pass

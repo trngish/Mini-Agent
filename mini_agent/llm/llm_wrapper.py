@@ -102,12 +102,12 @@ class LLMClient:
         logger.info("Initialized LLM client with provider: %s, api_base: %s", provider, full_api_base)
 
     @property
-    def retry_callback(self):
+    def retry_callback(self) -> Any:
         """Get retry callback."""
         return self._client.retry_callback
 
     @retry_callback.setter
-    def retry_callback(self, value):
+    def retry_callback(self, value: Any) -> None:
         """Set retry callback."""
         self._client.retry_callback = value
 
