@@ -46,15 +46,18 @@ m27:
   enable_extended_thinking: true
   
   # Thinking budget in tokens (M2.7 supports up to 32K)
-  # Higher values = more reasoning capacity, but uses more output tokens
-  # Recommended: 16384 for complex reasoning, 8192 for general tasks, 4096 for simple
-  thinking_budget_tokens: 16384
+  # 按次数计费优化：token免费，用满思考预算！
+  # 深度思考 → 更高命中率 → 更少重试 → 更少总调用次数
+  # 简单任务也给足思考空间（16K），确保一次做对
+  thinking_budget_tokens: 32768
   
   # Enable parallel tool calls for better performance (default: true)
   enable_parallel_tool_calls: true
   
-  # Maximum concurrent tool executions when parallel is enabled (default: 5)
-  max_concurrent_tools: 5
+  # Maximum concurrent tool executions when parallel is enabled (default: 20)
+  # M2.7 supports 20+ parallel tool calls with 97% following rate
+  # More tools per call = fewer API calls = lower cost
+  max_concurrent_tools: 20
   
   # Enable message caching for cost optimization (default: true)
   enable_message_cache: true
@@ -95,7 +98,9 @@ tools:
   
   # Claude Skills
   enable_skills: true      # Enable Skills
-  skills_dir: "./mini_agent/skills"   # Skills directory path
+  # Skills directory - use mini_agent/skills (canonical location)
+  # This path is resolved relative to the package root
+  skills_dir: "mini_agent/skills"
   
   # MCP Tools
   enable_mcp: true         # Enable MCP tools

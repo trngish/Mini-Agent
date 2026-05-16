@@ -628,14 +628,9 @@ dependencies = [
     { name = "tiktoken" },
 ]
 
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
@@ -654,17 +649,15 @@ requires-dist = [
     { name = "prompt-toolkit", specifier = ">=3.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", specifier = ">=8.4.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "textual", specifier = ">=8.0.0" },
     { name = "tiktoken", specifier = ">=0.5.0" },
 ]
-provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },

@@ -3,7 +3,7 @@
 import asyncio
 import json
 import os
-import traceback
+import re
 from collections import deque
 from pathlib import Path
 from time import perf_counter
@@ -12,6 +12,7 @@ from typing import Any, Optional
 from .llm import LLMClient
 from .logger import AgentLogger
 from .schema import AgentMode, Message
+from .schema.schema import WRITE_TOOLS
 from .session import SessionManager
 from .tools.base import Tool, ToolResult
 from .utils import Colors, calculate_display_width
@@ -22,7 +23,28 @@ from .utils.model_utils import is_m27_model, get_token_limit_for_model
 # Constants - avoid magic numbers
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
 DEFAULT_ENCODING_NAME = "cl100k_base"
-WRITE_TOOLS = frozenset({"write_file", "edit_file", "bash", "git"})
+
+# Adaptive thinking budget levels (按次数计费优化：token免费，思考越深命中率越高)
+# 提高基础预算：更深思考 → 更高命中率 → 更少重试 → 更少总调用次数
+THINKING_BUDGET_SIMPLE = 16384      # 简单任务：原8K→16K，确保一次做对
+THINKING_BUDGET_MEDIUM = 24576      # 中等任务：原16K→24K，减少返工
+THINKING_BUDGET_COMPLEX = 32768     # 复杂任务：原24K→32K，深度规划
+THINKING_BUDGET_SUPER = 32768       # 超复杂任务：32K上限
+
+# Complexity indicators for auto-detection
+COMPLEXITY_HIGH_KEYWORDS = {
+    "重构", "refactor", "架构", "architecture", "重写", "rewrite",
+    "迁移", "migrate", "全面", "comprehensive", "整体", "entire",
+    "所有", "all files", "批量", "batch", "多个文件", "multi-file",
+    "设计", "design", "调试", "debug", "排查", "investigate",
+    "优化", "optimize", "性能", "performance",
+}
+
+COMPLEXITY_MEDIUM_KEYWORDS = {
+    "修改", "modify", "fix", "修复", "实现", "implement", "添加", "add",
+    "更新", "update", "创建", "create", "搜索", "search", "分析", "analyze",
+    "检查", "check", "比较", "compare", "转换", "convert",
+}
 
 
 class Agent:
@@ -65,6 +87,20 @@ class Agent:
         
         # M2.7 supports up to 32K output tokens, store for reference
         self.max_output_tokens = self.m27_config.get("max_output_tokens", 16384) if self.is_m27 else 8192
+        
+        # Optimization: adaptive thinking budget
+        # Max budget from config, actual budget is dynamically adjusted per task
+        self._max_thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384) if self.is_m27 else 0
+        self.thinking_budget = self._max_thinking_budget  # Start with max, will be adjusted per task
+        
+        # Optimization: track consecutive tool failures - handle locally before reporting
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3  # 连续失败3次才回话报告
+        
+        # Optimization: batch size for parallel tool execution
+        # More tools per call = fewer API calls
+        # M2.7 supports 20+ parallel tool calls with 97% following rate
+        self._max_tools_per_call = self.m27_config.get("max_concurrent_tools", 20) if self.is_m27 else 3
 
         # Ensure workspace exists
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -100,6 +136,8 @@ class Agent:
         # Initialize logger
         self.logger = AgentLogger()
 
+        # API call tracking
+        self.api_call_count: int = 0
         # Token usage from last API response (updated after each LLM call)
         self.api_total_tokens: int = 0
         # Flag to skip token check right after summary (avoid consecutive triggers)
@@ -125,6 +163,60 @@ class Agent:
     def add_user_message(self, content: str) -> None:
         """Add a user message to history."""
         self.messages.append(Message(role="user", content=content))
+        # Adaptively adjust thinking budget based on task complexity
+        self._adjust_thinking_budget(content)
+
+    def _adjust_thinking_budget(self, user_message: str) -> None:
+        """Adaptively adjust thinking budget based on task complexity.
+
+        按次数计费优化：token免费，思考越深→命中率越高→重试越少→总调用次数越少。
+        简单任务给足思考空间也能提高单次完成率。
+
+        Args:
+            user_message: The user's message to analyze for complexity
+        """
+        if not self.is_m27:
+            return
+
+        msg_lower = user_message.lower()
+
+        # Detect complexity level from keywords
+        high_matches = sum(1 for kw in COMPLEXITY_HIGH_KEYWORDS if kw in msg_lower)
+        medium_matches = sum(1 for kw in COMPLEXITY_MEDIUM_KEYWORDS if kw in msg_lower)
+
+        # Estimate file count mentioned
+        file_mentions = len(re.findall(r'\.(py|js|ts|jsx|tsx|java|go|rs|c|cpp|h|rb|php|yaml|yml|json|toml|md|txt|csv|sql|sh|bash|ps1)', msg_lower))
+
+        # Determine complexity
+        if high_matches >= 2 or file_mentions >= 4:
+            new_budget = THINKING_BUDGET_SUPER
+            level = "超复杂"
+        elif high_matches >= 1 or file_mentions >= 2 or medium_matches >= 3:
+            new_budget = THINKING_BUDGET_COMPLEX
+            level = "复杂"
+        elif medium_matches >= 1 or file_mentions >= 1:
+            new_budget = THINKING_BUDGET_MEDIUM
+            level = "中等"
+        else:
+            new_budget = THINKING_BUDGET_SIMPLE
+            level = "简单"
+
+        # Also consider message length as a signal
+        msg_tokens = len(user_message) // 3  # rough estimation
+        if msg_tokens > 2000:
+            new_budget = max(new_budget, THINKING_BUDGET_COMPLEX)
+            level = "复杂(长消息)"
+
+        # Constrain to max budget from config
+        new_budget = min(new_budget, self._max_thinking_budget)
+
+        if new_budget != self.thinking_budget:
+            old_budget = self.thinking_budget
+            self.thinking_budget = new_budget
+            # Update the LLM client's thinking budget dynamically
+            if hasattr(self.llm, '_client') and hasattr(self.llm._client, '_thinking_budget_tokens'):
+                self.llm._client._thinking_budget_tokens = new_budget
+            print(f"{Colors.DIM}🧠 Thinking budget adjusted: {old_budget} → {new_budget} ({level}任务){Colors.RESET}")
 
     def _check_cancelled(self) -> bool:
         """Check if agent execution has been cancelled.
@@ -277,11 +369,11 @@ class Agent:
 
             # If there are execution messages in this round, summarize them
             if execution_messages:
-                summary_text = await self._create_summary(execution_messages, i + 1)
+                summary_text = self._create_local_summary(execution_messages, i + 1)
                 if summary_text:
                     summary_message = Message(
                         role="user",
-                        content=f"[Assistant Execution Summary]\n\n{summary_text}",
+                        content=f"[Execution Summary {i + 1}]\n\n{summary_text}",
                     )
                     new_messages.append(summary_message)
                     summary_count += 1
@@ -302,8 +394,13 @@ class Agent:
         print(f"{Colors.DIM}  Structure: system + {len(user_indices)} user messages + {summary_count} summaries{Colors.RESET}")
         print(f"{Colors.DIM}  Note: API token count will update on next LLM call{Colors.RESET}")
 
-    async def _create_summary(self, messages: list[Message], round_num: int) -> str:
-        """Create summary for one execution round
+    def _create_local_summary(self, messages: list[Message], round_num: int) -> str:
+        """Create summary locally without LLM call (saves tokens).
+
+        按次数计费优化：token免费，保留更多细节以减少后续重复调用。
+        摘要质量越高，LLM越不需要重新获取信息。
+        提高截断限制：2000字符（assistant）、1500字符（tool result），
+        因为信息丢失导致的重调成本远高于多传一些token。
 
         Args:
             messages: List of messages to summarize
@@ -315,51 +412,48 @@ class Agent:
         if not messages:
             return ""
 
-        # Build summary content
-        summary_content = f"Round {round_num} execution process:\n\n"
+        # Build structured summary
+        lines = [f"Round {round_num}:"]
+        tool_calls_count = 0
+        tool_results_count = 0
+        assistant_responses = []
+
         for msg in messages:
             if msg.role == "assistant":
-                content_text = msg.content if isinstance(msg.content, str) else str(msg.content)
-                summary_content += f"Assistant: {content_text}\n"
+                content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                if content:
+                    # 按次数计费优化：保留更多内容（2000字符），大幅减少信息丢失导致的重调
+                    if len(content) > 2000:
+                        content = content[:2000] + "..."
+                    assistant_responses.append(content)
                 if msg.tool_calls:
                     tool_names = [tc.function.name for tc in msg.tool_calls]
-                    summary_content += f"  → Called tools: {', '.join(tool_names)}\n"
+                    # 保留工具参数概要，帮助后续理解上下文
+                    tool_details = []
+                    for tc in msg.tool_calls:
+                        args_str = str(tc.function.arguments)
+                        if len(args_str) > 150:
+                            args_str = args_str[:150] + "..."
+                        tool_details.append(f"{tc.function.name}({args_str})")
+                    lines.append(f"  Tools called: {', '.join(tool_details)}")
+                    tool_calls_count += len(msg.tool_calls)
             elif msg.role == "tool":
-                result_preview = msg.content if isinstance(msg.content, str) else str(msg.content)
-                summary_content += f"  ← Tool returned: {result_preview}...\n"
+                tool_results_count += 1
+                result = msg.content if isinstance(msg.content, str) else str(msg.content)
+                # 按次数计费优化：保留更多结果（1500字符），避免因信息不足重新获取
+                if len(result) > 1500:
+                    result = result[:1500] + "..."
+                lines.append(f"  Result: {result}")
 
-        # Call LLM to generate concise summary
-        try:
-            summary_prompt = f"""Please provide a concise summary of the following Agent execution process:
+        # Add assistant response summary if no tools were called
+        if not tool_calls_count and assistant_responses:
+            lines.append(f"  Response: {assistant_responses[0]}")
 
-{summary_content}
+        # Add statistics
+        if tool_calls_count or tool_results_count:
+            lines.append(f"  Stats: {tool_calls_count} tool(s), {tool_results_count} result(s)")
 
-Requirements:
-1. Focus on what tasks were completed and which tools were called
-2. Keep key execution results and important findings
-3. Be concise and clear, within 1000 words
-4. Use English
-5. Do not include "user" related content, only summarize the Agent's execution process"""
-
-            summary_msg = Message(role="user", content=summary_prompt)
-            response = await self.llm.generate(
-                messages=[
-                    Message(
-                        role="system",
-                        content="You are an assistant skilled at summarizing Agent execution processes.",
-                    ),
-                    summary_msg,
-                ]
-            )
-
-            summary_text = response.content
-            print(f"{Colors.BRIGHT_GREEN}✓ Summary for round {round_num} generated successfully{Colors.RESET}")
-            return summary_text
-
-        except Exception as e:
-            print(f"{Colors.BRIGHT_RED}✗ Summary generation failed for round {round_num}: {e}{Colors.RESET}")
-            # Use simple text summary on failure
-            return summary_content
+        return "\n".join(lines)
 
     async def run(self, cancel_event: Optional[asyncio.Event] = None) -> str:
         """Execute agent loop until task is complete or max steps reached.
@@ -465,9 +559,16 @@ Requirements:
                 print(f"\n{error_msg}")
                 return f"LLM call failed: {llm_error.user_guidance}"
 
-            # Accumulate API reported token usage
+            # Accumulate API call count and token usage
+            self.api_call_count += 1
             if response.usage:
                 self.api_total_tokens = response.usage.total_tokens
+
+            # 按次数计费统计：显示调用次数和工具调用数
+            tool_count = len(response.tool_calls) if response.tool_calls else 0
+            print(f"\n  {Colors.DIM}📊 API Call #{self.api_call_count} | Tools: {tool_count} | "
+                  f"Thinking budget: {self.thinking_budget} | "
+                  f"Total tokens: {self.api_total_tokens:,}{Colors.RESET}")
 
             # Log LLM response
             self.logger.log_response(
@@ -491,6 +592,7 @@ Requirements:
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
                 print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
+                print(f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self.api_call_count} (按次数计费统计){Colors.RESET}")
                 return response.content
 
             # Execute tool calls (parallel if M2.7)
@@ -498,9 +600,16 @@ Requirements:
             max_concurrent = self.m27_config.get("max_concurrent_tools", 5) if self.is_m27 else 1
 
             if parallel_enabled and len(response.tool_calls) > 1:
-                results = await self._execute_tools_parallel(response.tool_calls, max_concurrent)
+                results = await self.execute_tools_parallel(response.tool_calls, max_concurrent)
             else:
-                results = await self._execute_tools_sequential(response.tool_calls)
+                results = await self.execute_tools_sequential(response.tool_calls)
+
+            # Append tool messages and handle cancellation
+            for tool_call, tool_msg in results:
+                if self._check_cancelled():
+                    self._cleanup_incomplete_messages()
+                    return "Task cancelled by user."
+                self.messages.append(tool_msg)
 
             step_elapsed = perf_counter() - step_start_time
             total_elapsed = perf_counter() - run_start_time
@@ -537,11 +646,24 @@ Requirements:
         else:
             print(f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}")
 
-    async def _execute_single_tool(self, tool_call) -> tuple:
-        """Execute a single tool and return (tool_call, tool_msg)."""
+    def _on_tool_result(self, function_name: str, result: ToolResult) -> None:
+        """Handle tool result - print and log."""
+        self._print_tool_result(result)
+        self.logger.log_tool_result(
+            tool_name=function_name,
+            arguments={},  # Already logged in execute_single_tool
+            result_success=result.success,
+            result_content=result.content if result.success else None,
+            result_error=result.error if not result.success else None,
+        )
+
+    async def execute_single_tool(self, tool_call) -> tuple:
+        """Execute a single tool with Agent-specific behavior (print, log, approve)."""
         tool_call_id = tool_call.id
         function_name = tool_call.function.name
         arguments = tool_call.function.arguments
+
+        self._print_tool_call(function_name, arguments)
 
         # Plan mode: block write tools
         if self.mode == AgentMode.PLAN and function_name in self.write_tools:
@@ -549,8 +671,7 @@ Requirements:
                 success=False, content="",
                 error=f"Blocked in PLAN mode (read-only). Switch to /mode agent to use {function_name}.",
             )
-            self._print_tool_call(function_name, arguments)
-            self._print_tool_result(result)
+            self._on_tool_result(function_name, result)
             tool_msg = Message(
                 role="tool",
                 content=f"Error: {result.error}",
@@ -559,15 +680,13 @@ Requirements:
             )
             return (tool_call, tool_msg)
 
-        self._print_tool_call(function_name, arguments)
-
-        # YOLO mode: auto-approve, Agent mode: needs confirmation
+        # Agent mode: needs confirmation
         if self.mode == AgentMode.AGENT and not self._check_approved(function_name):
             result = ToolResult(
                 success=False, content="",
                 error=f"Tool call rejected by user. Type 'y' to approve, or switch to /mode yolo for auto-approve.",
             )
-            self._print_tool_result(result)
+            self._on_tool_result(function_name, result)
             tool_msg = Message(
                 role="tool",
                 content=f"Error: {result.error}",
@@ -591,56 +710,49 @@ Requirements:
                     error=f"Tool execution failed: {error_detail}\n\nTraceback:\n{error_trace}",
                 )
 
-        self.logger.log_tool_result(
-            tool_name=function_name,
-            arguments=arguments,
-            result_success=result.success,
-            result_content=result.content if result.success else None,
-            result_error=result.error if not result.success else None,
-        )
+        self._on_tool_result(function_name, result)
 
-        self._print_tool_result(result)
-
+        # Keep tool results intact (user pays per call, not per token)
+        content = result.content if result.success else f"Error: {result.error}"
+        
         tool_msg = Message(
             role="tool",
-            content=result.content if result.success else f"Error: {result.error}",
+            content=content,
             tool_call_id=tool_call_id,
             name=function_name,
         )
         return (tool_call, tool_msg)
 
-    async def _execute_tools_sequential(self, tool_calls: list) -> list[tuple]:
+    async def execute_tools_sequential(self, tool_calls: list) -> list[tuple]:
         """Execute tools one at a time."""
         results = []
         for tc in tool_calls:
-            if self._check_cancelled():
-                self._cleanup_incomplete_messages()
-                return results
-            tool_call, tool_msg = await self._execute_single_tool(tc)
-            self.messages.append(tool_msg)
+            tool_call, tool_msg = await self.execute_single_tool(tc)
             results.append((tool_call, tool_msg))
         return results
 
-    async def _execute_tools_parallel(self, tool_calls: list, max_concurrent: int = 5) -> list[tuple]:
+    async def execute_tools_parallel(self, tool_calls: list, max_concurrent: int = 5) -> list[tuple]:
         """Execute tools in parallel using a semaphore to limit concurrency."""
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_execute(tc):
             async with semaphore:
-                return await self._execute_single_tool(tc)
+                return await self.execute_single_tool(tc)
 
         # Print all tool headers first
         for tc in tool_calls:
             self._print_tool_call(tc.function.name, tc.function.arguments)
 
         # Execute all tools concurrently
-        task_results = await asyncio.gather(*[bounded_execute(tc) for tc in tool_calls], return_exceptions=True)
+        task_results = await asyncio.gather(
+            *[bounded_execute(tc) for tc in tool_calls],
+            return_exceptions=True
+        )
         
         # Handle any exceptions that occurred
         processed_results = []
-        for i, (tc, result) in enumerate(zip(tool_calls, task_results)):
+        for tc, result in zip(tool_calls, task_results):
             if isinstance(result, Exception):
-                # Create error result for failed tool
                 tool_msg = Message(
                     role="tool",
                     content=f"Error: {type(result).__name__}: {str(result)}",
@@ -650,13 +762,6 @@ Requirements:
                 processed_results.append((tc, tool_msg))
             else:
                 processed_results.append(result)
-
-        # Append results in original order
-        for tool_call, tool_msg in processed_results:
-            if self._check_cancelled():
-                self._cleanup_incomplete_messages()
-                return processed_results
-            self.messages.append(tool_msg)
 
         return processed_results
 

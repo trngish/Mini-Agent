@@ -9,8 +9,9 @@ from ..utils.model_utils import get_model_specs, is_minimax_model
 from ..utils.platform_utils import normalize_path_separators as normalize_path
 
 # Centralized token limits for file content truncation
-DEFAULT_FILE_TOKEN_LIMIT = 32000
-M27_FILE_TOKEN_LIMIT = 64000
+# 按次数计费优化：token免费，提高截断限制以保留更多上下文，减少因信息不足导致的重复调用
+DEFAULT_FILE_TOKEN_LIMIT = 64000   # 原32000→64000
+M27_FILE_TOKEN_LIMIT = 128000     # 原64000→128000
 
 
 def truncate_text_by_tokens(

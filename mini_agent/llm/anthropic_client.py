@@ -117,7 +117,15 @@ class AnthropicClient(LLMClientBase):
         }
 
         if system_message:
-            params["system"] = system_message
+            # 按次数计费优化：使用 prompt caching 减少重复处理
+            # cache_control 标记让 API 缓存 system prompt，后续调用复用
+            params["system"] = [
+                {
+                    "type": "text",
+                    "text": system_message,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
 
         if tools:
             params["tools"] = self._convert_tools(tools)
@@ -219,6 +227,8 @@ class AnthropicClient(LLMClientBase):
         """Get extended thinking configuration for M2.7.
 
         M2.7 supports extended thinking with budget up to 32K tokens.
+        按次数计费优化：思考越深→命中率越高→总调用次数越少
+
         Reference: https://www.minimaxi.com/models/text/m27
 
         Returns:
@@ -272,6 +282,10 @@ class AnthropicClient(LLMClientBase):
     def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert internal messages to Anthropic format.
 
+        按次数计费优化：
+        - 启用 prompt caching 以减少重复 token 处理（token免费但cache能加速响应）
+        - 保留完整的工具结果（token免费，信息越完整命中率越高）
+
         Args:
             messages: List of internal Message objects
 
@@ -283,6 +297,7 @@ class AnthropicClient(LLMClientBase):
 
         for msg in messages:
             if msg.role == "system":
+                # Add cache control to system message for prompt caching
                 system_message = msg.content
                 continue
 
@@ -312,6 +327,8 @@ class AnthropicClient(LLMClientBase):
                     api_messages.append({"role": msg.role, "content": msg.content})
 
             elif msg.role == "tool":
+                # 按次数计费优化：保留完整工具结果，不截断
+                tool_content = msg.content
                 api_messages.append(
                     {
                         "role": "user",
@@ -319,7 +336,7 @@ class AnthropicClient(LLMClientBase):
                             {
                                 "type": "tool_result",
                                 "tool_use_id": msg.tool_call_id,
-                                "content": msg.content,
+                                "content": tool_content,
                             }
                         ],
                     }

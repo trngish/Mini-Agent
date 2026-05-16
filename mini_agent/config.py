@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class RetryConfig(BaseModel):
-    """Retry configuration"""
+    """Retry configuration for YAML config file."""
 
     enabled: bool = True
     max_retries: int = 3
@@ -97,10 +97,11 @@ class M27Config(BaseModel):
     """MiniMax M2.7 specific configuration"""
 
     enable_extended_thinking: bool = True
-    thinking_budget_tokens: int = 8192
-    enable_parallel_tool_calls: bool = True
-    max_concurrent_tools: int = 5
+    thinking_budget_tokens: int = 32768  # 按次数计费：用满32K思考预算，深度思考=高命中率=少调用
+    thinking_budget_adaptive: bool = True  # Adaptive thinking budget
     enable_message_cache: bool = True
+    enable_parallel_tool_calls: bool = True
+    max_concurrent_tools: int = 20  # M2.7 supports 20+ parallel, more per call = fewer calls
     token_limit: int = 800_000  # 800K tokens for 1M context window
     max_output_tokens: int = 32768  # M2.7 supports up to 32K output
 
@@ -224,7 +225,7 @@ class Config(BaseModel):
     def _parse_agent_config(cls, data: dict[str, Any]) -> AgentConfig:
         """Parse Agent configuration section."""
         return AgentConfig(
-            max_steps=data.get("max_steps", 50),
+            max_steps=data.get("max_steps", AgentConfig().max_steps),
             workspace_dir=data.get("workspace_dir", "./workspace"),
             system_prompt_path=data.get("system_prompt_path", "system_prompt.md"),
         )
@@ -274,10 +275,10 @@ class Config(BaseModel):
         m27_data = data.get("m27", {})
         return M27Config(
             enable_extended_thinking=m27_data.get("enable_extended_thinking", True),
-            thinking_budget_tokens=m27_data.get("thinking_budget_tokens", 8192),
+            thinking_budget_tokens=m27_data.get("thinking_budget_tokens", 32768),
+            thinking_budget_adaptive=m27_data.get("thinking_budget_adaptive", True),
             enable_parallel_tool_calls=m27_data.get("enable_parallel_tool_calls", True),
-            max_concurrent_tools=m27_data.get("max_concurrent_tools", 5),
-            enable_message_cache=m27_data.get("enable_message_cache", True),
+            max_concurrent_tools=m27_data.get("max_concurrent_tools", 20),
             token_limit=m27_data.get("token_limit", 800_000),
             max_output_tokens=m27_data.get("max_output_tokens", 32768),
         )

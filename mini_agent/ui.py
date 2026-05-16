@@ -219,7 +219,7 @@ def print_stats(agent: Agent, session_start: datetime) -> None:
     for icon, label, value in [
         ("⏱", "Duration", f"{minutes}m {seconds}s"),
         ("💬", "Messages", str(len(agent.messages))),
-        ("🔢", "Tokens Used", f"{agent.api_total_tokens:,}"),
+        ("🔢", "调用次数", f"{agent.api_call_count}"),
     ]:
         print(f"  {icon}  {Colors.DIM}{label}:{Colors.RESET} {value}")
     print()

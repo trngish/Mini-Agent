@@ -11,6 +11,10 @@ from .schema import LLMProvider
 from .tools.base import Tool
 from .tools.bash_tool import BashKillTool, BashOutputTool, BashTool
 from .tools.file_tools import EditTool, ReadTool, WriteTool
+from .tools.batch_tools import (
+    MultiReadTool, MultiEditTool, WorkspaceContextTool,
+    MultiGrepTool, MultiBashTool, DeepContextTool,
+)
 from .tools.search_tools import GrepTool, FindTool, TreeTool
 from .tools.git_tool import GitTool, GitStatusTool
 from .tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
@@ -30,13 +34,20 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
         tools.append(ReadTool())
         tools.append(WriteTool())
         tools.append(EditTool())
-        print(f"{Colors.GREEN}✅ File tools enabled{Colors.RESET}")
+        # Batch operation tools - 按次数计费优化：合并操作减少API调用
+        tools.append(MultiReadTool())
+        tools.append(MultiEditTool())
+        tools.append(WorkspaceContextTool())
+        tools.append(DeepContextTool())
+        print(f"{Colors.GREEN}✅ File tools enabled (with batch operations + deep context){Colors.RESET}")
 
     if config.tools.enable_bash:
         tools.append(BashTool(platform_mode=config.platform.mode))
         tools.append(BashOutputTool())
         tools.append(BashKillTool())
-        print(f"{Colors.GREEN}✅ Bash tools enabled{Colors.RESET}")
+        # Batch bash tool - 按次数计费优化：合并多个独立命令为一次调用
+        tools.append(MultiBashTool(platform_mode=config.platform.mode))
+        print(f"{Colors.GREEN}✅ Bash tools enabled (with batch execution){Colors.RESET}")
 
     if config.tools.enable_note:
         tools.append(SessionNoteTool())
@@ -53,7 +64,9 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
     tools.append(GrepTool())
     tools.append(FindTool())
     tools.append(TreeTool())
-    print(f"{Colors.GREEN}✅ Search tools enabled{Colors.RESET}")
+    # Batch search tool - 按次数计费优化：合并多次搜索为一次调用
+    tools.append(MultiGrepTool())
+    print(f"{Colors.GREEN}✅ Search tools enabled (with batch search){Colors.RESET}")
 
     tools.append(GitTool())
     tools.append(GitStatusTool())

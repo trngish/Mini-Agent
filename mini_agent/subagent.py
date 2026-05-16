@@ -5,7 +5,8 @@ from time import perf_counter
 from typing import Optional
 
 from .llm import LLMClient
-from .schema import Message
+from .schema import AgentMode, Message
+from .schema.schema import WRITE_TOOLS
 from .tools.base import Tool, ToolResult
 
 
@@ -32,7 +33,7 @@ class SubAgent:
         llm_client: LLMClient,
         tools: list[Tool],
         system_prompt: str = "You are a helpful assistant. Complete the assigned task concisely.",
-        max_steps: int = 10,
+        max_steps: int = 50,
         m27_config: Optional[dict] = None,
     ):
         self.llm = llm_client
@@ -41,11 +42,17 @@ class SubAgent:
         self.system_prompt = system_prompt
         self.max_steps = max_steps
         self.m27_config = m27_config or {}
+        self.is_m27 = False  # SubAgent doesn't need M2.7 specifics
+        self.mode = AgentMode.YOLO  # SubAgent always runs in YOLO mode
+        self.write_tools = WRITE_TOOLS
 
     async def run(self, task: str) -> SubAgentResult:
         """Execute a sub-task and return the result."""
         start = perf_counter()
-        messages = [Message(role="system", content=self.system_prompt), Message(role="user", content=task)]
+        messages = [
+            Message(role="system", content=self.system_prompt),
+            Message(role="user", content=task)
+        ]
 
         for step in range(self.max_steps):
             try:
@@ -59,7 +66,7 @@ class SubAgent:
             if response.tool_calls:
                 # M2.7: execute tools in parallel if enabled and multiple tools
                 parallel_enabled = self.m27_config.get("enable_parallel_tool_calls", True)
-                max_concurrent = self.m27_config.get("max_concurrent_tools", 5)
+                max_concurrent = self.m27_config.get("max_concurrent_tools", 10)
 
                 if parallel_enabled and len(response.tool_calls) > 1:
                     results = await self._execute_tools_parallel(response.tool_calls, max_concurrent)
@@ -97,8 +104,26 @@ class SubAgent:
             async with semaphore:
                 return await self._execute_single_tool(tc)
 
-        task_results = await asyncio.gather(*[bounded_execute(tc) for tc in tool_calls])
-        return list(task_results)
+        task_results = await asyncio.gather(
+            *[bounded_execute(tc) for tc in tool_calls],
+            return_exceptions=True
+        )
+        
+        # Handle any exceptions
+        processed_results = []
+        for tc, result in zip(tool_calls, task_results):
+            if isinstance(result, Exception):
+                tool_msg = Message(
+                    role="tool",
+                    content=f"Error: {type(result).__name__}: {str(result)}",
+                    tool_call_id=tc.id,
+                    name=tc.function.name,
+                )
+                processed_results.append((tc, tool_msg))
+            else:
+                processed_results.append(result)
+
+        return processed_results
 
     async def _execute_single_tool(self, tool_call) -> tuple:
         """Execute a single tool and return (tool_call, tool_msg)."""
@@ -129,6 +154,15 @@ class SubAgent:
         )
         return (tool_call, tool_msg)
 
+    def cleanup(self) -> None:
+        """Clean up resources held by the sub-agent.
+        
+        Should be called when sub-agent is no longer needed.
+        """
+        # Clear tool references to free memory
+        self.tools.clear()
+        self.tool_list.clear()
+
 
 async def run_sub_agents(
     llm_client: LLMClient,
@@ -152,7 +186,10 @@ async def run_sub_agents(
     async def run_one(task: str) -> SubAgentResult:
         async with semaphore:
             agent = SubAgent(llm_client=llm_client, tools=tools)
-            return await agent.run(task)
+            try:
+                return await agent.run(task)
+            finally:
+                agent.cleanup()
 
     results = await asyncio.gather(*[run_one(t) for t in tasks])
-    return results
+    return list(results)

@@ -18,6 +18,10 @@ class AgentMode(str, Enum):
     YOLO = "yolo"      # Auto-approve all tools
 
 
+# Tools considered as write operations (blocked in PLAN mode)
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "bash", "git", "multi_edit", "multi_bash"})
+
+
 class FunctionCall(BaseModel):
     """Function call details."""
 
