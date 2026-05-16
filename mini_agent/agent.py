@@ -413,9 +413,9 @@ Requirements:
                 content_first = True
                 
                 # Use deque for efficient buffer management with maxlen
+                buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
                 thinking_buffer: deque[str] = deque(maxlen=buffer_size)
                 content_buffer: deque[str] = deque(maxlen=buffer_size)
-                buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
 
                 def on_thinking(text: str) -> None:
                     nonlocal thinking_first, thinking_buffer

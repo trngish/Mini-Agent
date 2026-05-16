@@ -134,9 +134,9 @@ class AnthropicClient(LLMClientBase):
         tool_call_index = 0
 
         # Use deque for efficient buffer management with maxlen
+        buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
         text_buffer: deque[str] = deque(maxlen=buffer_size)
         thinking_buffer: deque[str] = deque(maxlen=buffer_size)
-        buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
 
         try:
             stream = await self.client.messages.create(**params)
