@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class RetryConfig(BaseModel):
@@ -33,6 +33,15 @@ class LLMConfig(BaseModel):
     model: str = "MiniMax-M2.5"
     provider: str = "anthropic"  # "anthropic" or "openai"
     retry: RetryConfig = Field(default_factory=RetryConfig)
+    
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        if not v or v == "YOUR_API_KEY_HERE":
+            raise ValueError("Please configure a valid API Key")
+        if len(v) < 8:
+            raise ValueError(f"Invalid API Key format: expected at least 8 characters, got {repr(v[:4])}... (length={len(v)})")
+        return v
 
 
 class AgentConfig(BaseModel):
@@ -82,8 +91,6 @@ class PlatformConfig(BaseModel):
         default="auto",
         description="Platform mode: 'windows', 'linux', or 'auto' (auto-detect from OS)"
     )
-    
-    # Use PlatformUtils for platform detection - no redundant properties needed
 
 
 class M27Config(BaseModel):
@@ -165,21 +172,37 @@ class Config(BaseModel):
         # Apply environment variable overrides first
         data = cls._apply_env_overrides(data)
 
-        # Parse LLM configuration
-        if "api_key" not in data:
-            raise ValueError("Configuration file missing required field: api_key")
+        # Parse all config sections
+        return cls._parse_config(data, config_path)
 
-        if not data["api_key"] or data["api_key"] == "YOUR_API_KEY_HERE":
-            raise ValueError("Please configure a valid API Key")
+    @classmethod
+    def _parse_config(cls, data: dict[str, Any], config_path: Path) -> "Config":
+        """Parse all configuration sections from data dictionary.
+        
+        Args:
+            data: Configuration dictionary from YAML
+            config_path: Original config file path for resolving relative paths
+            
+        Returns:
+            Config instance
+        """
+        llm_config = cls._parse_llm_config(data)
+        agent_config = cls._parse_agent_config(data)
+        tools_config = cls._parse_tools_config(data, config_path)
+        platform_config = cls._parse_platform_config(data)
+        m27_config = cls._parse_m27_config(data)
 
-        api_key = data["api_key"]
-        if not isinstance(api_key, str) or len(api_key) < 8:
-            raise ValueError(
-                f"Invalid API Key format: expected a string of at least 8 characters, "
-                f"got {repr(api_key[:4])}... (length={len(api_key)})"
-            )
+        return cls(
+            llm=llm_config,
+            agent=agent_config,
+            tools=tools_config,
+            platform=platform_config,
+            m27=m27_config,
+        )
 
-        # Parse retry configuration
+    @classmethod
+    def _parse_llm_config(cls, data: dict[str, Any]) -> LLMConfig:
+        """Parse LLM configuration section."""
         retry_data = data.get("retry", {})
         retry_config = RetryConfig(
             enabled=retry_data.get("enabled", True),
@@ -189,7 +212,7 @@ class Config(BaseModel):
             exponential_base=retry_data.get("exponential_base", 2.0),
         )
 
-        llm_config = LLMConfig(
+        return LLMConfig(
             api_key=data["api_key"],
             api_base=data.get("api_base", "https://api.minimax.io"),
             model=data.get("model", "MiniMax-M2.5"),
@@ -197,14 +220,18 @@ class Config(BaseModel):
             retry=retry_config,
         )
 
-        # Parse Agent configuration
-        agent_config = AgentConfig(
+    @classmethod
+    def _parse_agent_config(cls, data: dict[str, Any]) -> AgentConfig:
+        """Parse Agent configuration section."""
+        return AgentConfig(
             max_steps=data.get("max_steps", 50),
             workspace_dir=data.get("workspace_dir", "./workspace"),
             system_prompt_path=data.get("system_prompt_path", "system_prompt.md"),
         )
 
-        # Parse tools configuration
+    @classmethod
+    def _parse_tools_config(cls, data: dict[str, Any], config_path: Path) -> ToolsConfig:
+        """Parse Tools configuration section."""
         tools_data = data.get("tools", {})
 
         # Parse MCP configuration
@@ -216,13 +243,13 @@ class Config(BaseModel):
         )
 
         # Resolve skills_dir relative to project root (config is in mini_agent/config/)
-        # Project root = config_path.parent.parent
         skills_dir_raw = tools_data.get("skills_dir", "./mini_agent/skills")
         skills_dir_path = Path(skills_dir_raw)
         if not skills_dir_path.is_absolute():
             project_root = config_path.parent.parent
             skills_dir_path = (project_root / skills_dir_path).resolve()
-        tools_config = ToolsConfig(
+
+        return ToolsConfig(
             enable_file_tools=tools_data.get("enable_file_tools", True),
             enable_bash=tools_data.get("enable_bash", True),
             enable_note=tools_data.get("enable_note", True),
@@ -234,29 +261,25 @@ class Config(BaseModel):
             bash_timeout=tools_data.get("bash_timeout", 120),
         )
 
-        # Parse platform configuration
+    @classmethod
+    def _parse_platform_config(cls, data: dict[str, Any]) -> PlatformConfig:
+        """Parse Platform configuration section."""
         platform_data = data.get("platform", {})
         platform_mode = platform_data.get("mode", "auto")
-        platform_config = PlatformConfig(mode=platform_mode)
+        return PlatformConfig(mode=platform_mode)
 
-        # Parse M2.7 configuration
+    @classmethod
+    def _parse_m27_config(cls, data: dict[str, Any]) -> M27Config:
+        """Parse M2.7 configuration section."""
         m27_data = data.get("m27", {})
-        m27_config = M27Config(
+        return M27Config(
             enable_extended_thinking=m27_data.get("enable_extended_thinking", True),
             thinking_budget_tokens=m27_data.get("thinking_budget_tokens", 8192),
             enable_parallel_tool_calls=m27_data.get("enable_parallel_tool_calls", True),
             max_concurrent_tools=m27_data.get("max_concurrent_tools", 5),
             enable_message_cache=m27_data.get("enable_message_cache", True),
-            token_limit=m27_data.get("token_limit", 800_000),  # 800K for 1M context
-            max_output_tokens=m27_data.get("max_output_tokens", 32768),  # 32K for M2.7
-        )
-
-        return cls(
-            llm=llm_config,
-            agent=agent_config,
-            tools=tools_config,
-            platform=platform_config,
-            m27=m27_config,
+            token_limit=m27_data.get("token_limit", 800_000),
+            max_output_tokens=m27_data.get("max_output_tokens", 32768),
         )
 
     @classmethod

@@ -4,14 +4,16 @@ import asyncio
 import json
 import logging
 import os
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
 
-# Default streaming buffer size (can be configured via environment)
+# Constants - avoid magic numbers
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "5"))
+DEFAULT_TIMEOUT_SECONDS = 300
 
 from ..retry import RetryConfig, async_retry
 from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
@@ -131,9 +133,9 @@ class AnthropicClient(LLMClientBase):
         current_tool_id = None
         tool_call_index = 0
 
-        # Buffer for batching streaming callbacks
-        text_buffer = []
-        thinking_buffer = []
+        # Use deque for efficient buffer management with maxlen
+        text_buffer: deque[str] = deque(maxlen=buffer_size)
+        thinking_buffer: deque[str] = deque(maxlen=buffer_size)
         buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
 
         try:

@@ -6,6 +6,7 @@ for various API error types.
 
 import re
 from enum import Enum
+from functools import lru_cache
 from typing import Optional
 
 from .display import Colors
@@ -152,15 +153,15 @@ class LLMError(Exception):
 class LLMErrorClassifier:
     """Classifies LLM API errors from exception objects or HTTP responses."""
 
-    # Pattern matchers for specific error messages
-    RATE_LIMIT_PATTERNS = [
+    # Pattern matchers for specific error messages (compiled once for performance)
+    _RATE_LIMIT_PATTERNS = [
         re.compile(r"rate.?limit", re.IGNORECASE),
         re.compile(r"too.?many.?requests", re.IGNORECASE),
         re.compile(r"quota.?exceeded", re.IGNORECASE),
         re.compile(r"api.?rate", re.IGNORECASE),
     ]
 
-    CONTEXT_LENGTH_PATTERNS = [
+    _CONTEXT_LENGTH_PATTERNS = [
         re.compile(r"context.?length", re.IGNORECASE),
         re.compile(r"token.?limit", re.IGNORECASE),
         re.compile(r"too.?long", re.IGNORECASE),
@@ -168,20 +169,20 @@ class LLMErrorClassifier:
         re.compile(r"max_tokens", re.IGNORECASE),
     ]
 
-    AUTH_PATTERNS = [
+    _AUTH_PATTERNS = [
         re.compile(r"invalid.?api.?key", re.IGNORECASE),
         re.compile(r"authentication.?failed", re.IGNORECASE),
         re.compile(r"unauthorized", re.IGNORECASE),
         re.compile(r"api.?key.?invalid", re.IGNORECASE),
     ]
 
-    TIMEOUT_PATTERNS = [
+    _TIMEOUT_PATTERNS = [
         re.compile(r"timeout", re.IGNORECASE),
         re.compile(r"timed.?out", re.IGNORECASE),
         re.compile(r"request.?timeout", re.IGNORECASE),
     ]
 
-    CONNECTION_PATTERNS = [
+    _CONNECTION_PATTERNS = [
         re.compile(r"connection.*refused", re.IGNORECASE),
         re.compile(r"connection.*reset", re.IGNORECASE),
         re.compile(r"network.*unreachable", re.IGNORECASE),
@@ -238,7 +239,7 @@ class LLMErrorClassifier:
         """Classify error by HTTP status code."""
         if status_code == 400:
             # Check for specific 400 errors
-            if cls._matches_patterns(message, cls.CONTEXT_LENGTH_PATTERNS):
+            if cls._matches_patterns(message, cls._CONTEXT_LENGTH_PATTERNS):
                 return LLMErrorType.CONTEXT_LENGTH_EXCEEDED
             return LLMErrorType.BAD_REQUEST
 
@@ -252,7 +253,7 @@ class LLMErrorClassifier:
             return LLMErrorType.UNPROCESSABLE_ENTITY
 
         elif status_code == 429:
-            if cls._matches_patterns(message, cls.RATE_LIMIT_PATTERNS):
+            if cls._matches_patterns(message, cls._RATE_LIMIT_PATTERNS):
                 return LLMErrorType.RATE_LIMIT_ERROR
             return LLMErrorType.QUOTA_EXCEEDED
 
@@ -268,22 +269,28 @@ class LLMErrorClassifier:
     @classmethod
     def _classify_by_message(cls, message: str) -> LLMErrorType:
         """Classify error by error message patterns."""
-        if cls._matches_patterns(message, cls.AUTH_PATTERNS):
+        if cls._matches_patterns(message, cls._AUTH_PATTERNS):
             return LLMErrorType.AUTHENTICATION_ERROR
 
-        if cls._matches_patterns(message, cls.CONTEXT_LENGTH_PATTERNS):
+        if cls._matches_patterns(message, cls._CONTEXT_LENGTH_PATTERNS):
             return LLMErrorType.CONTEXT_LENGTH_EXCEEDED
 
-        if cls._matches_patterns(message, cls.RATE_LIMIT_PATTERNS):
+        if cls._matches_patterns(message, cls._RATE_LIMIT_PATTERNS):
             return LLMErrorType.RATE_LIMIT_ERROR
 
-        if cls._matches_patterns(message, cls.TIMEOUT_PATTERNS):
+        if cls._matches_patterns(message, cls._TIMEOUT_PATTERNS):
             return LLMErrorType.TIMEOUT_ERROR
 
-        if cls._matches_patterns(message, cls.CONNECTION_PATTERNS):
+        if cls._matches_patterns(message, cls._CONNECTION_PATTERNS):
             return LLMErrorType.CONNECTION_ERROR
 
         return LLMErrorType.UNKNOWN_ERROR
+
+    @classmethod
+    @lru_cache(maxsize=128)
+    def _matches_patterns_cached(cls, text: str, patterns_hash: int) -> bool:
+        """Cached pattern matching helper (uses hash to store patterns)."""
+        return False  # Placeholder - actual logic uses class-level patterns
 
     @classmethod
     def _matches_patterns(cls, text: str, patterns: list[re.Pattern]) -> bool:
@@ -291,8 +298,9 @@ class LLMErrorClassifier:
         return any(p.search(text) for p in patterns)
 
     @classmethod
-    def _extract_retry_after(cls, response_body: Optional[str]) -> Optional[int]:
-        """Extract retry-after value from response body."""
+    @lru_cache(maxsize=32)
+    def _extract_retry_after(cls, response_body: str) -> Optional[int]:
+        """Extract retry-after value from response body with caching."""
         if not response_body:
             return None
 
@@ -309,6 +317,7 @@ class LLMErrorClassifier:
         return None
 
 
+@lru_cache(maxsize=1)
 def format_llm_error(error: Exception, status_code: Optional[int] = None) -> str:
     """Format an LLM error into a user-friendly message.
 

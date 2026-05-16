@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import traceback
+from collections import deque
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Optional
@@ -18,15 +19,15 @@ from .utils.token_utils import get_encoder
 from .utils.error_handler import LLMErrorClassifier, format_llm_error
 from .utils.model_utils import is_m27_model, get_token_limit_for_model
 
-# Default streaming buffer size (can be configured via environment)
+# Constants - avoid magic numbers
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
+DEFAULT_ENCODING_NAME = "cl100k_base"
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "bash", "git"})
 
 
 class Agent:
     """Single agent with basic tools and MCP support."""
 
-    WRITE_TOOLS = {"write_file", "edit_file", "bash", "git"}
-    
     # Class-level tiktoken encoder cache for reuse
     _encoder_cache: dict[str, Any] = {}
 
@@ -49,6 +50,8 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         self.cancel_event: Optional[asyncio.Event] = None
         self.session_manager = SessionManager()
+        # Make write tools configurable at instance level
+        self.write_tools = WRITE_TOOLS
 
         # M2.7 specific configuration
         self.m27_config = m27_config or {}
@@ -106,7 +109,7 @@ class Agent:
         self._cached_token_index: int = 0
 
     @classmethod
-    def _get_cached_encoder(cls, encoding_name: str = "cl100k_base"):
+    def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
         """Get cached tiktoken encoder or create new one.
         
         Args:
@@ -409,9 +412,9 @@ Requirements:
                 thinking_first = True
                 content_first = True
                 
-                # Buffer for batching output
-                thinking_buffer = []
-                content_buffer = []
+                # Use deque for efficient buffer management with maxlen
+                thinking_buffer: deque[str] = deque(maxlen=buffer_size)
+                content_buffer: deque[str] = deque(maxlen=buffer_size)
                 buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
 
                 def on_thinking(text: str) -> None:
@@ -541,7 +544,7 @@ Requirements:
         arguments = tool_call.function.arguments
 
         # Plan mode: block write tools
-        if self.mode == AgentMode.PLAN and function_name in self.WRITE_TOOLS:
+        if self.mode == AgentMode.PLAN and function_name in self.write_tools:
             result = ToolResult(
                 success=False, content="",
                 error=f"Blocked in PLAN mode (read-only). Switch to /mode agent to use {function_name}.",

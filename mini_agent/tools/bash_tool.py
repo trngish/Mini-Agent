@@ -20,8 +20,10 @@ from .bash_result import BashOutputResult
 from .bash_background import BackgroundShell, BackgroundShellManager
 from ..utils.platform_utils import PlatformUtils
 
-# Default streaming buffer size (can be configured via environment)
-STREAM_BUFFER_SIZE = int(__import__("os").environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "5"))
+# Constants - avoid magic numbers
+DEFAULT_TIMEOUT = 120
+MAX_TIMEOUT = 600
+FALLBACK_ENCODINGS = ("utf-8", "gbk", "cp1252")
 
 
 class BashTool(Tool):
@@ -124,7 +126,7 @@ Examples:
     async def execute(
         self,
         command: str,
-        timeout: int = 120,
+        timeout: int = DEFAULT_TIMEOUT,
         run_in_background: bool = False,
     ) -> BashOutputResult:
         """Execute shell command with optional background execution.
@@ -138,11 +140,8 @@ Examples:
             BashOutputResult with command output and status
         """
         try:
-            # Validate timeout
-            if timeout > 600:
-                timeout = 600
-            elif timeout < 1:
-                timeout = 120
+            # Validate and normalize timeout
+            timeout = self._validate_timeout(timeout)
 
             # Get shell configuration based on platform mode
             shell_exe, shell_args, shell_name = get_platform_shell_args(
@@ -152,13 +151,8 @@ Examples:
             # Get platform-appropriate environment
             env = get_subprocess_env()
 
-            # Prepare shell-specific command execution
-            if self.is_windows:
-                # Windows: Use PowerShell with appropriate encoding
-                shell_cmd = [shell_exe] + shell_args + [command]
-            else:
-                # Unix/Linux/macOS: Use bash
-                shell_cmd = command
+            # Prepare shell command
+            shell_cmd = self._build_shell_command(shell_exe, shell_args, command)
 
             if run_in_background:
                 return await self._execute_background(shell_cmd, command, env)
@@ -173,6 +167,42 @@ Examples:
                 stderr=str(e),
                 exit_code=-1,
             )
+
+    def _validate_timeout(self, timeout: int) -> int:
+        """Validate and normalize timeout value.
+        
+        Args:
+            timeout: Raw timeout value
+            
+        Returns:
+            Normalized timeout within bounds
+        """
+        if timeout > MAX_TIMEOUT:
+            return MAX_TIMEOUT
+        elif timeout < 1:
+            return DEFAULT_TIMEOUT
+        return timeout
+
+    def _build_shell_command(
+        self,
+        shell_exe: str,
+        shell_args: list[str],
+        command: str,
+    ) -> list[str] | str:
+        """Build platform-specific shell command.
+        
+        Args:
+            shell_exe: Shell executable path
+            shell_args: Shell arguments
+            command: Command to execute
+            
+        Returns:
+            Platform-appropriate command structure
+        """
+        if self.is_windows:
+            return [shell_exe] + shell_args + [command]
+        else:
+            return command
 
     async def _execute_background(
         self,
@@ -259,9 +289,9 @@ Examples:
                 exit_code=-1,
             )
 
-        # Decode output
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        stderr_text = stderr.decode("utf-8", errors="replace")
+        # Decode output with fallback encodings
+        stdout_text = self._decode_output(stdout)
+        stderr_text = self._decode_output(stderr)
 
         # Create result (content auto-formatted by model_validator)
         is_success = process.returncode == 0
@@ -278,6 +308,28 @@ Examples:
             stderr=stderr_text,
             exit_code=process.returncode or 0,
         )
+
+    def _decode_output(self, data: bytes) -> str:
+        """Decode output bytes with fallback encodings.
+        
+        Args:
+            data: Raw bytes from subprocess
+            
+        Returns:
+            Decoded string with replacements for invalid chars
+        """
+        if not data:
+            return ""
+        
+        # Try encodings in order of preference
+        for encoding in FALLBACK_ENCODINGS:
+            try:
+                return data.decode(encoding, errors="strict")
+            except UnicodeDecodeError:
+                continue
+        
+        # Final fallback: replace errors
+        return data.decode("utf-8", errors="replace")
 
 
 class BashOutputTool(Tool):

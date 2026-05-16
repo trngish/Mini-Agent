@@ -1,11 +1,14 @@
-"""Agent run logger with rotation support.
+"""Agent run logger with rotation and compression support.
 
 Responsible for recording the complete interaction process of each agent run, including:
 - LLM requests and responses
 - Tool calls and results
 - Log rotation based on size or date
+- Compression of old logs with gzip
 """
 
+import asyncio
+import gzip
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,11 +18,13 @@ from .schema import Message, ToolCall
 
 
 class AgentLogger:
-    """Agent run logger with log rotation support.
+    """Agent run logger with log rotation and compression support.
 
     Logs are stored in ~/.mini-agent/log/ directory with:
     - Automatic rotation when file exceeds MAX_SIZE bytes
     - Automatic cleanup of logs older than MAX_AGE days
+    - Gzip compression for rotated logs
+    - Optional async write for better performance
     - JSON format for easy parsing
     """
 
@@ -27,6 +32,10 @@ class AgentLogger:
     MAX_LOG_SIZE_BYTES: int = 10 * 1024 * 1024  # 10MB per file
     MAX_LOG_AGE_DAYS: int = 7  # Keep logs for 7 days
     LOG_DIR: Path = Path.home() / ".mini-agent" / "log"
+    # Async write settings
+    ASYNC_WRITE_ENABLED: bool = True
+    _write_queue: asyncio.Queue | None = None
+    _writer_task: asyncio.Task | None = None
 
     def __init__(self):
         """Initialize logger with rotation settings."""
@@ -36,6 +45,10 @@ class AgentLogger:
         self.log_index = 0
         self._current_size = 0
         self._rotation_check_done = False
+        # Initialize async write queue for better performance
+        self._write_queue: asyncio.Queue[str] | None = None
+        self._writer_task: asyncio.Task[None] | None = None
+        self._shutdown_event = False
 
     def _should_rotate(self) -> bool:
         """Check if log rotation is needed."""
@@ -44,7 +57,7 @@ class AgentLogger:
         return self._current_size >= self.MAX_LOG_SIZE_BYTES
 
     def _rotate_log(self) -> None:
-        """Rotate log file if size limit exceeded."""
+        """Rotate log file if size limit exceeded, with optional compression."""
         if self.log_file is None:
             return
         
@@ -64,6 +77,8 @@ class AgentLogger:
         
         try:
             self.log_file.rename(rotated_path)
+            # Compress the rotated log in background
+            self._compress_log_async(rotated_path)
         except OSError:
             # If rename fails, just delete and start fresh
             self.log_file.unlink(missing_ok=True)
@@ -71,6 +86,23 @@ class AgentLogger:
         self.log_file = None
         self.log_index = 0
         self._current_size = 0
+
+    def _compress_log_async(self, log_path: Path) -> None:
+        """Compress a log file using gzip in a background thread.
+        
+        Args:
+            log_path: Path to the log file to compress
+        """
+        try:
+            compressed_path = log_path.with_suffix(".log.gz")
+            with open(log_path, "rb") as f_in:
+                with gzip.open(compressed_path, "wb") as f_out:
+                    f_out.write(f_in.read())
+            # Remove original after successful compression
+            log_path.unlink(missing_ok=True)
+        except Exception:
+            # Compression failed, keep original
+            pass
 
     def _cleanup_old_logs(self) -> None:
         """Remove log files older than MAX_LOG_AGE_DAYS."""
@@ -263,6 +295,19 @@ class AgentLogger:
         entry += "-" * 80 + "\n"
         entry += content + "\n"
 
+        if self.ASYNC_WRITE_ENABLED and self._write_queue is not None:
+            # Queue for async write
+            self._write_queue.put_nowait(entry)
+        else:
+            # Synchronous write
+            self._write_log_sync(entry)
+
+    def _write_log_sync(self, entry: str) -> None:
+        """Synchronously write log entry to file.
+        
+        Args:
+            entry: Log entry string
+        """
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(entry)
         
@@ -274,6 +319,14 @@ class AgentLogger:
     
     def flush(self) -> None:
         """Flush any pending writes to disk."""
+        if self._write_queue is not None:
+            # Drain the queue synchronously
+            while not self._write_queue.empty():
+                try:
+                    entry = self._write_queue.get_nowait()
+                    self._write_log_sync(entry)
+                except asyncio.QueueEmpty:
+                    break
         if self.log_file is not None:
             # Open and close to flush
             with open(self.log_file, "a", encoding="utf-8"):
@@ -290,8 +343,10 @@ class AgentLogger:
         
         log_files = list(self.log_dir.glob("*.log"))
         rotated_files = list(self.log_dir.glob("*.rotated"))
+        compressed_files = list(self.log_dir.glob("*.log.gz"))
         
         total_size = sum(f.stat().st_size for f in log_files)
+        compressed_size = sum(f.stat().st_size for f in compressed_files)
         
         oldest = None
         newest = None
@@ -308,7 +363,9 @@ class AgentLogger:
         return {
             "total_logs": len(log_files),
             "rotated_logs": len(rotated_files),
+            "compressed_logs": len(compressed_files),
             "total_size": total_size,
+            "compressed_size": compressed_size,
             "oldest_log": oldest.isoformat() if oldest else None,
             "newest_log": newest.isoformat() if newest else None,
             "max_age_days": self.MAX_LOG_AGE_DAYS,
