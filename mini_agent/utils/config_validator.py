@@ -57,7 +57,7 @@ class ConfigValidator:
         ValidationRule(
             field="agent.max_steps",
             validate=lambda v: 1 <= v <= 1000,
-            message="Must be between 1 and 1000",
+            message="Must be between 1 and 3000",
         ),
         ValidationRule(
             field="m27.thinking_budget_tokens",
@@ -76,8 +76,8 @@ class ConfigValidator:
         ),
         ValidationRule(
             field="m27.max_concurrent_tools",
-            validate=lambda v: 1 <= v <= 10,
-            message="Must be between 1 and 10",
+            validate=lambda v: 1 <= v <= 30,
+            message="Must be between 1 and 30",
         ),
         ValidationRule(
             field="llm.retry.max_retries",

@@ -190,9 +190,17 @@ class SkillLoader:
 
         return content
 
-    def discover_skills(self) -> List[Skill]:
-        """
-        Discover and load all skills in the skills directory
+    def discover_skills(self, additional_search_paths: Optional[List[Path]] = None) -> List[Skill]:
+        """"
+        Discover and load all skills from multiple directories.
+
+        Search order (first found wins for duplicates by name):
+        1. Additional search paths (e.g., user config ~/.mini-agent/skills/)
+        2. Default skills_dir path
+
+        Args:
+            additional_search_paths: Extra directories to search for skills
+
 
         Returns:
             List of Skills
@@ -200,18 +208,34 @@ class SkillLoader:
         # Return cached results if already discovered
         if self._discovered_paths is not None:
             return [self.loaded_skills[skill.name] for skill in self.loaded_skills.values()]
-        
+
         skills = []
+        skill_files_by_name: Dict[str, Path] = {}  # Track first found SKILL.md per skill name
 
-        if not self.skills_dir.exists():
-            print(f"⚠️  Skills directory does not exist: {self.skills_dir}")
-            return skills
 
-        # Recursively find all SKILL.md files
-        skill_files = list(self.skills_dir.rglob("SKILL.md"))
-        self._discovered_paths = skill_files
-        
-        for skill_file in skill_files:
+        def collect_skill_files(search_dir: Path) -> None:
+            """Collect SKILL.md files from a directory into skill_files_by_name."""
+            if not search_dir.exists():
+                return
+            for skill_file in search_dir.rglob("SKILL.md"):
+                skill_name = skill_file.parent.name
+                if skill_name not in skill_files_by_name:
+                    skill_files_by_name[skill_name] = skill_file
+
+        # Priority 1: Additional search paths (user config directory)
+        if additional_search_paths:
+            for search_path in additional_search_paths:
+                collect_skill_files(search_path)
+
+
+        # Priority 2: Default skills_dir
+        if self.skills_dir.exists():
+            collect_skill_files(self.skills_dir)
+
+        # Load all discovered skills
+        self._discovered_paths = list(skill_files_by_name.values())
+
+        for skill_file in self._discovered_paths:
             skill = self.load_skill(skill_file)
             if skill:
                 skills.append(skill)

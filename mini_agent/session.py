@@ -116,8 +116,9 @@ class SessionManager:
             # Fall back to scanning directory
             return self._list_sessions_scan()
         
-        # Filter to existing sessions
+        # Filter to existing sessions and clean stale index entries
         sessions = []
+        stale_ids = []
         for entry in self._index:
             path = self.session_dir / f"{entry['id']}.json"
             if path.exists():
@@ -128,8 +129,11 @@ class SessionManager:
                     "messages": entry.get("message_count", 0),
                 })
             else:
-                # Session file no longer exists, remove from index
-                pass
+                stale_ids.append(entry["id"])
+
+        if stale_ids:
+            self._index = [s for s in self._index if s["id"] not in stale_ids]
+            self._save_index(self._index)
         
         return sessions
 

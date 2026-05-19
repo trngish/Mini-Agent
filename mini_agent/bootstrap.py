@@ -1,6 +1,5 @@
 """Agent and tool bootstrap logic."""
 
-import asyncio
 import logging
 from pathlib import Path
 
@@ -42,7 +41,7 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
         print(f"{Colors.GREEN}✅ File tools enabled (with batch operations + deep context){Colors.RESET}")
 
     if config.tools.enable_bash:
-        tools.append(BashTool(platform_mode=config.platform.mode))
+        tools.append(BashTool(platform_mode=config.platform.mode, default_timeout=config.tools.bash_timeout))
         tools.append(BashOutputTool())
         tools.append(BashKillTool())
         # Batch bash tool - 按次数计费优化：合并多个独立命令为一次调用
@@ -54,7 +53,12 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
         print(f"{Colors.GREEN}✅ Note tool enabled{Colors.RESET}")
 
     if config.tools.enable_skills:
-        skill_tools, skill_loader = create_skill_tools(config.tools.skills_dir)
+        # Get skills search paths (user config dir + project dir)
+        skills_search_paths = config.tools.get_skills_search_paths()
+        skill_tools, skill_loader = create_skill_tools(
+            config.tools.skills_dir,
+            additional_search_paths=skills_search_paths,
+        )
         if skill_tools:
             tools.extend(skill_tools)
             print(f"{Colors.GREEN}✅ Skills enabled ({len(skill_tools)} skill tools){Colors.RESET}")
@@ -75,30 +79,47 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
     return tools, skill_loader
 
 
-def add_workspace_tools(tools: list, config: Config, workspace_dir: Path) -> None:
+async def add_workspace_tools(tools: list, config: Config, workspace_dir: Path) -> None:
     """Add workspace-dependent tools."""
     if config.tools.enable_mcp:
         print(f"{Colors.DIM}⏳ Loading MCP tools...{Colors.RESET}")
-        mcp_config_path = workspace_dir / config.tools.mcp_config_path
-        if not mcp_config_path.exists():
-            alt_path = Path(config.tools.mcp_config_path)
-            if alt_path.exists():
-                mcp_config_path = alt_path
 
-        if mcp_config_path.exists():
+        # Get MCP config paths from user dir and project dir
+        mcp_config_paths = config.tools.get_mcp_config_paths()
+
+        # Fallback to legacy behavior if no paths found
+        if not mcp_config_paths:
+            mcp_config_path = workspace_dir / config.tools.mcp_config_path
+            if not mcp_config_path.exists():
+                alt_path = Path(config.tools.mcp_config_path)
+                if alt_path.exists():
+                    mcp_config_path = alt_path
+            if mcp_config_path.exists():
+                mcp_config_paths = [mcp_config_path]
+
+        if mcp_config_paths:
             set_mcp_timeout_config(
                 connect_timeout=config.tools.mcp.connect_timeout,
                 execute_timeout=config.tools.mcp.execute_timeout,
                 sse_read_timeout=config.tools.mcp.sse_read_timeout,
             )
-            mcp_tools = asyncio.run(load_mcp_tools_async(str(mcp_config_path)))
-            if mcp_tools:
-                tools.extend(mcp_tools)
-                print(f"{Colors.GREEN}✅ MCP tools enabled ({len(mcp_tools)} tools){Colors.RESET}")
+
+            all_mcp_tools = []
+            for mcp_config_path in mcp_config_paths:
+                print(f"{Colors.DIM}  Loading MCP config: {mcp_config_path}{Colors.RESET}")
+                mcp_tools = await load_mcp_tools_async(str(mcp_config_path))
+                if mcp_tools:
+                    all_mcp_tools.extend(mcp_tools)
+
+            if all_mcp_tools:
+                tools.extend(all_mcp_tools)
+                print(f"{Colors.GREEN}✅ MCP tools enabled ({len(all_mcp_tools)} tools from {len(mcp_config_paths)} config(s)){Colors.RESET}")
             else:
                 print(f"{Colors.BRIGHT_YELLOW}⚠️  MCP enabled but no tools loaded{Colors.RESET}")
         else:
-            print(f"{Colors.BRIGHT_YELLOW}⚠️  MCP config not found: {mcp_config_path}{Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}⚠️  MCP config not found in any location:{Colors.RESET}")
+            print(f"{Colors.DIM}  - ~/.mini-agent/config/mcp.json (user dir){Colors.RESET}")
+            print(f"{Colors.DIM}  - ./mcp.json (project dir){Colors.RESET}")
 
 
 async def cleanup_mcp():

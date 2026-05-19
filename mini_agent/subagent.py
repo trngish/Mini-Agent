@@ -8,6 +8,7 @@ from .llm import LLMClient
 from .schema import AgentMode, Message
 from .schema.schema import WRITE_TOOLS
 from .tools.base import Tool, ToolResult
+from .utils.model_utils import is_m27_model
 
 
 class SubAgentResult:
@@ -42,7 +43,8 @@ class SubAgent:
         self.system_prompt = system_prompt
         self.max_steps = max_steps
         self.m27_config = m27_config or {}
-        self.is_m27 = False  # SubAgent doesn't need M2.7 specifics
+        model_name = getattr(llm_client, 'model', '')
+        self.is_m27 = is_m27_model(model_name)
         self.mode = AgentMode.YOLO  # SubAgent always runs in YOLO mode
         self.write_tools = WRITE_TOOLS
 

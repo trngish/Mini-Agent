@@ -5,11 +5,32 @@ to help the agent work with version control more easily.
 """
 
 import asyncio
+import shlex
+import platform as _platform
 from pathlib import Path
 from typing import Any
 
 from .base import Tool, ToolResult
 from .bash_tool import BashTool
+
+
+def _shell_quote(s: str, is_windows: bool) -> str:
+    """Quote a string for safe shell insertion, preventing injection.
+
+    Args:
+        s: The string to quote
+        is_windows: Whether the target shell is Windows
+
+    Returns:
+        Shell-safe quoted string
+    """
+    if is_windows:
+        # PowerShell: escape single quotes and wrap in single quotes
+        # Single quotes in PowerShell are literal; escape ' by doubling it
+        return "'" + s.replace("'", "''") + "'"
+    else:
+        # Unix: use shlex.quote for POSIX shell safety
+        return shlex.quote(s)
 
 
 class GitTool(Tool):
@@ -115,22 +136,17 @@ Examples:
         else:
             target_path = Path(path)
 
-        # Check if running on Windows
-        import platform
-        is_windows = platform.system() == "Windows"
+        is_windows = _platform.system() == "Windows"
+        separator = "; " if is_windows else " && "
+        qd = lambda s: _shell_quote(str(s), is_windows)  # noqa: E731
 
         # Build git command based on operation
         if operation == "status":
-            # Use porcelain format for easier parsing
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git status --porcelain", timeout=30)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git status --porcelain", timeout=30)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git status --porcelain", timeout=30)
             if result.success:
                 output = result.content.strip()
                 if not output:
                     return ToolResult(success=True, content="Working tree clean")
-                # Add header for better readability
                 lines = output.split("\n")
                 staged = [l for l in lines if l.startswith("M") or l.startswith("A")]
                 unstaged = [l for l in lines if l.startswith(" M") or l.startswith("??")]
@@ -144,15 +160,9 @@ Examples:
 
         elif operation == "add":
             if all:
-                if is_windows:
-                    result = await self._bash.execute(f"cd {target_path}; git add -A", timeout=30)
-                else:
-                    result = await self._bash.execute(f"cd {target_path} && git add -A", timeout=30)
+                result = await self._bash.execute(f"cd {qd(target_path)}{separator}git add -A", timeout=30)
             else:
-                if is_windows:
-                    result = await self._bash.execute(f"cd {target_path}; git add {path}", timeout=30)
-                else:
-                    result = await self._bash.execute(f"cd {target_path} && git add {path}", timeout=30)
+                result = await self._bash.execute(f"cd {qd(target_path)}{separator}git add {qd(path)}", timeout=30)
             if result.success:
                 return ToolResult(success=True, content=f"Staged: {path}")
             return result
@@ -160,21 +170,13 @@ Examples:
         elif operation == "commit":
             if not message:
                 return ToolResult(success=False, content="", error="Commit message required")
-            # Escape quotes in message
-            escaped_msg = message.replace('"', '\\"')
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git commit -m \"{escaped_msg}\"", timeout=60)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git commit -m \"{escaped_msg}\"", timeout=60)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git commit -m {qd(message)}", timeout=60)
             if result.success:
                 return ToolResult(success=True, content=f"Committed: {message}")
             return result
 
         elif operation == "log":
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git log --oneline -10", timeout=30)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git log --oneline -10", timeout=30)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git log --oneline -10", timeout=30)
             if result.success:
                 output = result.content.strip()
                 if not output:
@@ -183,12 +185,8 @@ Examples:
             return result
 
         elif operation == "diff":
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git diff --stat", timeout=30)
-                diff_result = await self._bash.execute(f"cd {target_path}; git diff", timeout=60)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git diff --stat", timeout=30)
-                diff_result = await self._bash.execute(f"cd {target_path} && git diff", timeout=60)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git diff --stat", timeout=30)
+            diff_result = await self._bash.execute(f"cd {qd(target_path)}{separator}git diff", timeout=60)
             if result.success:
                 output = result.content.strip()
                 if not output:
@@ -201,10 +199,7 @@ Examples:
             return result
 
         elif operation == "branch":
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git branch -a", timeout=30)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git branch -a", timeout=30)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git branch -a", timeout=30)
             if result.success:
                 output = result.content.strip()
                 return ToolResult(success=True, content=f"Branches:\n\n{output}")
@@ -213,26 +208,17 @@ Examples:
         elif operation == "checkout":
             if not branch:
                 return ToolResult(success=False, content="", error="Branch name required for checkout")
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git checkout {branch}", timeout=60)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git checkout {branch}", timeout=60)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git checkout {qd(branch)}", timeout=60)
             if result.success:
                 return ToolResult(success=True, content=f"Switched to branch: {branch}")
             return result
 
         elif operation == "pull":
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git pull", timeout=120)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git pull", timeout=120)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git pull", timeout=120)
             return result
 
         elif operation == "push":
-            if is_windows:
-                result = await self._bash.execute(f"cd {target_path}; git push", timeout=120)
-            else:
-                result = await self._bash.execute(f"cd {target_path} && git push", timeout=120)
+            result = await self._bash.execute(f"cd {qd(target_path)}{separator}git push", timeout=120)
             return result
 
         else:
@@ -285,22 +271,16 @@ Examples:
         else:
             target_path = Path(path)
 
-        # Check if running on Windows
-        import platform
-        is_windows = platform.system() == "Windows"
+        is_windows = _platform.system() == "Windows"
+        separator = "; " if is_windows else " && "
+        qd = lambda s: _shell_quote(str(s), is_windows)  # noqa: E731
 
         # Get branch first
-        if is_windows:
-            branch_result = await self._bash.execute(f"cd {target_path}; git branch --show-current", timeout=10)
-        else:
-            branch_result = await self._bash.execute(f"cd {target_path} && git branch --show-current", timeout=10)
+        branch_result = await self._bash.execute(f"cd {qd(target_path)}{separator}git branch --show-current", timeout=10)
         branch = branch_result.content.strip() if branch_result.success else "unknown"
 
         # Get status
-        if is_windows:
-            status_result = await self._bash.execute(f"cd {target_path}; git status --short", timeout=10)
-        else:
-            status_result = await self._bash.execute(f"cd {target_path} && git status --short", timeout=10)
+        status_result = await self._bash.execute(f"cd {qd(target_path)}{separator}git status --short", timeout=10)
         
         if status_result.success:
             lines = status_result.content.strip().split("\n") if status_result.content.strip() else []

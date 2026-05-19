@@ -38,7 +38,10 @@ class LLMConfig(BaseModel):
     @classmethod
     def validate_api_key(cls, v: str) -> str:
         if not v or v == "YOUR_API_KEY_HERE":
-            raise ValueError("Please configure a valid API Key")
+            raise ValueError(
+                "API key not configured. Set MINIMAX_API_KEY environment variable "
+                "or configure api_key in config.yaml"
+            )
         if len(v) < 8:
             raise ValueError(f"Invalid API Key format: expected at least 8 characters, got {repr(v[:4])}... (length={len(v)})")
         return v
@@ -61,7 +64,7 @@ class MCPConfig(BaseModel):
 
 
 class ToolsConfig(BaseModel):
-    """Tools configuration"""
+    """"Tools configuration"""
 
     # Basic tools (file operations, bash)
     enable_file_tools: bool = True
@@ -82,6 +85,55 @@ class ToolsConfig(BaseModel):
         default=120,
         description="Default timeout for bash tool execution (default: 120, max: 600)"
     )
+
+    def get_skills_search_paths(self) -> list[Path]:
+        """"Get skills directories to search, in priority order.
+
+        
+        Priority:
+        1. User config directory: ~/.mini-agent/skills/
+        2. Project directory: {project_root}/mini_agent/skills/
+        
+        Returns:
+            List of skills directory paths to search
+        """
+        paths = []
+        
+        # Priority 1: User config directory skills (~/.mini-agent/skills/)
+        user_skills_dir = Path.home() / ".mini-agent" / "skills"
+        if user_skills_dir.exists():
+            paths.append(user_skills_dir)
+        
+        # Priority 2: Project directory skills (./mini_agent/skills/)
+        project_skills_dir = Path("mini_agent") / "skills"
+        if project_skills_dir.exists():
+            paths.append(project_skills_dir)
+        
+        return paths
+
+    def get_mcp_config_paths(self) -> list[Path]:
+        """Get MCP config file paths to search, in priority order.
+
+        Priority:
+        1. User config directory: ~/.mini-agent/config/mcp.json
+        2. Project directory: ./mcp.json
+
+        Returns:
+            List of MCP config file paths to search
+        """
+        paths = []
+
+        # Priority 1: User config directory MCP config (~/.mini-agent/config/mcp.json)
+        user_mcp_config = Path.home() / ".mini-agent" / "config" / "mcp.json"
+        if user_mcp_config.exists():
+            paths.append(user_mcp_config)
+
+        # Priority 2: Project directory MCP config (./mcp.json)
+        project_mcp_config = Path("mcp.json")
+        if project_mcp_config.exists():
+            paths.append(project_mcp_config)
+
+        return paths
 
 
 class PlatformConfig(BaseModel):
@@ -174,7 +226,13 @@ class Config(BaseModel):
         data = cls._apply_env_overrides(data)
 
         # Parse all config sections
-        return cls._parse_config(data, config_path)
+        config = cls._parse_config(data, config_path)
+
+        # Validate configuration with ConfigValidator
+        from .utils.config_validator import ConfigValidator
+        ConfigValidator.validate_or_raise(config)
+
+        return config
 
     @classmethod
     def _parse_config(cls, data: dict[str, Any], config_path: Path) -> "Config":
@@ -297,7 +355,8 @@ class Config(BaseModel):
             Updated configuration dictionary with environment overrides
         """
         # LLM configuration overrides
-        if api_key := os.environ.get("MINI_AGENT_API_KEY"):
+        # Support both MINIMAX_API_KEY (conventional) and MINI_AGENT_API_KEY (legacy)
+        if api_key := (os.environ.get("MINIMAX_API_KEY") or os.environ.get("MINI_AGENT_API_KEY")):
             data["api_key"] = api_key
 
         if api_base := os.environ.get("MINI_AGENT_API_BASE"):
@@ -446,7 +505,8 @@ class Config(BaseModel):
         """
         return """
 Environment Variable Configuration:
-  MINI_AGENT_API_KEY       - Override API key
+  MINIMAX_API_KEY          - Override API key (recommended)
+  MINI_AGENT_API_KEY       - Override API key (legacy alias)
   MINI_AGENT_API_BASE      - Override API base URL
   MINI_AGENT_MODEL         - Override model name
   MINI_AGENT_PROVIDER      - Override provider (anthropic/openai)
@@ -457,4 +517,5 @@ Environment Variable Configuration:
   MINI_AGENT_ENABLE_MCP    - Override MCP enable (true/false)
 
 Environment variables take precedence over config.yaml values.
+MINIMAX_API_KEY is the recommended variable; MINI_AGENT_API_KEY is a legacy alias.
 """

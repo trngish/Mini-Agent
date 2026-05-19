@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .schema import AgentMode, Message
+from .schema import AgentMode, Message, ToolCall
 from .schema.schema import WRITE_TOOLS
 from .session import SessionManager
 from .tools.base import Tool, ToolResult
@@ -19,6 +19,7 @@ from .utils import Colors, calculate_display_width
 from .utils.token_utils import get_encoder
 from .utils.error_handler import LLMErrorClassifier, format_llm_error
 from .utils.model_utils import is_m27_model, get_token_limit_for_model
+from .utils.tool_error_handler import handle_tool_error
 
 # Constants - avoid magic numbers
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
@@ -50,7 +51,7 @@ COMPLEXITY_MEDIUM_KEYWORDS = {
 class Agent:
     """Single agent with basic tools and MCP support."""
 
-    # Class-level tiktoken encoder cache for reuse
+    # Module-level tiktoken encoder cache for reuse (shared safely via dict lookup)
     _encoder_cache: dict[str, Any] = {}
 
     def __init__(
@@ -77,11 +78,12 @@ class Agent:
 
         # M2.7 specific configuration
         self.m27_config = m27_config or {}
-        self.is_m27 = is_m27_model(llm_client.model)
+        model_name = getattr(llm_client, 'model', '')
+        self.is_m27 = is_m27_model(model_name)
         
         # Use unified token limit calculation
         self.token_limit = get_token_limit_for_model(
-            llm_client.model,
+            model_name,
             self.m27_config.get("token_limit") if self.is_m27 else token_limit
         )
         
@@ -214,8 +216,9 @@ class Agent:
             old_budget = self.thinking_budget
             self.thinking_budget = new_budget
             # Update the LLM client's thinking budget dynamically
-            if hasattr(self.llm, '_client') and hasattr(self.llm._client, '_thinking_budget_tokens'):
-                self.llm._client._thinking_budget_tokens = new_budget
+            llm_client = getattr(self.llm, '_client', None)
+            if llm_client is not None and hasattr(llm_client, '_thinking_budget_tokens'):
+                llm_client._thinking_budget_tokens = new_budget
             print(f"{Colors.DIM}🧠 Thinking budget adjusted: {old_budget} → {new_budget} ({level}任务){Colors.RESET}")
 
     def _check_cancelled(self) -> bool:
@@ -642,9 +645,9 @@ class Agent:
             text = result.content
             if len(text) > 300:
                 text = text[:300] + f"{Colors.DIM}...{Colors.RESET}"
-            print(f"{Colors.BRIGHT_GREEN}✓ Result:{Colors.RESET} {text}")
+            print(f"{Colors.BRIGHT_GREEN}✓ Result:\n{Colors.RESET}{text}")
         else:
-            print(f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}")
+            print(f"{Colors.BRIGHT_RED}✗ Error:\n{Colors.RESET}{Colors.RED}{result.error}{Colors.RESET}")
 
     def _on_tool_result(self, function_name: str, result: ToolResult) -> None:
         """Handle tool result - print and log."""
@@ -657,7 +660,7 @@ class Agent:
             result_error=result.error if not result.success else None,
         )
 
-    async def execute_single_tool(self, tool_call) -> tuple:
+    async def execute_single_tool(self, tool_call: ToolCall) -> tuple[ToolCall, Message]:
         """Execute a single tool with Agent-specific behavior (print, log, approve)."""
         tool_call_id = tool_call.id
         function_name = tool_call.function.name
@@ -702,12 +705,11 @@ class Agent:
                 tool = self.tools[function_name]
                 result = await tool.execute(**arguments)
             except Exception as e:
-                error_detail = f"{type(e).__name__}: {str(e)}"
-                error_trace = traceback.format_exc()
+                tool_error = handle_tool_error(function_name, arguments, e)
                 result = ToolResult(
                     success=False,
                     content="",
-                    error=f"Tool execution failed: {error_detail}\n\nTraceback:\n{error_trace}",
+                    error=tool_error.message,
                 )
 
         self._on_tool_result(function_name, result)
@@ -723,7 +725,7 @@ class Agent:
         )
         return (tool_call, tool_msg)
 
-    async def execute_tools_sequential(self, tool_calls: list) -> list[tuple]:
+    async def execute_tools_sequential(self, tool_calls: list[ToolCall]) -> list[tuple[ToolCall, Message]]:
         """Execute tools one at a time."""
         results = []
         for tc in tool_calls:
@@ -731,7 +733,7 @@ class Agent:
             results.append((tool_call, tool_msg))
         return results
 
-    async def execute_tools_parallel(self, tool_calls: list, max_concurrent: int = 5) -> list[tuple]:
+    async def execute_tools_parallel(self, tool_calls: list[ToolCall], max_concurrent: int = 5) -> list[tuple[ToolCall, Message]]:
         """Execute tools in parallel using a semaphore to limit concurrency."""
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -845,13 +847,19 @@ class Agent:
         self._cached_token_count = 0
         self._cached_token_index = 0
         
-        # Clear encoder cache to free memory
-        self._encoder_cache.clear()
+        # Note: Do NOT clear _encoder_cache here — it is a module-level
+        # shared cache. Clearing it would affect all Agent instances.
         
         # Clean up background shells
         from .tools.bash_background import BackgroundShellManager
-        for bash_id in BackgroundShellManager.get_available_ids():
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(BackgroundShellManager.cleanup_all())
+        except RuntimeError:
+            # No running event loop — try to run synchronously
             try:
-                BackgroundShellManager.terminate(bash_id)
+                asyncio.run(BackgroundShellManager.cleanup_all())
             except Exception:
                 pass
+        except Exception:
+            pass

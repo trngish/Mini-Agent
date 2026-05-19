@@ -167,3 +167,41 @@ class BackgroundShellManager:
         cls._remove(bash_id)
 
         return shell
+
+    @classmethod
+    async def cleanup_all(cls) -> list[str]:
+        """Clean up all background shells and resources.
+        
+        Returns:
+            List of terminated shell IDs
+        """
+        terminated_ids = list(cls._shells.keys())
+        
+        # Terminate all shells
+        for bash_id in terminated_ids:
+            try:
+                await cls.terminate(bash_id)
+            except Exception:
+                # Ignore errors during cleanup
+                pass
+        
+        return terminated_ids
+
+    @classmethod
+    def get_stats(cls) -> dict:
+        """Get statistics about managed shells.
+        
+        Returns:
+            Dictionary with shell counts and status
+        """
+        running = sum(1 for s in cls._shells.values() if s.status == "running")
+        completed = sum(1 for s in cls._shells.values() if s.status == "completed")
+        failed = sum(1 for s in cls._shells.values() if s.status == "failed")
+        
+        return {
+            "total": len(cls._shells),
+            "running": running,
+            "completed": completed,
+            "failed": failed,
+            "monitor_tasks": len(cls._monitor_tasks),
+        }

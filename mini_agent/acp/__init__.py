@@ -15,7 +15,7 @@ from acp import (
     CancelNotification,
     InitializeRequest,
     InitializeResponse,
-    NewSessionRequest,
+    NewSessionRequest as BaseNewSessionRequest,
     NewSessionResponse,
     PromptRequest,
     PromptResponse,
@@ -28,8 +28,14 @@ from acp import (
     update_agent_thought,
     update_tool_call,
 )
-from pydantic import field_validator
+from pydantic import field_validator, Field
 from acp.schema import AgentCapabilities, Implementation, McpCapabilities
+
+
+class NewSessionRequest(BaseNewSessionRequest):
+    """Override to make cwd and mcpServers optional."""
+    cwd: str | None = None
+    mcpServers: list = []
 
 from mini_agent.agent import Agent
 from mini_agent.bootstrap import add_workspace_tools, initialize_base_tools
@@ -129,9 +135,9 @@ class MiniMaxACPAgent:
         for _ in range(agent.max_steps):
             if state.cancelled:
                 return "cancelled"
-            tool_schemas = [tool.to_schema() for tool in agent.tools.values()]
+            tools_list = list(agent.tools.values())
             try:
-                response = await agent.llm.generate(messages=agent.messages, tools=tool_schemas)
+                response = await agent.llm.generate(messages=agent.messages, tools=tools_list)
             except Exception as exc:
                 logger.exception("LLM error")
                 await self._send(session_id, update_agent_message(text_block(f"Error: {exc}")))
@@ -182,8 +188,10 @@ async def run_acp_server(config: Config | None = None) -> None:
         meta = skill_loader.get_skills_metadata_prompt()
         if meta:
             system_prompt = f"{system_prompt.rstrip()}\n\n{meta}"
+    from ..schema import LLMProvider
     rcfg = config.llm.retry
-    llm = LLMClient(api_key=config.llm.api_key, api_base=config.llm.api_base, model=config.llm.model, retry_config=RetryConfigBase(enabled=rcfg.enabled, max_retries=rcfg.max_retries, initial_delay=rcfg.initial_delay, max_delay=rcfg.max_delay, exponential_base=rcfg.exponential_base))
+    provider = LLMProvider.ANTHROPIC if config.llm.provider.lower() == "anthropic" else LLMProvider.OPENAI
+    llm = LLMClient(api_key=config.llm.api_key, provider=provider, api_base=config.llm.api_base, model=config.llm.model, retry_config=RetryConfigBase(enabled=rcfg.enabled, max_retries=rcfg.max_retries, initial_delay=rcfg.initial_delay, max_delay=rcfg.max_delay, exponential_base=rcfg.exponential_base))
     reader, writer = await stdio_streams()
     AgentSideConnection(lambda conn: MiniMaxACPAgent(conn, config, llm, base_tools, system_prompt), writer, reader)
     logger.info("Mini-Agent ACP server running")

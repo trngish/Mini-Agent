@@ -34,8 +34,6 @@ class AgentLogger:
     LOG_DIR: Path = Path.home() / ".mini-agent" / "log"
     # Async write settings
     ASYNC_WRITE_ENABLED: bool = True
-    _write_queue: asyncio.Queue | None = None
-    _writer_task: asyncio.Task | None = None
 
     def __init__(self):
         """Initialize logger with rotation settings."""

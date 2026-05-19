@@ -8,6 +8,7 @@ from .batch_tools import (
     MultiGrepTool, MultiBashTool, DeepContextTool,
 )
 from .note_tool import RecallNoteTool, SessionNoteTool
+from .md_converter_tool import MDToPDFTool, MDToDOCXTool
 
 __all__ = [
     "Tool",
@@ -24,4 +25,6 @@ __all__ = [
     "DeepContextTool",
     "SessionNoteTool",
     "RecallNoteTool",
+    "MDToPDFTool",
+    "MDToDOCXTool",
 ]

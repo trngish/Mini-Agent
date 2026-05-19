@@ -4,6 +4,7 @@ Skill Tool - Tool for Agent to load Skills on-demand
 Implements Progressive Disclosure (Level 2): Load full skill content when needed
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .base import Tool, ToolResult
@@ -56,6 +57,7 @@ class GetSkillTool(Tool):
 
 def create_skill_tools(
     skills_dir: str = "./skills",
+    additional_search_paths: Optional[List[Path]] = None,
 ) -> tuple[List[Tool], Optional[SkillLoader]]:
     """
     Create skill tool for Progressive Disclosure
@@ -65,6 +67,7 @@ def create_skill_tools(
 
     Args:
         skills_dir: Skills directory path
+        additional_search_paths: Extra directories to search for skills (e.g., user config)
 
     Returns:
         Tuple of (list of tools, skill loader)
@@ -72,8 +75,8 @@ def create_skill_tools(
     # Create skill loader
     loader = SkillLoader(skills_dir)
 
-    # Discover and load skills
-    skills = loader.discover_skills()
+    # Discover and load skills from multiple directories
+    skills = loader.discover_skills(additional_search_paths=additional_search_paths)
     print(f"✅ Discovered {len(skills)} Claude Skills")
 
     # Create only the get_skill tool (Progressive Disclosure Level 2)

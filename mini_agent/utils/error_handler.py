@@ -316,8 +316,6 @@ class LLMErrorClassifier:
 
         return None
 
-
-@lru_cache(maxsize=1)
 def format_llm_error(error: Exception, status_code: Optional[int] = None) -> str:
     """Format an LLM error into a user-friendly message.
 

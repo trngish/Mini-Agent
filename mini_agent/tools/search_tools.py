@@ -190,11 +190,12 @@ Examples:
 
     def _iterate_files(self, directory: Path, pattern: str):
         """Iterate over files matching the pattern in directory."""
+        import os
         if directory.is_file():
             yield directory
             return
 
-        for root, dirs, files in directory.walk():
+        for root, dirs, files in os.walk(directory):
             # Skip hidden directories and common non-source directories
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('__pycache__', 'node_modules', '.git')]
 
@@ -290,7 +291,8 @@ Examples:
             results = []
             search_pattern = pattern if case_sensitive else pattern.lower()
 
-            for root, dirs, files in search_dir.walk():
+            import os
+            for root, dirs, files in os.walk(search_dir):
                 # Skip hidden directories
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
 

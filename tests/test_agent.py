@@ -1,4 +1,9 @@
-"""Test cases for Agent."""
+"""Test cases for Agent.
+
+Note: These tests require a valid API key and call real LLM endpoints.
+They are marked with @pytest.mark.integration so they can be excluded
+from fast test runs via: pytest -m "not integration"
+"""
 
 import asyncio
 import tempfile
@@ -12,34 +17,36 @@ from mini_agent.config import Config
 from mini_agent.tools import BashTool, EditTool, ReadTool, WriteTool
 
 
+def _load_config() -> Config:
+    """Load config or skip test if unavailable."""
+    config_path = Path("mini_agent/config/config.yaml")
+    if not config_path.exists():
+        pytest.skip("config.yaml not found")
+    config = Config.from_yaml(config_path)
+    if not config.llm.api_key or config.llm.api_key == "YOUR_API_KEY_HERE":
+        pytest.skip("API key not configured")
+    return config
+
+
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_agent_simple_task():
     """Test agent with a simple file creation task."""
-    print("\n=== Testing Agent with Simple File Task ===")
+    config = _load_config()
 
-    # Load config
-    config_path = Path("mini_agent/config/config.yaml")
-    config = Config.from_yaml(config_path)
-
-    # Create temp workspace
     with tempfile.TemporaryDirectory() as workspace_dir:
-        print(f"Using workspace: {workspace_dir}")
-
-        # Load system prompt (Agent will auto-inject workspace info)
         system_prompt_path = Path("mini_agent/config/system_prompt.md")
         if system_prompt_path.exists():
             system_prompt = system_prompt_path.read_text(encoding="utf-8")
         else:
             system_prompt = "You are a helpful AI assistant that can use tools."
 
-        # Initialize LLM client
         llm_client = LLMClient(
             api_key=config.llm.api_key,
             api_base=config.llm.api_base,
             model=config.llm.model,
         )
 
-        # Initialize tools
         tools = [
             ReadTool(workspace_dir=workspace_dir),
             WriteTool(workspace_dir=workspace_dir),
@@ -47,88 +54,6 @@ async def test_agent_simple_task():
             BashTool(),
         ]
 
-        # Create agent
-        agent = Agent(
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            tools=tools,
-            max_steps=10,  # Limit steps for testing
-            workspace_dir=workspace_dir,
-        )
-
-        # Task: Create a simple text file
-        task = "Create a file named 'test.txt' with the content 'Hello from Agent!'"
-        print(f"\nTask: {task}\n")
-
-        agent.add_user_message(task)
-
-        try:
-            result = await agent.run()
-
-            print(f"\n{'=' * 80}")
-            print(f"Agent Result: {result}")
-            print("=" * 80)
-
-            # Check if file was created
-            test_file = Path(workspace_dir) / "test.txt"
-            if test_file.exists():
-                content = test_file.read_text()
-                print("\n✅ File created successfully!")
-                print(f"Content: {content}")
-
-                if "Hello from Agent!" in content:
-                    print("✅ Content is correct!")
-                    return True
-                else:
-                    print(f"⚠️  Content mismatch: {content}")
-                    return True  # Still count as success, agent did create the file
-            else:
-                print("⚠️  File was not created, but agent completed")
-                return True  # Agent might have completed differently
-
-        except Exception as e:
-            print(f"❌ Agent test failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-
-@pytest.mark.asyncio
-async def test_agent_bash_task():
-    """Test agent with a bash command task."""
-    print("\n=== Testing Agent with Bash Task ===")
-
-    # Load config
-    config_path = Path("mini_agent/config/config.yaml")
-    config = Config.from_yaml(config_path)
-
-    # Create temp workspace
-    with tempfile.TemporaryDirectory() as workspace_dir:
-        print(f"Using workspace: {workspace_dir}")
-
-        # Load system prompt (Agent will auto-inject workspace info)
-        system_prompt_path = Path("mini_agent/config/system_prompt.md")
-        if system_prompt_path.exists():
-            system_prompt = system_prompt_path.read_text(encoding="utf-8")
-        else:
-            system_prompt = "You are a helpful AI assistant that can use tools."
-
-        # Initialize LLM client
-        llm_client = LLMClient(
-            api_key=config.llm.api_key,
-            api_base=config.llm.api_base,
-            model=config.llm.model,
-        )
-
-        # Initialize tools
-        tools = [
-            ReadTool(workspace_dir=workspace_dir),
-            WriteTool(workspace_dir=workspace_dir),
-            BashTool(),
-        ]
-
-        # Create agent
         agent = Agent(
             llm_client=llm_client,
             system_prompt=system_prompt,
@@ -137,51 +62,54 @@ async def test_agent_bash_task():
             workspace_dir=workspace_dir,
         )
 
-        # Task: List files using bash
-        task = "Use bash to list all files in the current directory and tell me what you find."
-        print(f"\nTask: {task}\n")
-
+        task = "Create a file named 'test.txt' with the content 'Hello from Agent!'"
         agent.add_user_message(task)
 
-        try:
-            result = await agent.run()
+        result = await agent.run()
+        assert result is not None, "Agent run should return a result"
 
-            print(f"\n{'=' * 80}")
-            print(f"Agent Result: {result}")
-            print("=" * 80)
-
-            print("\n✅ Bash task completed!")
-            return True
-
-        except Exception as e:
-            print(f"❌ Bash task failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
+        # Verify the file was actually created
+        test_file = Path(workspace_dir) / "test.txt"
+        assert test_file.exists(), f"Agent should have created {test_file}"
+        content = test_file.read_text()
+        assert "Hello from Agent!" in content, f"File content should contain expected text, got: {content}"
 
 
-async def main():
-    """Run all agent tests."""
-    print("=" * 80)
-    print("Running Agent Integration Tests")
-    print("=" * 80)
-    print("\nNote: These tests require a valid MiniMax API key in config.yaml")
-    print("These tests will actually call the LLM API and may take some time.\n")
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_agent_bash_task():
+    """Test agent with a bash command task."""
+    config = _load_config()
 
-    # Test simple file task
-    result1 = await test_agent_simple_task()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        system_prompt_path = Path("mini_agent/config/system_prompt.md")
+        if system_prompt_path.exists():
+            system_prompt = system_prompt_path.read_text(encoding="utf-8")
+        else:
+            system_prompt = "You are a helpful AI assistant that can use tools."
 
-    # Test bash task
-    result2 = await test_agent_bash_task()
+        llm_client = LLMClient(
+            api_key=config.llm.api_key,
+            api_base=config.llm.api_base,
+            model=config.llm.model,
+        )
 
-    print("\n" + "=" * 80)
-    if result1 and result2:
-        print("All Agent tests passed! ✅")
-    else:
-        print("Some Agent tests failed. Check the output above.")
-    print("=" * 80)
+        tools = [
+            ReadTool(workspace_dir=workspace_dir),
+            WriteTool(workspace_dir=workspace_dir),
+            BashTool(),
+        ]
 
+        agent = Agent(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            tools=tools,
+            max_steps=10,
+            workspace_dir=workspace_dir,
+        )
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        task = "Use bash to list all files in the current directory and tell me what you find."
+        agent.add_user_message(task)
+
+        result = await agent.run()
+        assert result is not None, "Agent run should return a result"

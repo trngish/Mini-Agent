@@ -20,32 +20,6 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.styles import Style
-
-from .agent import Agent
-from .bootstrap import (
-    build_m27_config,
-    cleanup_mcp,
-    create_llm_client,
-    initialize_base_tools,
-    add_workspace_tools,
-)
-from .config import Config, CLIOverrideConfig
-from .schema import AgentMode
-from .subagent import SubAgent
-from .ui import (
-    print_banner,
-    print_help,
-    print_session_info,
-    print_stats,
-    read_log_file,
-    show_log_directory,
-)
 from .utils import Colors
 
 
@@ -60,6 +34,14 @@ def on_retry(exception: Exception, attempt: int) -> None:
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+    from prompt_toolkit.completion import WordCompleter
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style
+    from .schema import AgentMode
+
     parser = argparse.ArgumentParser(description="Mini Agent - AI-powered assistant")
     parser.add_argument("--workspace", "-w", type=str, help="Workspace directory path")
     parser.add_argument("--task", "-t", type=str, help="Execute a specific task non-interactively")
@@ -84,11 +66,39 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOverrideConfig = None):
+async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: None = None):
     """Main agent initialization and execution."""
+    from .agent import Agent
+    from .bootstrap import (
+        build_m27_config,
+        cleanup_mcp,
+        create_llm_client,
+        initialize_base_tools,
+        add_workspace_tools,
+    )
+    from .config import Config, CLIOverrideConfig
+    from .schema import AgentMode
+    from .subagent import SubAgent
+    from .ui import (
+        print_banner,
+        print_help,
+        print_session_info,
+        print_stats,
+        read_log_file,
+        show_log_directory,
+    )
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+    from prompt_toolkit.completion import WordCompleter
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style
+
     session_start = datetime.now()
 
-    # 1. Load configuration
+    if cli_overrides is None:
+        cli_overrides = CLIOverrideConfig()
+
     config = Config.load()
 
     # Apply CLI overrides if provided
@@ -100,7 +110,7 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOve
 
     # 3. Initialize tools
     tools, skill_loader = await initialize_base_tools(config)
-    add_workspace_tools(tools, config, workspace_dir)
+    await add_workspace_tools(tools, config, workspace_dir)
 
     # 4. Load system prompt
     system_prompt_path = Config.find_config_file(config.agent.system_prompt_path)
@@ -350,6 +360,9 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: CLIOve
 
 def main() -> None:
     """Main entry point for CLI."""
+    from .config import CLIOverrideConfig
+    from .ui import read_log_file, show_log_directory
+
     args = parse_args()
 
     if args.command == "log":
@@ -359,10 +372,8 @@ def main() -> None:
             show_log_directory(open_file_manager=True)
         return
 
-    # Determine workspace
     workspace_dir = Path(args.workspace).resolve() if args.workspace else Path.cwd().resolve()
 
-    # Build CLI overrides
     cli_overrides = CLIOverrideConfig(
         api_key=args.api_key,
         api_base=args.api_base,

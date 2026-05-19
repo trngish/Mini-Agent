@@ -7,6 +7,7 @@ Modules:
 - bash_shared: Platform-specific shell configuration utilities
 - bash_result: BashOutputResult result type
 - bash_background: BackgroundShell and BackgroundShellManager
+- bash_foreground: ForegroundExecutor
 """
 
 import asyncio
@@ -18,12 +19,9 @@ from .base import Tool
 from .bash_shared import get_platform_shell_args, get_subprocess_env
 from .bash_result import BashOutputResult
 from .bash_background import BackgroundShell, BackgroundShellManager
+from .bash_foreground import ForegroundExecutor
 from ..utils.platform_utils import PlatformUtils
-
-# Constants - avoid magic numbers
-DEFAULT_TIMEOUT = 120
-MAX_TIMEOUT = 600
-FALLBACK_ENCODINGS = ("utf-8", "gbk", "cp1252")
+from ..utils.command_validator import assess_command_danger, DangerLevel, detect_platform_mismatch
 
 
 class BashTool(Tool):
@@ -50,6 +48,13 @@ class BashTool(Tool):
         # Use unified PlatformUtils for platform detection
         self.is_windows = PlatformUtils.is_windows(platform_mode)
         self.shell_name = "PowerShell" if self.is_windows else "bash"
+        
+        # Delegate foreground execution to specialized module
+        self._foreground_executor = ForegroundExecutor(
+            workspace_dir=workspace_dir,
+            is_windows=self.is_windows,
+            default_timeout=default_timeout,
+        )
 
     @property
     def name(self) -> str:
@@ -126,7 +131,7 @@ Examples:
     async def execute(
         self,
         command: str,
-        timeout: int = DEFAULT_TIMEOUT,
+        timeout: int = 120,
         run_in_background: bool = False,
     ) -> BashOutputResult:
         """Execute shell command with optional background execution.
@@ -140,8 +145,19 @@ Examples:
             BashOutputResult with command output and status
         """
         try:
-            # Validate and normalize timeout
-            timeout = self._validate_timeout(timeout)
+            # Security: Check for dangerous commands
+            danger_level, danger_reason = assess_command_danger(command)
+            if danger_level == DangerLevel.BLOCKED:
+                return BashOutputResult(
+                    success=False,
+                    error=f"Command blocked for safety: {danger_reason}",
+                    stdout="",
+                    stderr=danger_reason or "Blocked command",
+                    exit_code=-1,
+                )
+
+            # Platform compatibility check
+            platform_warning = detect_platform_mismatch(command, self.is_windows)
 
             # Get shell configuration based on platform mode
             shell_exe, shell_args, shell_name = get_platform_shell_args(
@@ -155,9 +171,16 @@ Examples:
             shell_cmd = self._build_shell_command(shell_exe, shell_args, command)
 
             if run_in_background:
-                return await self._execute_background(shell_cmd, command, env)
+                result = await self._execute_background(shell_cmd, command, env)
             else:
-                return await self._execute_foreground(shell_cmd, command, env, timeout)
+                result = await self._foreground_executor.execute(shell_cmd, command, env, timeout)
+
+            # Prepend platform warning if mismatch detected
+            if platform_warning:
+                warning_section = f"\n[{result.exit_code}]" if result.exit_code else ""
+                result.stdout = f"{platform_warning}{warning_section}\n\n{result.stdout}" if result.stdout else platform_warning
+                result.content = result.stdout
+            return result
 
         except Exception as e:
             return BashOutputResult(
@@ -168,20 +191,61 @@ Examples:
                 exit_code=-1,
             )
 
-    def _validate_timeout(self, timeout: int) -> int:
-        """Validate and normalize timeout value.
-        
+    async def _execute_background(
+        self,
+        shell_cmd: list[str] | str,
+        original_command: str,
+        env: dict[str, str],
+    ) -> BashOutputResult:
+        """Execute command in background mode.
+
+        Delegates to BackgroundShellManager for process lifecycle management.
+
         Args:
-            timeout: Raw timeout value
-            
+            shell_cmd: Platform-specific shell command
+            original_command: Original command string
+            env: Environment variables for subprocess
+
         Returns:
-            Normalized timeout within bounds
+            BashOutputResult indicating background command started
         """
-        if timeout > MAX_TIMEOUT:
-            return MAX_TIMEOUT
-        elif timeout < 1:
-            return DEFAULT_TIMEOUT
-        return timeout
+        bash_id = uuid.uuid4().hex[:12]
+
+        if self.is_windows:
+            process = await asyncio.create_subprocess_exec(
+                *shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=self.workspace_dir,
+                env=env,
+            )
+        else:
+            process = await asyncio.create_subprocess_shell(
+                shell_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=self.workspace_dir,
+                env=env,
+            )
+
+        # Create shell data container
+        shell = BackgroundShell(
+            bash_id=bash_id,
+            command=original_command,
+            process=process,
+            start_time=time.time(),
+        )
+
+        # Register with manager and start monitoring
+        BackgroundShellManager.add(shell)
+        BackgroundShellManager.start_monitor(bash_id)
+
+        return BashOutputResult(
+            success=True,
+            stdout=f"Background command started with ID: {bash_id}",
+            bash_id=bash_id,
+            exit_code=0,
+        )
 
     def _build_shell_command(
         self,
@@ -203,133 +267,6 @@ Examples:
             return [shell_exe] + shell_args + [command]
         else:
             return command
-
-    async def _execute_background(
-        self,
-        shell_cmd: list[str] | str,
-        original_command: str,
-        env: dict[str, str],
-    ) -> BashOutputResult:
-        """Execute command in background mode."""
-        bash_id = str(uuid.uuid4())[:8]
-
-        # Start background process with combined stdout/stderr
-        if self.is_windows:
-            process = await asyncio.create_subprocess_exec(
-                *shell_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=self.workspace_dir,
-                env=env,
-            )
-        else:
-            process = await asyncio.create_subprocess_shell(
-                shell_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=self.workspace_dir,
-                env=env,
-            )
-
-        # Create background shell and add to manager
-        bg_shell = BackgroundShell(bash_id=bash_id, command=original_command, process=process, start_time=time.time())
-        BackgroundShellManager.add(bg_shell)
-
-        # Start monitoring task
-        await BackgroundShellManager.start_monitor(bash_id)
-
-        # Return immediately with bash_id
-        message = f"Command started in background. Use bash_output to monitor (bash_id='{bash_id}')."
-        formatted_content = f"{message}\n\nCommand: {original_command}\nBash ID: {bash_id}"
-
-        return BashOutputResult(
-            success=True,
-            content=formatted_content,
-            stdout=f"Background command started with ID: {bash_id}",
-            stderr="",
-            exit_code=0,
-            bash_id=bash_id,
-        )
-
-    async def _execute_foreground(
-        self,
-        shell_cmd: list[str] | str,
-        original_command: str,
-        env: dict[str, str],
-        timeout: int,
-    ) -> BashOutputResult:
-        """Execute command in foreground mode."""
-        if self.is_windows:
-            process = await asyncio.create_subprocess_exec(
-                *shell_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.workspace_dir,
-                env=env,
-            )
-        else:
-            process = await asyncio.create_subprocess_shell(
-                shell_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.workspace_dir,
-                env=env,
-            )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            process.kill()
-            error_msg = f"Command timed out after {timeout} seconds"
-            return BashOutputResult(
-                success=False,
-                error=error_msg,
-                stdout="",
-                stderr=error_msg,
-                exit_code=-1,
-            )
-
-        # Decode output with fallback encodings
-        stdout_text = self._decode_output(stdout)
-        stderr_text = self._decode_output(stderr)
-
-        # Create result (content auto-formatted by model_validator)
-        is_success = process.returncode == 0
-        error_msg = None
-        if not is_success:
-            error_msg = f"Command failed with exit code {process.returncode}"
-            if stderr_text:
-                error_msg += f"\n{stderr_text.strip()}"
-
-        return BashOutputResult(
-            success=is_success,
-            error=error_msg,
-            stdout=stdout_text,
-            stderr=stderr_text,
-            exit_code=process.returncode or 0,
-        )
-
-    def _decode_output(self, data: bytes) -> str:
-        """Decode output bytes with fallback encodings.
-        
-        Args:
-            data: Raw bytes from subprocess
-            
-        Returns:
-            Decoded string with replacements for invalid chars
-        """
-        if not data:
-            return ""
-        
-        # Try encodings in order of preference
-        for encoding in FALLBACK_ENCODINGS:
-            try:
-                return data.decode(encoding, errors="strict")
-            except UnicodeDecodeError:
-                continue
-        
-        # Final fallback: replace errors
-        return data.decode("utf-8", errors="replace")
 
 
 class BashOutputTool(Tool):

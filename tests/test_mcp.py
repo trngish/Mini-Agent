@@ -22,6 +22,12 @@ from mini_agent.tools.mcp_loader import (
 def mcp_config():
     """Read MCP configuration."""
     mcp_config_path = Path("mini_agent/config/mcp.json")
+    if not mcp_config_path.exists():
+        alt_path = Path("mini_agent/config/mcp-example.json")
+        if alt_path.exists():
+            mcp_config_path = alt_path
+        else:
+            pytest.skip("mcp.json not found, skipping MCP integration tests")
     with open(mcp_config_path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -262,7 +268,8 @@ class TestMCPServerConnectionTimeout:
 @pytest.mark.asyncio
 async def test_url_config_validation():
     """Test that URL-based config without url is rejected."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
         config = {
             "mcpServers": {
                 "broken-sse": {
@@ -273,20 +280,21 @@ async def test_url_config_validation():
         }
         json.dump(config, f)
         f.flush()
+        f.close()
 
-        try:
-            tools = await load_mcp_tools_async(f.name)
-            # Should return empty list (server skipped due to missing url)
-            assert tools == []
-        finally:
-            await cleanup_mcp_connections()
-            Path(f.name).unlink()
+        tools = await load_mcp_tools_async(f.name)
+        # Should return empty list (server skipped due to missing url)
+        assert tools == []
+    finally:
+        await cleanup_mcp_connections()
+        Path(f.name).unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio
 async def test_stdio_config_validation():
     """Test that STDIO config without command is rejected."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
         config = {
             "mcpServers": {
                 "broken-stdio": {
@@ -297,20 +305,21 @@ async def test_stdio_config_validation():
         }
         json.dump(config, f)
         f.flush()
+        f.close()
 
-        try:
-            tools = await load_mcp_tools_async(f.name)
-            # Should return empty list (server skipped due to missing command)
-            assert tools == []
-        finally:
-            await cleanup_mcp_connections()
-            Path(f.name).unlink()
+        tools = await load_mcp_tools_async(f.name)
+        # Should return empty list (server skipped due to missing command)
+        assert tools == []
+    finally:
+        await cleanup_mcp_connections()
+        Path(f.name).unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio
 async def test_mixed_config_loading():
     """Test loading config with both STDIO and URL-based servers."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
         config = {
             "mcpServers": {
                 "stdio-server": {"command": "npx", "args": ["-y", "nonexistent-server"], "disabled": True},
@@ -320,14 +329,14 @@ async def test_mixed_config_loading():
         }
         json.dump(config, f)
         f.flush()
+        f.close()
 
-        try:
-            # All servers are disabled, should return empty but not error
-            tools = await load_mcp_tools_async(f.name)
-            assert tools == []
-        finally:
-            await cleanup_mcp_connections()
-            Path(f.name).unlink()
+        # All servers are disabled, should return empty but not error
+        tools = await load_mcp_tools_async(f.name)
+        assert tools == []
+    finally:
+        await cleanup_mcp_connections()
+        Path(f.name).unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio
@@ -527,7 +536,8 @@ async def test_per_server_timeout_override_in_config():
     """Test that per-server timeout overrides from config are respected."""
     print("\n=== Testing Per-Server Timeout Override ===")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
         config = {
             "mcpServers": {
                 "fast-server": {
@@ -539,23 +549,23 @@ async def test_per_server_timeout_override_in_config():
         }
         json.dump(config, f)
         f.flush()
+        f.close()
 
-        try:
-            import time
+        import time
 
-            start = time.time()
-            tools = await load_mcp_tools_async(f.name)
-            elapsed = time.time() - start
+        start = time.time()
+        tools = await load_mcp_tools_async(f.name)
+        elapsed = time.time() - start
 
-            # Should fail due to unreachable server
-            assert tools == []
-            # Should respect the short 1.0s connect_timeout
-            assert elapsed < 5.0, f"Should use per-server timeout, but took {elapsed:.1f}s"
-            print(f"✅ Per-server timeout override worked, failed in {elapsed:.1f}s")
+        # Should fail due to unreachable server
+        assert tools == []
+        # Should respect the short 1.0s connect_timeout
+        assert elapsed < 5.0, f"Should use per-server timeout, but took {elapsed:.1f}s"
+        print(f"✅ Per-server timeout override worked, failed in {elapsed:.1f}s")
 
-        finally:
-            await cleanup_mcp_connections()
-            Path(f.name).unlink()
+    finally:
+        await cleanup_mcp_connections()
+        Path(f.name).unlink(missing_ok=True)
 
 
 async def main():

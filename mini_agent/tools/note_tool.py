@@ -88,6 +88,9 @@ class SessionNoteTool(Tool):
         self.memory_file.parent.mkdir(parents=True, exist_ok=True)
         self.memory_file.write_text(json.dumps(notes, indent=2, ensure_ascii=False))
 
+    # Maximum content length for a single note (prevents disk exhaustion)
+    MAX_NOTE_CONTENT_LENGTH = 10000
+
     async def execute(self, content: str, category: str = "general") -> ToolResult:
         """Record a session note.
 
@@ -99,6 +102,14 @@ class SessionNoteTool(Tool):
             ToolResult with success status
         """
         try:
+            # Validate content length
+            if len(content) > self.MAX_NOTE_CONTENT_LENGTH:
+                return ToolResult(
+                    success=False,
+                    content="",
+                    error=f"Note content too long ({len(content)} chars, max {self.MAX_NOTE_CONTENT_LENGTH}). Please summarize.",
+                )
+
             # Load existing notes
             notes = self._load_from_file()
 

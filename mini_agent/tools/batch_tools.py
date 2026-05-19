@@ -10,11 +10,33 @@
 """
 
 import asyncio
+import json
 import os
 import re
 import subprocess
+
+from .batch_shared import get_git_status_sync, get_tree_sync
 from pathlib import Path
 from typing import Any
+
+
+def _ensure_list(data: list | str | None) -> list:
+    """Ensure input is a list, parsing JSON string if needed.
+
+    LLMs sometimes pass JSON-encoded strings instead of proper lists.
+    """
+    if data is None:
+        return []
+    if isinstance(data, list):
+        return data
+    if isinstance(data, str):
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return [data]
 
 from .base import Tool, ToolResult
 from .file_tools import truncate_text_by_tokens, get_file_token_limit
@@ -67,6 +89,7 @@ class MultiReadTool(Tool):
 
     async def execute(self, paths: list[str], offset: int | None = None, limit: int | None = None) -> ToolResult:
         """Execute multi-file read."""
+        paths = _ensure_list(paths)
         results = []
         total_lines = 0
         errors = []
@@ -183,6 +206,7 @@ class MultiEditTool(Tool):
 
     async def execute(self, edits: list[dict[str, str]]) -> ToolResult:
         """Execute multi-file edit."""
+        edits = _ensure_list(edits)
         results = []
         success_count = 0
         error_count = 0
@@ -341,95 +365,11 @@ class WorkspaceContextTool(Tool):
 
     def _get_tree(self, max_depth: int) -> str:
         """Get directory tree structure."""
-        lines = []
-        try:
-            for root, dirs, files in os.walk(self.workspace_dir):
-                # Skip hidden and common non-essential directories
-                dirs[:] = [d for d in dirs if not d.startswith('.')
-                           and d not in ('node_modules', '__pycache__', '.git',
-                                         'venv', '.venv', 'dist', 'build',
-                                         '.next', '.nuxt', 'target', 'vendor')]
-                rel_root = Path(root).relative_to(self.workspace_dir)
-                depth = len(rel_root.parts) if str(rel_root) != "." else 0
-
-                if depth > max_depth:
-                    dirs.clear()
-                    continue
-
-                indent = "  " * depth
-                folder_name = str(rel_root) if str(rel_root) != "." else "."
-                lines.append(f"{indent}{folder_name}/")
-
-                # Limit files shown per directory
-                file_count = 0
-                for f in sorted(files):
-                    if f.startswith('.'):
-                        continue
-                    if file_count < 20:  # Show max 20 files per directory
-                        lines.append(f"{indent}  {f}")
-                    file_count += 1
-                if file_count > 20:
-                    lines.append(f"{indent}  ... ({file_count - 20} more files)")
-
-        except Exception as e:
-            lines.append(f"Error generating tree: {e}")
-
-        return "\n".join(lines)
+        return get_tree_sync(self.workspace_dir, max_depth, show_sizes=False, max_files_per_dir=20)
 
     def _get_git_status(self) -> str:
         """Get git status information."""
-        lines = []
-        try:
-            import subprocess
-            # Check if in a git repo
-            result = subprocess.run(
-                ["git", "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            if result.returncode != 0:
-                return "Not a git repository"
-
-            # Get branch
-            result = subprocess.run(
-                ["git", "branch", "--show-current"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            branch = result.stdout.strip()
-            lines.append(f"Branch: {branch}")
-
-            # Get short status
-            result = subprocess.run(
-                ["git", "status", "--short"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            status = result.stdout.strip()
-            if status:
-                lines.append("Changes:")
-                for line in status.split("\n")[:30]:  # Limit to 30 entries
-                    lines.append(f"  {line}")
-                if len(status.split("\n")) > 30:
-                    lines.append(f"  ... ({len(status.split(chr(10))) - 30} more changes)")
-            else:
-                lines.append("Working tree clean")
-
-            # Get last 5 commits
-            result = subprocess.run(
-                ["git", "log", "--oneline", "-5"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            if result.returncode == 0:
-                lines.append("\nRecent commits:")
-                for line in result.stdout.strip().split("\n"):
-                    lines.append(f"  {line}")
-
-        except Exception as e:
-            lines.append(f"Git info unavailable: {e}")
-
-        return "\n".join(lines)
+        return get_git_status_sync(self.workspace_dir, max_status_lines=30, max_commits=5)
 
     def _find_config_files(self) -> str:
         """Find key configuration files in the workspace."""
@@ -549,6 +489,7 @@ class MultiGrepTool(Tool):
 
     async def execute(self, searches: list[dict[str, Any]]) -> ToolResult:
         """Execute multiple grep searches."""
+        searches = _ensure_list(searches)
         import fnmatch
 
         results = []
@@ -624,10 +565,11 @@ class MultiGrepTool(Tool):
     def _iterate_files(self, directory: Path, pattern: str):
         """Iterate over files matching the pattern."""
         import fnmatch
+        import os
         if directory.is_file():
             yield directory
             return
-        for root, dirs, files in directory.walk():
+        for root, dirs, files in os.walk(directory):
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('__pycache__', 'node_modules', '.git')]
             for filename in files:
                 if fnmatch.fnmatch(filename, pattern):
@@ -693,12 +635,31 @@ class MultiBashTool(Tool):
 
     async def execute(self, commands: list[dict[str, Any]]) -> ToolResult:
         """Execute multiple commands in parallel."""
+        commands = _ensure_list(commands)
         from .bash_shared import get_platform_shell_args, get_subprocess_env
+        from ..utils.command_validator import assess_command_danger, DangerLevel, detect_platform_mismatch
+
+        # Validate all commands for dangerous patterns before execution
+        blocked = []
+        for cmd_dict in commands:
+            command = cmd_dict.get("command", "")
+            level, reason = assess_command_danger(command)
+            if level == DangerLevel.BLOCKED:
+                blocked.append(f"{cmd_dict.get('label', command[:40])}: {reason}")
+        if blocked:
+            return ToolResult(
+                success=False,
+                content="",
+                error="Blocked commands: " + "; ".join(blocked),
+            )
 
         async def run_single(cmd_dict: dict) -> str:
             command = cmd_dict.get("command", "")
             label = cmd_dict.get("label", command[:40])
             timeout = min(cmd_dict.get("timeout", 60), 120)
+
+            # Platform compatibility check
+            platform_warning = detect_platform_mismatch(command, self.is_windows)
 
             try:
                 shell_exe, shell_args, _ = get_platform_shell_args(
@@ -733,6 +694,10 @@ class MultiBashTool(Tool):
                 stdout_text = stdout.decode("utf-8", errors="replace").strip()
                 stderr_text = stderr.decode("utf-8", errors="replace").strip()
                 exit_code = process.returncode or 0
+
+                # Prepend platform warning if detected
+                if platform_warning:
+                    stdout_text = f"{platform_warning}\n\n{stdout_text}" if stdout_text else platform_warning
 
                 if exit_code == 0:
                     output = stdout_text or "(no output)"
@@ -860,82 +825,11 @@ class DeepContextTool(Tool):
 
     def _get_tree(self, max_depth: int) -> str:
         """Get directory tree structure."""
-        lines = []
-        try:
-            for root, dirs, files in os.walk(self.workspace_dir):
-                dirs[:] = [d for d in sorted(dirs) if not d.startswith('.')
-                           and d not in ('node_modules', '__pycache__', '.git',
-                                         'venv', '.venv', 'dist', 'build',
-                                         '.next', '.nuxt', 'target', 'vendor',
-                                         '.mypy_cache', '.pytest_cache', '.ruff_cache')]
-                rel_root = Path(root).relative_to(self.workspace_dir)
-                depth = len(rel_root.parts) if str(rel_root) != "." else 0
-
-                if depth > max_depth:
-                    dirs.clear()
-                    continue
-
-                indent = "  " * depth
-                folder_name = str(rel_root) if str(rel_root) != "." else "."
-                file_count = len([f for f in files if not f.startswith('.')])
-                lines.append(f"{indent}{folder_name}/ ({file_count} files)")
-
-                for f in sorted(files):
-                    if f.startswith('.'):
-                        continue
-                    size = (Path(root) / f).stat().st_size
-                    size_str = f"{size}B" if size < 1024 else f"{size/1024:.1f}K"
-                    lines.append(f"{indent}  {f} ({size_str})")
-
-        except Exception as e:
-            lines.append(f"Error: {e}")
-        return "\n".join(lines)
+        return get_tree_sync(self.workspace_dir, max_depth, show_sizes=True, max_files_per_dir=0)
 
     def _get_git_status(self) -> str:
         """Get git status information."""
-        lines = []
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            if result.returncode != 0:
-                return "Not a git repository"
-
-            result = subprocess.run(
-                ["git", "branch", "--show-current"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            lines.append(f"Branch: {result.stdout.strip()}")
-
-            result = subprocess.run(
-                ["git", "status", "--short"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            status = result.stdout.strip()
-            if status:
-                lines.append("Changes:")
-                for line in status.split("\n")[:50]:
-                    lines.append(f"  {line}")
-            else:
-                lines.append("Working tree clean")
-
-            result = subprocess.run(
-                ["git", "log", "--oneline", "-10"],
-                capture_output=True, text=True,
-                cwd=str(self.workspace_dir), timeout=5,
-            )
-            if result.returncode == 0:
-                lines.append("\nRecent commits:")
-                for line in result.stdout.strip().split("\n"):
-                    lines.append(f"  {line}")
-
-        except Exception as e:
-            lines.append(f"Git info unavailable: {e}")
-        return "\n".join(lines)
+        return get_git_status_sync(self.workspace_dir, max_status_lines=50, max_commits=10)
 
     def _read_config_files(self) -> str:
         """Read key config files content."""

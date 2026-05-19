@@ -138,4 +138,12 @@ class LLMClient:
         Returns:
             LLMResponse containing the generated content
         """
+        # Validate messages before sending to catch structural errors early
+        from ..utils.message_validator import MessageValidator, ValidationError
+        try:
+            for i, msg in enumerate(messages):
+                MessageValidator.validate_message(msg)
+        except ValidationError as e:
+            logger.warning("Message validation issue at index %d: %s", i, e)
+
         return await self._client.generate(messages, tools, **kwargs)

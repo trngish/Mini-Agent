@@ -14,6 +14,42 @@ DEFAULT_FILE_TOKEN_LIMIT = 64000   # 原32000→64000
 M27_FILE_TOKEN_LIMIT = 128000     # 原64000→128000
 
 
+def _resolve_and_validate_path(path: str, workspace_dir: Path) -> Path:
+    """Resolve a path and validate relative paths stay within the workspace.
+
+    For relative paths: resolves against workspace_dir and ensures the result
+    does not escape via directory traversal (e.g. ../../etc/passwd).
+    For absolute paths: allows through (agent may need to read/write files
+    outside the workspace, e.g. system configs), but still normalizes the path
+    to eliminate traversal components.
+
+    Args:
+        path: Raw file path (absolute or relative)
+        workspace_dir: The workspace root directory
+
+    Returns:
+        Resolved absolute Path
+
+    Raises:
+        ValueError: If a relative path resolves outside the workspace
+    """
+    file_path = Path(path)
+    if not file_path.is_absolute():
+        # Relative path: resolve against workspace and validate containment
+        resolved = (workspace_dir / file_path).resolve()
+        workspace_resolved = workspace_dir.resolve()
+        try:
+            resolved.relative_to(workspace_resolved)
+        except ValueError:
+            raise ValueError(
+                f"Path escapes workspace: {resolved} is outside {workspace_resolved}"
+            )
+        return resolved
+    else:
+        # Absolute path: allow but normalize to eliminate traversal
+        return file_path.resolve()
+
+
 def truncate_text_by_tokens(
     text: str,
     max_tokens: int,
@@ -131,10 +167,11 @@ class ReadTool(Tool):
         try:
             # Normalize path separators for current platform
             path = normalize_path(path)
-            file_path = Path(path)
-            # Resolve relative paths relative to workspace_dir
-            if not file_path.is_absolute():
-                file_path = self.workspace_dir / file_path
+            # Resolve and validate path stays within workspace
+            try:
+                file_path = _resolve_and_validate_path(path, self.workspace_dir)
+            except ValueError as e:
+                return ToolResult(success=False, content="", error=str(e))
 
             if not file_path.exists():
                 return ToolResult(
@@ -220,10 +257,11 @@ class WriteTool(Tool):
         try:
             # Normalize path separators for current platform
             path = normalize_path(path)
-            file_path = Path(path)
-            # Resolve relative paths relative to workspace_dir
-            if not file_path.is_absolute():
-                file_path = self.workspace_dir / file_path
+            # Resolve and validate path stays within workspace
+            try:
+                file_path = _resolve_and_validate_path(path, self.workspace_dir)
+            except ValueError as e:
+                return ToolResult(success=False, content="", error=str(e))
 
             # Create parent directories if they don't exist
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,10 +321,11 @@ class EditTool(Tool):
         try:
             # Normalize path separators for current platform
             path = normalize_path(path)
-            file_path = Path(path)
-            # Resolve relative paths relative to workspace_dir
-            if not file_path.is_absolute():
-                file_path = self.workspace_dir / file_path
+            # Resolve and validate path stays within workspace
+            try:
+                file_path = _resolve_and_validate_path(path, self.workspace_dir)
+            except ValueError as e:
+                return ToolResult(success=False, content="", error=str(e))
 
             if not file_path.exists():
                 return ToolResult(

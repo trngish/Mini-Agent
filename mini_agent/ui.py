@@ -34,7 +34,9 @@ def print_image(width: int = 80) -> bool:
         height = int(width * aspect * 0.5)
         if height < 1:
             return False
-        resample = getattr(Image, "LANCZOS", Image.BICUBIC)
+        resample = getattr(Image, "Resampling", getattr(Image, "LANCZOS", Image.BICUBIC))
+        if hasattr(Image, "Resampling"):
+            resample = Image.Resampling.LANCZOS
         img = img.resize((width, height * 2), resample)
         pixels = img.load()
         for y in range(0, img.height, 2):
@@ -115,13 +117,22 @@ def print_banner() -> None:
 
     # Gradient M logo with ANSI color escape sequences
     # Each line has multiple color segments for gradient effect
+    # logo = [
+    #     f"{Colors.CYAN}███╗   ███╗███╗   ███╗██╗  ██╗",
+    #     f"{Colors.BRIGHT_CYAN}████╗ ████║████╗ ████║╚██╗██╔╝",
+    #     f"{Colors.BRIGHT_CYAN}██╔████╔██║██╔████╔██║ ╚███╔╝",
+    #     f"{Colors.CYAN}██║╚██╔╝██║██║╚██╔╝██║ ██╔██╗",
+    #     f"{Colors.CYAN}██║ ╚═╝ ██║██║ ╚═╝ ██║██╔╝ ██╗",
+    #     f"{Colors.CYAN}╚═╝     ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝",
+    # ]
+
     logo = [
-        f"{Colors.CYAN}███╗   ███╗███╗   ███╗██╗  ██╗",
-        f"{Colors.BRIGHT_CYAN}████╗ ████║████╗ ████║╚██╗██╔╝",
-        f"{Colors.BRIGHT_CYAN}██╔████╔██║██╔████╔██║ ╚███╔╝",
-        f"{Colors.CYAN}██║╚██╔╝██║██║╚██╔╝██║ ██╔██╗",
-        f"{Colors.CYAN}██║ ╚═╝ ██║██║ ╚═╝ ██║██╔╝ ██╗",
-        f"{Colors.CYAN}╚═╝     ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝",
+        f"{Colors.CYAN}███╗   ███╗███╗   ███╗  ███╗  ",
+        f"{Colors.BRIGHT_CYAN}████╗ ████║████╗ ████║ ██╔██╗ ",
+        f"{Colors.BRIGHT_CYAN}██╔████╔██║██╔████╔██║ ██║██║ ",
+        f"{Colors.CYAN}██║╚██╔╝██║██║╚██╔╝██║ █████║ ",
+        f"{Colors.CYAN}██║ ╚═╝ ██║██║ ╚═╝ ██║ ██║██║ ",
+        f"{Colors.CYAN}╚═╝     ╚═╝╚═╝     ╚═╝ ╚═╝╚═╝ ",
     ]
     tips = [
         "Type a task to begin",

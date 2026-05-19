@@ -15,19 +15,23 @@ from mini_agent.retry import RetryConfig
 from mini_agent.schema import Message
 
 
-def load_config():
-    """Load config from config.yaml."""
+def _load_config_or_skip():
+    """Load config from config.yaml, skipping if unavailable."""
     config_path = Path("mini_agent/config/config.yaml")
+    if not config_path.exists():
+        pytest.skip("config.yaml not found")
     with open(config_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    if not config.get("api_key") or config["api_key"] == "YOUR_MINIMAX_API_KEY_HERE":
+        pytest.skip("API key not configured")
+    return config
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_anthropic_simple_completion():
     """Test Anthropic client with simple completion."""
-    print("\n=== Testing Anthropic Simple Completion ===")
-
-    config = load_config()
+    config = _load_config_or_skip()
 
     # Create Anthropic client
     client = AnthropicClient(
@@ -43,32 +47,19 @@ async def test_anthropic_simple_completion():
         Message(role="user", content="Say 'Hello from Anthropic!' and nothing else."),
     ]
 
-    try:
-        response = await client.generate(messages=messages)
+    response = await client.generate(messages=messages)
 
-        print(f"Response: {response.content}")
-        print(f"Thinking: {response.thinking}")
-        print(f"Finish reason: {response.finish_reason}")
-
-        assert response.content, "Response content is empty"
-        assert "Hello" in response.content or "hello" in response.content
-
-        print("✅ Anthropic simple completion test passed")
-        return True
-    except Exception as e:
-        print(f"❌ Anthropic test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+    assert response.content, "Response content is empty"
+    assert "Hello" in response.content or "hello" in response.content, (
+        f"Response doesn't contain 'Hello': {response.content}"
+    )
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_openai_simple_completion():
     """Test OpenAI client with simple completion."""
-    print("\n=== Testing OpenAI Simple Completion ===")
-
-    config = load_config()
+    config = _load_config_or_skip()
 
     # Create OpenAI client
     client = OpenAIClient(
@@ -84,32 +75,19 @@ async def test_openai_simple_completion():
         Message(role="user", content="Say 'Hello from OpenAI!' and nothing else."),
     ]
 
-    try:
-        response = await client.generate(messages=messages)
+    response = await client.generate(messages=messages)
 
-        print(f"Response: {response.content}")
-        print(f"Thinking: {response.thinking}")
-        print(f"Finish reason: {response.finish_reason}")
-
-        assert response.content, "Response content is empty"
-        assert "Hello" in response.content or "hello" in response.content
-
-        print("✅ OpenAI simple completion test passed")
-        return True
-    except Exception as e:
-        print(f"❌ OpenAI test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+    assert response.content, "Response content is empty"
+    assert "Hello" in response.content or "hello" in response.content, (
+        f"Response doesn't contain 'Hello': {response.content}"
+    )
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_anthropic_tool_calling():
     """Test Anthropic client with tool calling."""
-    print("\n=== Testing Anthropic Tool Calling ===")
-
-    config = load_config()
+    config = _load_config_or_skip()
 
     # Create Anthropic client
     client = AnthropicClient(
@@ -141,35 +119,23 @@ async def test_anthropic_tool_calling():
         Message(role="user", content="What's the weather in San Francisco?"),
     ]
 
-    try:
-        response = await client.generate(messages=messages, tools=tools)
+    response = await client.generate(messages=messages, tools=tools)
 
-        print(f"Response: {response.content}")
-        print(f"Thinking: {response.thinking}")
-        print(f"Tool calls: {response.tool_calls}")
-
-        if response.tool_calls:
-            assert len(response.tool_calls) > 0
-            assert response.tool_calls[0].function.name == "get_weather"
-            print("✅ Anthropic tool calling test passed")
-        else:
-            print("⚠️  Warning: LLM didn't use tools, but request succeeded")
-
-        return True
-    except Exception as e:
-        print(f"❌ Anthropic tool calling test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+    assert response.content or response.tool_calls, (
+        "Response should have content or tool calls"
+    )
+    if response.tool_calls:
+        assert len(response.tool_calls) > 0, "Tool calls list should not be empty"
+        assert response.tool_calls[0].function.name == "get_weather", (
+            f"Expected 'get_weather' tool, got '{response.tool_calls[0].function.name}'"
+        )
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_openai_tool_calling():
     """Test OpenAI client with tool calling."""
-    print("\n=== Testing OpenAI Tool Calling ===")
-
-    config = load_config()
+    config = _load_config_or_skip()
 
     # Create OpenAI client
     client = OpenAIClient(
@@ -201,35 +167,23 @@ async def test_openai_tool_calling():
         Message(role="user", content="What's the weather in New York?"),
     ]
 
-    try:
-        response = await client.generate(messages=messages, tools=tools)
+    response = await client.generate(messages=messages, tools=tools)
 
-        print(f"Response: {response.content}")
-        print(f"Thinking: {response.thinking}")
-        print(f"Tool calls: {response.tool_calls}")
-
-        if response.tool_calls:
-            assert len(response.tool_calls) > 0
-            assert response.tool_calls[0].function.name == "get_weather"
-            print("✅ OpenAI tool calling test passed")
-        else:
-            print("⚠️  Warning: LLM didn't use tools, but request succeeded")
-
-        return True
-    except Exception as e:
-        print(f"❌ OpenAI tool calling test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+    assert response.content or response.tool_calls, (
+        "Response should have content or tool calls"
+    )
+    if response.tool_calls:
+        assert len(response.tool_calls) > 0, "Tool calls list should not be empty"
+        assert response.tool_calls[0].function.name == "get_weather", (
+            f"Expected 'get_weather' tool, got '{response.tool_calls[0].function.name}'"
+        )
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_multi_turn_conversation():
     """Test multi-turn conversation with tool calling."""
-    print("\n=== Testing Multi-turn Conversation ===")
-
-    config = load_config()
+    config = _load_config_or_skip()
 
     # Test with Anthropic client
     client = AnthropicClient(
@@ -258,50 +212,36 @@ async def test_multi_turn_conversation():
         }
     ]
 
-    try:
-        # First turn - user asks
-        messages = [Message(role="user", content="What's 5 + 3?")]
-        response = await client.generate(messages=messages, tools=tools)
+    # First turn - user asks
+    messages = [Message(role="user", content="What's 5 + 3?")]
+    response = await client.generate(messages=messages, tools=tools)
 
-        print(f"Turn 1 - Response: {response.content}")
-        print(f"Turn 1 - Tool calls: {response.tool_calls}")
-
-        if response.tool_calls:
-            # Add assistant response
-            messages.append(
-                Message(
-                    role="assistant",
-                    content=response.content,
-                    thinking=response.thinking,
-                    tool_calls=response.tool_calls,
-                )
+    if response.tool_calls:
+        # Add assistant response
+        messages.append(
+            Message(
+                role="assistant",
+                content=response.content,
+                thinking=response.thinking,
+                tool_calls=response.tool_calls,
             )
+        )
 
-            # Add tool result
-            messages.append(
-                Message(
-                    role="tool",
-                    tool_call_id=response.tool_calls[0].id,
-                    content="8",
-                )
+        # Add tool result
+        messages.append(
+            Message(
+                role="tool",
+                tool_call_id=response.tool_calls[0].id,
+                content="8",
             )
+        )
 
-            # Second turn - get final answer
-            final_response = await client.generate(messages=messages, tools=tools)
-            print(f"Turn 2 - Response: {final_response.content}")
-
-            assert final_response.content
-            print("✅ Multi-turn conversation test passed")
-        else:
-            print("⚠️  Warning: LLM didn't use tools")
-
-        return True
-    except Exception as e:
-        print(f"❌ Multi-turn conversation test failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
+        # Second turn - get final answer
+        final_response = await client.generate(messages=messages, tools=tools)
+        assert final_response.content, "Final response should have content"
+    else:
+        # If LLM didn't use tools, it should still have responded with content
+        assert response.content, "Response should have content when no tool calls"
 
 
 async def main():
@@ -326,7 +266,7 @@ async def main():
 
     print("\n" + "=" * 80)
     if all(results):
-        print("All LLM client tests passed! ✅")
+        print("All LLM client tests passed!")
     else:
         print("Some LLM client tests failed. Check the output above.")
     print("=" * 80)

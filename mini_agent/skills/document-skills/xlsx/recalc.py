@@ -29,7 +29,7 @@ def setup_libreoffice_macro():
     
     if not os.path.exists(macro_dir):
         subprocess.run(['soffice', '--headless', '--terminate_after_init'], 
-                      capture_output=True, timeout=10)
+                      capture_output=True, timeout=10, encoding='utf-8', errors='replace')
         os.makedirs(macro_dir, exist_ok=True)
     
     macro_content = '''<?xml version="1.0" encoding="UTF-8"?>
@@ -89,7 +89,7 @@ def recalc(filename, timeout=30):
         if timeout_cmd:
             cmd = [timeout_cmd, str(timeout)] + cmd
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     
     if result.returncode != 0 and result.returncode != 124:  # 124 is timeout exit code
         error_msg = result.stderr or 'Unknown error during recalculation'
