@@ -20,6 +20,7 @@ from mini_agent.tools.note_tool import RecallNoteTool, SessionNoteTool
 def mock_llm_client():
     """Create mock LLM client"""
     client = MagicMock(spec=LLMClient)
+    client.model = "test-model"
     return client
 
 

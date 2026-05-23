@@ -148,7 +148,9 @@ class AnthropicClient(LLMClientBase):
 
         try:
             stream = await self.client.messages.create(**params)
-            async with asyncio.timeout(300):
+            # Use configurable timeout from retry_config, default to 300s for backward compatibility
+            timeout = self.retry_config.max_delay if self.retry_config else 300
+            async with asyncio.timeout(timeout):
                 async for event in stream:
                     try:
                         if event.type == "content_block_delta":

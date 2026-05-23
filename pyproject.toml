@@ -46,6 +46,9 @@ mini_agent = ["skills/**/*"]
 testpaths = ["tests"]
 cache_dir = "workspace/.pytest_cache"
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
 
 [tool.pylint.messages_control]
 disable = [

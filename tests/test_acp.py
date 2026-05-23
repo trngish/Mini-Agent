@@ -21,6 +21,7 @@ class DummyConn:
 class DummyLLM:
     def __init__(self):
         self.calls = 0
+        self.model = "test-model"
 
     async def generate(self, messages, tools):
         self.calls += 1
@@ -70,9 +71,9 @@ def acp_agent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_acp_turn_executes_tool(acp_agent):
+async def test_acp_turn_executes_tool(acp_agent, tmp_path):
     agent, conn = acp_agent
-    session = await agent.newSession(SimpleNamespace(cwd=None))
+    session = await agent.newSession(SimpleNamespace(cwd=str(tmp_path), mcpServers=[]))
     prompt = SimpleNamespace(sessionId=session.sessionId, prompt=[{"text": "hello"}])
     response = await agent.prompt(prompt)
     assert response.stopReason == "end_turn"

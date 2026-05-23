@@ -162,17 +162,17 @@ class SessionManager:
     def delete(self, session_id: str) -> bool:
         """Delete a session file."""
         path = self.session_dir / f"{session_id}.json"
-        if path.exists():
+        file_existed = path.exists()
+        if file_existed:
             path.unlink()
-            
-            # Update index
-            self._ensure_index_loaded()
-            if self._index is not None:
-                self._index = [s for s in self._index if s.get("id") != session_id]
-                self._save_index(self._index)
-            
-            return True
-        return False
+        
+        # Always update index, even if file was already deleted
+        self._ensure_index_loaded()
+        if self._index is not None:
+            self._index = [s for s in self._index if s.get("id") != session_id]
+            self._save_index(self._index)
+        
+        return file_existed
 
     def clear_index(self) -> None:
         """Clear the session index cache."""

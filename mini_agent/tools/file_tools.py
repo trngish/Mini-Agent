@@ -81,6 +81,8 @@ def truncate_text_by_tokens(
 
     # Calculate token/character ratio for approximation
     char_count = len(text)
+    if char_count == 0:
+        return ""
     ratio = token_count / char_count
 
     # Keep head and tail mode: allocate half space for each (with 5% safety margin)
@@ -343,6 +345,13 @@ class EditTool(Tool):
                     error=f"Text not found in file: {old_str}",
                 )
 
+            count = content.count(old_str)
+            if count > 1:
+                return ToolResult(
+                    success=False,
+                    content="",
+                    error=f"Text appears {count} times in file. old_str must be unique.",
+                )
             new_content = content.replace(old_str, new_str)
             file_path.write_text(new_content, encoding="utf-8")
 

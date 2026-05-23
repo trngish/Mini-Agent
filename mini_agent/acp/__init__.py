@@ -103,8 +103,9 @@ class MiniMaxACPAgent:
         workspace = Path(params.cwd or self._config.agent.workspace_dir).expanduser()
         if not workspace.is_absolute():
             workspace = workspace.resolve()
+        logger.debug(f"Creating session with workspace: {workspace} (cwd={params.cwd}, config.workspace_dir={self._config.agent.workspace_dir})")
         tools = list(self._base_tools)
-        add_workspace_tools(tools, self._config, workspace)
+        await add_workspace_tools(tools, self._config, workspace)
         agent = Agent(llm_client=self._llm, system_prompt=self._system_prompt, tools=tools, max_steps=self._config.agent.max_steps, workspace_dir=str(workspace))
         self._sessions[session_id] = SessionState(agent=agent)
         return NewSessionResponse(sessionId=session_id)
@@ -114,10 +115,15 @@ class MiniMaxACPAgent:
         if not state:
             # Auto-create session if not found (compatibility with clients that skip newSession)
             logger.warning(f"Session '{params.sessionId}' not found, auto-creating new session")
-            new_session = await self.newSession(NewSessionRequest(cwd=None))
+            try:
+                new_session = await self.newSession(NewSessionRequest(cwd=self._config.agent.workspace_dir, mcpServers=[]))
+                logger.debug(f"Auto-created session: {new_session.sessionId}")
+            except Exception as e:
+                logger.exception(f"Failed to auto-create session: {e}")
+                return PromptResponse(stopReason="refusal")
             state = self._sessions.get(new_session.sessionId)
             if not state:
-                logger.error("Failed to auto-create session")
+                logger.error("Failed to create session state")
                 return PromptResponse(stopReason="refusal")
         state.cancelled = False
         user_text = "\n".join(block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "") for block in params.prompt)

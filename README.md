@@ -287,6 +287,9 @@ pytest tests/test_agent.py tests/test_note_tool.py -v
 
 If you encounter `[SSL: CERTIFICATE_VERIFY_FAILED]` error:
 
+> **WARNING**: Disabling SSL verification (`verify=False`) is a **severe security vulnerability**.
+> Never use in production — only for local development with self-signed certificates.
+
 **Quick fix for testing** (modify `mini_agent/llm.py`):
 ```python
 # Line 50: Add verify=False to AsyncClient

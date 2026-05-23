@@ -216,6 +216,8 @@ class Agent:
             old_budget = self.thinking_budget
             self.thinking_budget = new_budget
             # Update the LLM client's thinking budget dynamically
+            # Note: _thinking_budget_tokens is an internal interface exposed by the underlying
+            # LLM client for M2.7 optimization. Must remain compatible.
             llm_client = getattr(self.llm, '_client', None)
             if llm_client is not None and hasattr(llm_client, '_thinking_budget_tokens'):
                 llm_client._thinking_budget_tokens = new_budget
@@ -359,6 +361,11 @@ class Agent:
         for i, user_idx in enumerate(user_indices):
             # Add current user message
             new_messages.append(self.messages[user_idx])
+
+            # Truncate long user messages to avoid token limit issues
+            user_content = self.messages[user_idx].content
+            if len(user_content) > 5000:  # ~2000 tokens
+                self.messages[user_idx].content = user_content[:5000] + "...[truncated]..."
 
             # Determine message range to summarize
             # If last user, go to end of message list; otherwise to before next user
@@ -859,7 +866,9 @@ class Agent:
             # No running event loop — try to run synchronously
             try:
                 asyncio.run(BackgroundShellManager.cleanup_all())
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as e:
+                import logging
+                logging.warning(f"Background shell cleanup failed: {e}")
+        except Exception as e:
+            import logging
+            logging.warning(f"Event loop cleanup failed: {e}")
