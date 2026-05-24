@@ -147,3 +147,20 @@ class LLMClient:
             logger.warning("Message validation issue at index %d: %s", i, e)
 
         return await self._client.generate(messages, tools, **kwargs)
+
+    def clone(self) -> "LLMClient":
+        """Create a deep copy of this LLMClient.
+        
+        Each SubAgent needs its own LLMClient to avoid tool_call.id conflicts
+        when running concurrently. The API rejects requests with duplicate tool ids.
+        
+        Returns:
+            New LLMClient instance with the same configuration
+        """
+        return LLMClient(
+            api_key=self.api_key,
+            provider=self.provider,
+            api_base=self.api_base,
+            model=self.model,
+            retry_config=self.retry_config,
+        )

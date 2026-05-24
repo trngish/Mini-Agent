@@ -1,5 +1,9 @@
 """Core Agent implementation."""
 
+# ⚠️ 硬性规则：所有 Git 操作必须用户明确同意才能执行
+# 包括但不限于：git add, git commit, git push, git merge 等
+# 违反此规则的操作将被视为未授权
+
 import asyncio
 import json
 import os

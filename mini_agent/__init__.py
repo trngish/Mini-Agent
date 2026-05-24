@@ -7,6 +7,7 @@ from .retry import async_retry
 from .retry import RetryConfig as BaseRetryConfig
 from .config import RetryConfig
 from .subagent import SubAgent, SubAgentResult, run_sub_agents
+from .team import AgentTeam, AgentRole, RoleConfig, MessageBus, TeamResult
 
 __version__ = "0.1.0"
 
@@ -16,6 +17,12 @@ __all__ = [
     "SubAgent",
     "SubAgentResult",
     "run_sub_agents",
+    # Agent Team
+    "AgentTeam",
+    "AgentRole",
+    "RoleConfig",
+    "MessageBus",
+    "TeamResult",
     # LLM
     "LLMClient",
     "LLMProvider",

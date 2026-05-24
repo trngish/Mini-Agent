@@ -306,10 +306,11 @@ class AgentLogger:
         Args:
             entry: Log entry string
         """
-        with open(self.log_file, "a", encoding="utf-8") as f:
+        # Handle surrogates (invalid Unicode) that can't be encoded to UTF-8
+        encoded = entry.encode("utf-8", errors="replace")
+        self._current_size += len(encoded)
+        with open(self.log_file, "a", encoding="utf-8", errors="replace") as f:
             f.write(entry)
-        
-        self._current_size += len(entry.encode("utf-8"))
 
     def get_log_file_path(self) -> Path:
         """Get current log file path."""

@@ -80,12 +80,25 @@ class SubAgent:
                 max_concurrent = self.m27_config.get("max_concurrent_tools", 10)
 
                 if parallel_enabled and len(response.tool_calls) > 1:
+                    print(f"[DEBUG] Executing {len(response.tool_calls)} tools in parallel")
                     results = await self._execute_tools_parallel(response.tool_calls, max_concurrent)
                 else:
+                    print(f"[DEBUG] Executing {len(response.tool_calls)} tools sequentially")
                     results = await self._execute_tools_sequential(response.tool_calls)
+
+                # CRITICAL: Add assistant message with tool_calls BEFORE tool result
+                # This is required for the API to match tool results to their calls
+                assistant_msg = Message(
+                    role="assistant",
+                    content=response.content or "",
+                    thinking=response.thinking,
+                    tool_calls=response.tool_calls,
+                )
+                messages.append(assistant_msg)
 
                 # Add tool messages in order
                 for _, tool_msg in results:
+                    print(f"[DEBUG] Appending tool result: tool_call_id={tool_msg.tool_call_id}, name={tool_msg.name}")
                     messages.append(tool_msg)
                 continue
 
@@ -141,7 +154,9 @@ class SubAgent:
         tool_call_id = tool_call.id
         function_name = tool_call.function.name
         arguments = tool_call.function.arguments
-
+        
+        print(f"[DEBUG] _execute_single_tool: tool_call_id={tool_call_id}, function={function_name}, args={arguments}")
+        
         tool = self.tools.get(function_name)
         if not tool:
             tool_msg = Message(
@@ -194,7 +209,7 @@ async def run_sub_agents(
     """Run multiple sub-agents concurrently.
 
     Args:
-        llm_client: LLM client shared by all sub-agents
+        llm_client: LLM client (will be cloned for each subagent to avoid tool_call id conflicts)
         tasks: List of task descriptions
         tools: Available tools
         max_concurrent: Maximum concurrent sub-agents
@@ -206,7 +221,10 @@ async def run_sub_agents(
 
     async def run_one(task: str) -> SubAgentResult:
         async with semaphore:
-            agent = SubAgent(llm_client=llm_client, tools=tools)
+            # Clone the LLMClient for each subagent to avoid tool_call id conflicts
+            # Sharing a client causes API errors: "tool result's tool id not found"
+            agent_llm = llm_client.clone() if hasattr(llm_client, 'clone') else llm_client
+            agent = SubAgent(llm_client=agent_llm, tools=tools)
             try:
                 return await agent.run(task)
             finally:

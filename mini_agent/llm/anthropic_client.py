@@ -345,14 +345,16 @@ class AnthropicClient(LLMClientBase):
 
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
+                            tool_id = tool_call.id
                             content_blocks.append(
                                 {
                                     "type": "tool_use",
-                                    "id": tool_call.id,
+                                    "id": tool_id,
                                     "name": tool_call.function.name,
                                     "input": tool_call.function.arguments,
                                 }
                             )
+                            logger.debug(f"[SubAgent] Added tool_use block with id={tool_id}, name={tool_call.function.name}")
 
                     api_messages.append({"role": "assistant", "content": content_blocks})
                 else:
