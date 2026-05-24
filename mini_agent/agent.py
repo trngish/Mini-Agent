@@ -1022,6 +1022,45 @@ class Agent:
         """Get message history."""
         return self.messages.copy()
     
+    async def dispatch_sub_agents(
+        self, 
+        tasks: list[str], 
+        max_concurrent: int = 3,
+        system_prompt: str = "You are a helpful assistant. Complete the assigned task concisely.",
+    ) -> list:
+        """Dispatch multiple sub-agents to work in parallel on independent tasks.
+        
+        This enables the agent to "clone itself" and tackle multiple problems
+        simultaneously, then synthesize the results.
+        
+        Args:
+            tasks: List of task descriptions for sub-agents
+            max_concurrent: Maximum number of concurrent sub-agents
+            system_prompt: Custom system prompt for sub-agents
+            
+        Returns:
+            List of SubAgentResult objects with task, content, success, elapsed, error
+        """
+        from .subagent import run_sub_agents as run_subs
+        
+        # Get a copy of tools for sub-agents
+        tools = self.tool_list
+        
+        # Run sub-agents in parallel
+        results = await run_subs(
+            llm_client=self.llm,
+            tasks=tasks,
+            tools=tools,
+            max_concurrent=max_concurrent,
+        )
+        
+        # Log the dispatch
+        print(f"\n{Colors.BRIGHT_CYAN}🔄 Dispatched {len(tasks)} sub-agents ({max_concurrent} concurrent){Colors.RESET}")
+        successful = sum(1 for r in results if r.success)
+        print(f"{Colors.BRIGHT_GREEN}✅ {successful}/{len(tasks)} succeeded{Colors.RESET}")
+        
+        return results
+    
     def cleanup(self) -> None:
         """Clean up resources held by the agent.
         
