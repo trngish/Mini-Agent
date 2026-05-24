@@ -175,6 +175,12 @@ class Agent:
         self._error_patterns: dict[str, int] = {}  # tool_name -> failure count
         self._error_history: list[dict] = []  # Recent errors for analysis
         self._max_error_history = 20  # Keep last 20 errors
+        
+        # Performance metrics tracking
+        self._step_durations: list[float] = []  # Duration of each step in seconds
+        self._tool_execution_times: dict[str, list[float]] = {}  # tool_name -> durations
+        self._api_latencies: list[float] = []  # API call response times
+        self._max_step_history = 50  # Keep last 50 steps for metrics
 
     @classmethod
     def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
@@ -826,6 +832,12 @@ class Agent:
 
             step_elapsed = perf_counter() - step_start_time
             total_elapsed = perf_counter() - run_start_time
+            
+            # Track performance metrics
+            self._step_durations.append(step_elapsed)
+            if len(self._step_durations) > self._max_step_history:
+                self._step_durations = self._step_durations[-self._max_step_history:]
+            
             print(f"\n  {Colors.DIM}✔  Step {step + 1}  ({step_elapsed:.1f}s | total: {total_elapsed:.1f}s){Colors.RESET}")
 
             # Auto-save session after each step to prevent losing progress on crashes
@@ -927,6 +939,9 @@ class Agent:
         if function_name not in self.tools:
             result = ToolResult(success=False, content="", error=f"Unknown tool: {function_name}")
         else:
+            # Track tool execution time
+            tool_start = perf_counter()
+            
             # Tool execution with automatic retry for transient failures
             last_error = None
             max_tool_retries = 3
@@ -956,6 +971,14 @@ class Agent:
             else:
                 # All retries exhausted, result already has the last error
                 pass
+            
+            # Record tool execution time
+            tool_duration = perf_counter() - tool_start
+            if function_name not in self._tool_execution_times:
+                self._tool_execution_times[function_name] = []
+            self._tool_execution_times[function_name].append(tool_duration)
+            if len(self._tool_execution_times[function_name]) > 20:
+                self._tool_execution_times[function_name] = self._tool_execution_times[function_name][-20:]
 
         self._on_tool_result(function_name, result)
 
@@ -1200,6 +1223,39 @@ class Agent:
             suggestions.append("Long session detected - consider saving session and starting fresh")
             
         return suggestions
+    
+    def get_performance_metrics(self) -> dict:
+        """Get performance metrics for the current session.
+        
+        Returns:
+            Dict with timing metrics for steps, tools, and API calls
+        """
+        # Calculate step duration stats
+        step_stats = {}
+        if self._step_durations:
+            step_stats = {
+                "count": len(self._step_durations),
+                "avg_seconds": sum(self._step_durations) / len(self._step_durations),
+                "min_seconds": min(self._step_durations),
+                "max_seconds": max(self._step_durations),
+                "total_seconds": sum(self._step_durations),
+            }
+        
+        # Calculate tool execution stats
+        tool_stats = {}
+        for tool_name, durations in self._tool_execution_times.items():
+            if durations:
+                tool_stats[tool_name] = {
+                    "calls": len(durations),
+                    "avg_seconds": sum(durations) / len(durations),
+                    "total_seconds": sum(durations),
+                }
+        
+        return {
+            "step_metrics": step_stats,
+            "tool_metrics": tool_stats,
+            "api_call_count": self.api_call_count,
+        }
     
     async def dispatch_sub_agents(
         self, 
