@@ -2,6 +2,9 @@
 
 This tool provides convenient wrappers for common Git operations
 to help the agent work with version control more easily.
+
+⚠️ 硬性规则：所有 Git 操作必须用户明确同意才能执行
+This is a non-negotiable requirement for all AI agent operations.
 """
 
 import asyncio
