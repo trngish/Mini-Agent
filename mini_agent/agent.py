@@ -166,6 +166,10 @@ class Agent:
             self._thinking_manager = ThinkingManager(max_thinking_tokens=80_000)
         else:
             self._thinking_manager = None
+        
+        # Auto-save session after each step to prevent losing progress on crashes
+        self.auto_save = os.environ.get("MINI_AGENT_AUTO_SAVE", "true").lower() == "true"
+        self._last_auto_save_step = 0
 
     @classmethod
     def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
@@ -725,6 +729,13 @@ class Agent:
                 total_elapsed = perf_counter() - run_start_time
                 print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
                 print(f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self.api_call_count} (按次数计费统计){Colors.RESET}")
+                # Auto-save on successful completion
+                if self.auto_save:
+                    try:
+                        sid = self.session_manager.save(self.messages, f"completed_step_{step}")
+                        print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
+                    except Exception as e:
+                        print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
                 return response.content
 
             # Execute tool calls (parallel if M2.7)
@@ -764,11 +775,27 @@ class Agent:
             total_elapsed = perf_counter() - run_start_time
             print(f"\n  {Colors.DIM}✔  Step {step + 1}  ({step_elapsed:.1f}s | total: {total_elapsed:.1f}s){Colors.RESET}")
 
+            # Auto-save session after each step to prevent losing progress on crashes
+            if self.auto_save and step > 0 and step != self._last_auto_save_step:
+                try:
+                    sid = self.session_manager.save(self.messages, f"auto_step_{step}")
+                    print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
+                    self._last_auto_save_step = step
+                except Exception as e:
+                    print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
+
             step += 1
 
         # Max steps reached
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
+        # Auto-save on max steps (for potential resume)
+        if self.auto_save:
+            try:
+                sid = self.session_manager.save(self.messages, f"max_steps_{self.max_steps}")
+                print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
+            except Exception as e:
+                print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
         return error_msg
 
     def _format_arguments(self, arguments: dict) -> str:
