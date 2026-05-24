@@ -1022,6 +1022,54 @@ class Agent:
         """Get message history."""
         return self.messages.copy()
     
+    def get_status(self) -> dict:
+        """Get agent status report for self-diagnosis.
+        
+        Returns a dict with current state information including:
+        - token_usage: Estimated tokens used
+        - token_limit: Maximum allowed tokens
+        - api_call_count: Number of API calls made
+        - session_age_steps: How many steps in current session
+        - consecutive_failures: Recent failure count
+        - auto_save_enabled: Whether auto-save is on
+        - last_auto_save_step: Last step that was auto-saved
+        """
+        return {
+            "token_usage": self._estimate_tokens(),
+            "token_limit": self.token_limit,
+            "api_call_count": self.api_call_count,
+            "session_age_steps": len([m for m in self.messages if m.role == "user"]),
+            "consecutive_failures": self._consecutive_failures,
+            "auto_save_enabled": self.auto_save,
+            "last_auto_save_step": self._last_auto_save_step,
+            "thinking_budget": self.thinking_budget,
+            "mode": self.mode.value,
+        }
+    
+    def get_status_report(self) -> str:
+        """Generate a human-readable status report."""
+        status = self.get_status()
+        
+        lines = [
+            f"{Colors.BOLD}📊 Agent Status Report{Colors.RESET}",
+            f"{'=' * 40}",
+            f"Token usage: {status['token_usage']:,} / {status['token_limit']:,}",
+            f"API calls: {status['api_call_count']}",
+            f"Session steps: {status['session_age_steps']}",
+            f"Mode: {status['mode']}",
+            f"Thinking budget: {status['thinking_budget']:,}",
+            f"Consecutive failures: {status['consecutive_failures']}",
+            f"Auto-save: {status['auto_save_enabled']} (last: step {status['last_auto_save_step']})",
+        ]
+        
+        # Add warning indicators
+        if status['token_usage'] > status['token_limit'] * 0.8:
+            lines.append(f"{Colors.YELLOW}⚠️  Token usage high{Colors.RESET}")
+        if status['consecutive_failures'] >= 2:
+            lines.append(f"{Colors.YELLOW}⚠️  Multiple recent failures{Colors.RESET}")
+            
+        return '\n'.join(lines)
+    
     async def dispatch_sub_agents(
         self, 
         tasks: list[str], 
