@@ -714,6 +714,12 @@ class Agent:
             )
             self.messages.append(assistant_msg)
 
+            # Self-health check after each step
+            health_issues = self._check_health()
+            if health_issues:
+                for issue in health_issues:
+                    print(f"  {Colors.YELLOW}⚠️  {issue}{Colors.RESET}")
+
             # Prune thinking content if it exceeds threshold (M2.7 optimization)
             if self._thinking_manager and len(self.messages) > 5:
                 tokens_freed = self._thinking_manager.prune_thinking(self.messages)
@@ -1069,6 +1075,30 @@ class Agent:
             lines.append(f"{Colors.YELLOW}⚠️  Multiple recent failures{Colors.RESET}")
             
         return '\n'.join(lines)
+    
+    def _check_health(self) -> list[str]:
+        """Self-health check after each step. Returns list of issues found."""
+        issues = []
+        
+        # Check token usage
+        try:
+            tokens = self._estimate_tokens()
+            if tokens > self.token_limit * 0.9:
+                issues.append(f"Token usage critical: {tokens:,} / {self.token_limit:,}")
+            elif tokens > self.token_limit * 0.8:
+                issues.append(f"Token usage high: {tokens:,} / {self.token_limit:,}")
+        except Exception:
+            pass
+        
+        # Check consecutive failures
+        if self._consecutive_failures >= 3:
+            issues.append(f"Multiple consecutive tool failures: {self._consecutive_failures}")
+        
+        # Check for message consistency
+        if len(self.messages) < 2:
+            issues.append("Message history seems incomplete")
+            
+        return issues
     
     async def dispatch_sub_agents(
         self, 
