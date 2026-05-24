@@ -622,23 +622,31 @@ class Agent:
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
             try:
-                # Setup streaming callbacks for real-time output
-                thinking_first = True
-                content_first = True
+                # Track streaming state for correct ordering
+                thinking_started = False
+                thinking_output = []  # Buffer for thinking content when text arrives first
+                text_pending = []  # Buffer for text content when thinking arrives first
 
                 def on_thinking(text: str) -> None:
-                    nonlocal thinking_first
-                    if thinking_first:
+                    nonlocal thinking_started
+                    if not thinking_started:
+                        # Thinking arrived first - print header immediately
                         print(f"\n  {Colors.BOLD}{Colors.MAGENTA}🧠 Think{Colors.RESET}")
-                        thinking_first = False
+                        thinking_started = True
                     print(f"{Colors.DIM}{text}{Colors.RESET}", end="", flush=True)
+                    # Flush any pending text content
+                    while text_pending:
+                        pending = text_pending.pop(0)
+                        print(pending, end="", flush=True)
 
                 def on_text(text: str) -> None:
-                    nonlocal content_first
-                    if content_first:
-                        print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
-                        content_first = False
-                    print(text, end="", flush=True)
+                    nonlocal thinking_started
+                    if thinking_started:
+                        # Thinking already started/finished - safe to output text immediately
+                        print(text, end="", flush=True)
+                    else:
+                        # Thinking not started yet - buffer text
+                        text_pending.append(text)
 
                 response = await self.llm.generate(
                     messages=self.messages,
@@ -647,8 +655,20 @@ class Agent:
                     on_thinking=on_thinking,
                 )
 
-                # Print newline after streaming output if any was streamed
-                if not content_first or not thinking_first:
+                # Print assistant header and flush any pending text (or just text if no thinking)
+                if thinking_started:
+                    print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
+                    # Flush any text that arrived before thinking
+                    while text_pending:
+                        pending = text_pending.pop(0)
+                        print(pending, end="", flush=True)
+                    print()
+                elif text_pending:
+                    # No thinking at all - just print assistant header and text
+                    print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
+                    while text_pending:
+                        pending = text_pending.pop(0)
+                        print(pending, end="", flush=True)
                     print()
 
             except Exception as e:
@@ -827,16 +847,35 @@ class Agent:
         if function_name not in self.tools:
             result = ToolResult(success=False, content="", error=f"Unknown tool: {function_name}")
         else:
-            try:
-                tool = self.tools[function_name]
-                result = await tool.execute(**arguments)
-            except Exception as e:
-                tool_error = handle_tool_error(function_name, arguments, e)
-                result = ToolResult(
-                    success=False,
-                    content="",
-                    error=tool_error.message,
-                )
+            # Tool execution with automatic retry for transient failures
+            last_error = None
+            max_tool_retries = 3
+            for attempt in range(max_tool_retries):
+                try:
+                    tool = self.tools[function_name]
+                    result = await tool.execute(**arguments)
+                    # Only retry on transient errors, not user-rejected or blocked tools
+                    if result.success or "rejected" in result.error.lower() or "blocked" in result.error.lower():
+                        break
+                    last_error = result.error
+                except Exception as e:
+                    last_error = str(e)
+                    tool_error = handle_tool_error(function_name, arguments, e)
+                    result = ToolResult(
+                        success=False,
+                        content="",
+                        error=tool_error.message,
+                    )
+                    # Don't retry on fatal errors
+                    if "rejected" in str(e).lower() or "blocked" in str(e).lower():
+                        break
+                    
+                # Wait before retry (exponential backoff for transient failures)
+                if attempt < max_tool_retries - 1:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+            else:
+                # All retries exhausted, result already has the last error
+                pass
 
         self._on_tool_result(function_name, result)
 

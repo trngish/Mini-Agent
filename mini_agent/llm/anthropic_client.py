@@ -171,15 +171,25 @@ class AnthropicClient(LLMClientBase):
                             if delta.type == "text_delta":
                                 result.text += delta.text
                                 text_buffer.append(delta.text)
-                                if len(text_buffer) >= buffer_size and on_text:
-                                    on_text("".join(text_buffer))
-                                    text_buffer.clear()
+                                if on_text:
+                                    if len(text_buffer) >= buffer_size:
+                                        on_text("".join(text_buffer))
+                                        text_buffer.clear()
+                                    # Immediate flush for small outputs - ensure timely display
+                                    elif text_buffer and len(text_buffer) >= 1:
+                                        on_text("".join(text_buffer))
+                                        text_buffer.clear()
                             elif delta.type == "thinking_delta":
                                 result.thinking += delta.thinking
                                 thinking_buffer.append(delta.thinking)
-                                if len(thinking_buffer) >= buffer_size and on_thinking:
-                                    on_thinking("".join(thinking_buffer))
-                                    thinking_buffer.clear()
+                                if on_thinking:
+                                    if len(thinking_buffer) >= buffer_size:
+                                        on_thinking("".join(thinking_buffer))
+                                        thinking_buffer.clear()
+                                    # Immediate flush for small outputs - ensure timely display
+                                    elif thinking_buffer and len(thinking_buffer) >= 1:
+                                        on_thinking("".join(thinking_buffer))
+                                        thinking_buffer.clear()
                             elif delta.type == "input_json_delta":
                                 current_tool_input += getattr(delta, 'partial_json', "")
                         elif event.type == "message_delta":
@@ -216,6 +226,11 @@ class AnthropicClient(LLMClientBase):
                         logger.warning("Error processing stream event: %s", e)
                         continue
             
+            # Integrity check: ensure we received meaningful content
+            # If both text and thinking are empty but we didn't stop properly, log warning
+            if not result.text and not result.thinking and not result.tool_calls and result.stop_reason == "stop":
+                logger.warning("Stream completed but received no content - possible truncation")
+                
             # Flush remaining buffers
             if text_buffer and on_text:
                 on_text("".join(text_buffer))
@@ -224,6 +239,8 @@ class AnthropicClient(LLMClientBase):
                 
         except (TimeoutError, asyncio.TimeoutError) as e:
             logger.error("Stream timed out after 300s")
+            # Mark result as incomplete
+            result.stop_reason = "timeout"
             raise
         except Exception as e:
             logger.error("Stream iteration error: %s", e)
