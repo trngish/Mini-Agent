@@ -190,6 +190,34 @@ class Agent:
         self.messages.append(Message(role="user", content=content))
         # Adaptively adjust thinking budget based on task complexity
         self._adjust_thinking_budget(content)
+    
+    def record_context(self, content: str, category: str = "auto") -> None:
+        """Automatically record important context without needing explicit tool call.
+        
+        This is called internally by the agent when it encounters important
+        information worth remembering for future reference.
+        
+        Args:
+            content: The context to record
+            category: Category tag (default: "auto" for automatic recordings)
+        """
+        # Use session note tool if available
+        note_tool = self.tools.get("record_note")
+        if note_tool:
+            try:
+                # Run in background - don't block on this
+                import asyncio
+                loop = asyncio.get_event_loop()
+                loop.create_task(note_tool.execute(content=content, category=category))
+            except Exception:
+                pass  # Silently fail - recording is best-effort
+    
+    def _record_error_context(self, error: str, context: str) -> None:
+        """Record error context for future reference."""
+        self.record_context(
+            content=f"Error encountered: {error}. Context: {context[:200]}",
+            category="error_pattern"
+        )
 
     def _update_thinking_budget(self, budget: int) -> None:
         """Update thinking budget for M2.7 models via proper interface.
