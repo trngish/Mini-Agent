@@ -46,6 +46,32 @@ class OpenAIClient(LLMClientBase):
             base_url=api_base,
         )
 
+        # M2.7 configuration attributes
+        self._enable_extended_thinking = True
+        self._thinking_budget_tokens = 8192  # Default, can be updated via configure_m27 or configure_thinking_budget
+
+    def configure_thinking_budget(self, budget: int) -> None:
+        """Configure thinking budget dynamically.
+        
+        This is the official API for adjusting thinking budget at runtime
+        based on task complexity analysis.
+        
+        Args:
+            budget: Thinking budget in tokens (0 to disable)
+        """
+        self._thinking_budget_tokens = max(0, min(budget, 32768))
+
+    def configure_m27(self, config: dict) -> None:
+        """Configure M2.7 specific settings.
+        
+        Args:
+            config: M2.7 configuration dict from Config.m27
+        """
+        self._enable_extended_thinking = config.get("enable_extended_thinking", True)
+        # Use configured budget or default to 16K
+        configured_budget = config.get("thinking_budget_tokens", 16384)
+        self._thinking_budget_tokens = min(configured_budget, 32768)
+
     async def _make_api_request(
         self,
         api_messages: list[dict[str, Any]],

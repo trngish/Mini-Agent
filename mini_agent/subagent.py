@@ -51,6 +51,15 @@ class SubAgent:
     async def run(self, task: str) -> SubAgentResult:
         """Execute a sub-task and return the result."""
         start = perf_counter()
+        
+        # Configure M2.7 thinking budget if available
+        if self.is_m27 and self.m27_config:
+            thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384)
+            if hasattr(self.llm, 'configure_m27'):
+                self.llm.configure_m27(self.m27_config)
+            elif hasattr(self.llm, 'configure_thinking_budget'):
+                self.llm.configure_thinking_budget(thinking_budget)
+        
         messages = [
             Message(role="system", content=self.system_prompt),
             Message(role="user", content=task)
@@ -164,6 +173,16 @@ class SubAgent:
         # Clear tool references to free memory
         self.tools.clear()
         self.tool_list.clear()
+        
+        # Clean up background shells if any were created
+        try:
+            from .tools.bash_background import BackgroundShellManager
+            # Schedule cleanup without blocking
+            import asyncio
+            loop = asyncio.get_running_loop()
+            loop.create_task(BackgroundShellManager.cleanup_all())
+        except Exception:
+            pass  # Ignore cleanup errors
 
 
 async def run_sub_agents(

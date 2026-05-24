@@ -37,17 +37,36 @@ class SessionManager:
                 data = json.loads(index_path.read_text(encoding="utf-8"))
                 if isinstance(data, list):
                     return data
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, ValueError, KeyError, TypeError):
                 pass
         return []
 
     def _save_index(self, index: list[dict]) -> None:
-        """Save session index to disk."""
+        """Save session index to disk atomically.
+        
+        Uses write-to-temp-then-rename pattern to ensure atomic updates
+        and prevent index corruption on crashes during write.
+        """
         index_path = self._get_index_path()
-        index_path.write_text(
-            json.dumps(index, indent=2, ensure_ascii=False),
-            encoding="utf-8"
-        )
+        temp_path = index_path.with_suffix('.tmp')
+        
+        try:
+            # Write to temp file first
+            temp_path.write_text(
+                json.dumps(index, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
+            # Atomic rename (on POSIX systems)
+            temp_path.rename(index_path)
+        except OSError:
+            # Fallback for Windows or if rename fails - write directly
+            index_path.write_text(
+                json.dumps(index, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
+            # Clean up temp file if it exists
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
 
     def _ensure_index_loaded(self) -> None:
         """Ensure index is loaded."""
@@ -77,7 +96,17 @@ class SessionManager:
             "messages": self._serialize_messages(messages),
         }
         path = self.session_dir / f"{session_id}.json"
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        
+        # Atomic write: write to temp file first, then rename
+        temp_path = path.with_suffix('.tmp')
+        try:
+            temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            temp_path.rename(path)
+        except OSError:
+            # Fallback for Windows or if rename fails
+            path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
         
         # Update index
         self._ensure_index_loaded()

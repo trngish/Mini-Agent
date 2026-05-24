@@ -168,6 +168,21 @@ class Agent:
         # Adaptively adjust thinking budget based on task complexity
         self._adjust_thinking_budget(content)
 
+    def _update_thinking_budget(self, budget: int) -> None:
+        """Update thinking budget for M2.7 models via proper interface.
+        
+        This is the official API for dynamically adjusting thinking budget
+        based on task complexity. Agents should use this instead of directly
+        accessing private attributes.
+        
+        Args:
+            budget: New thinking budget in tokens
+        """
+        self.thinking_budget = budget
+        # Update the LLM client's thinking budget via public API
+        if hasattr(self.llm, 'configure_thinking_budget'):
+            self.llm.configure_thinking_budget(budget)
+
     def _adjust_thinking_budget(self, user_message: str) -> None:
         """Adaptively adjust thinking budget based on task complexity.
 
@@ -214,13 +229,7 @@ class Agent:
 
         if new_budget != self.thinking_budget:
             old_budget = self.thinking_budget
-            self.thinking_budget = new_budget
-            # Update the LLM client's thinking budget dynamically
-            # Note: _thinking_budget_tokens is an internal interface exposed by the underlying
-            # LLM client for M2.7 optimization. Must remain compatible.
-            llm_client = getattr(self.llm, '_client', None)
-            if llm_client is not None and hasattr(llm_client, '_thinking_budget_tokens'):
-                llm_client._thinking_budget_tokens = new_budget
+            self._update_thinking_budget(new_budget)
             print(f"{Colors.DIM}🧠 Thinking budget adjusted: {old_budget} → {new_budget} ({level}任务){Colors.RESET}")
 
     def _check_cancelled(self) -> bool:
@@ -861,14 +870,16 @@ class Agent:
         from .tools.bash_background import BackgroundShellManager
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(BackgroundShellManager.cleanup_all())
+            # Create cleanup task, fire and forget within same event loop
+            # Use create_task to schedule cleanup without blocking
+            cleanup_task = loop.create_task(BackgroundShellManager.cleanup_all())
+            # Don't await - let it run in background, we can't block here
+            # The task will complete even if we return
         except RuntimeError:
-            # No running event loop — try to run synchronously
-            try:
-                asyncio.run(BackgroundShellManager.cleanup_all())
-            except Exception as e:
-                import logging
-                logging.warning(f"Background shell cleanup failed: {e}")
+            # No running event loop - this should NOT happen in normal async context
+            # but handle it gracefully without creating a new event loop
+            import logging
+            logging.warning("No running event loop during cleanup - cleanup may be skipped")
         except Exception as e:
             import logging
             logging.warning(f"Event loop cleanup failed: {e}")

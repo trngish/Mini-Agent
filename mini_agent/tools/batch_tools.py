@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import fnmatch
 import json
 import os
 import re
@@ -142,8 +143,8 @@ class MultiReadTool(Tool):
             summary += f", {len(errors)} error(s)"
         combined += "\n" + summary
 
-        # Apply token truncation with generous limit (tokens are free)
-        max_tokens = get_file_token_limit() * 2  # Double the limit for multi-read
+        # Tokens are free - use full model limit for multi-read
+        max_tokens = get_file_token_limit()
         combined = truncate_text_by_tokens(combined, max_tokens)
 
         return ToolResult(success=True, content=combined)
@@ -158,6 +159,7 @@ class MultiEditTool(Tool):
 
     def __init__(self, workspace_dir: str = "."):
         self.workspace_dir = Path(workspace_dir).absolute()
+        self._default_encoding = "utf-8"
 
     @property
     def name(self) -> str:
@@ -195,10 +197,15 @@ class MultiEditTool(Tool):
                                 "type": "string",
                                 "description": "Replacement string",
                             },
+                            "encoding": {
+                                "type": "string",
+                                "description": "File encoding (default: utf-8)",
+                                "default": "utf-8",
+                            },
                         },
                         "required": ["path", "old_str", "new_str"],
                     },
-                    "description": "List of edits to apply. Each edit has path, old_str, new_str.",
+                    "description": "List of edits to apply. Each edit has path, old_str, new_str, optional encoding.",
                 },
             },
             "required": ["edits"],
@@ -219,6 +226,7 @@ class MultiEditTool(Tool):
             path = edit.get("path", "")
             old_str = edit.get("old_str", "")
             new_str = edit.get("new_str", "")
+            encoding = edit.get("encoding", self._default_encoding)
 
             if not path:
                 error_count += 1
@@ -235,7 +243,7 @@ class MultiEditTool(Tool):
                 if not old_str:
                     # Create new file
                     file_path.parent.mkdir(parents=True, exist_ok=True)
-                    file_path.write_text(new_str, encoding="utf-8")
+                    file_path.write_text(new_str, encoding=encoding)
                     files_edited.add(str(file_path))
                     success_count += 1
                     results.append(f"✅ Edit #{i+1} ({path}): Created new file")
@@ -246,7 +254,7 @@ class MultiEditTool(Tool):
                     results.append(f"❌ Edit #{i+1} ({path}): File not found")
                     continue
 
-                content = file_path.read_text(encoding="utf-8")
+                content = file_path.read_text(encoding=encoding)
 
                 if old_str not in content:
                     error_count += 1
@@ -254,11 +262,14 @@ class MultiEditTool(Tool):
                     continue
 
                 new_content = content.replace(old_str, new_str, 1)  # Replace first occurrence only
-                file_path.write_text(new_content, encoding="utf-8")
+                file_path.write_text(new_content, encoding=encoding)
                 files_edited.add(str(file_path))
                 success_count += 1
                 results.append(f"✅ Edit #{i+1} ({path}): Applied successfully")
 
+            except UnicodeDecodeError:
+                error_count += 1
+                results.append(f"❌ Edit #{i+1} ({path}): Failed to decode file with encoding '{encoding}'")
             except Exception as e:
                 error_count += 1
                 results.append(f"❌ Edit #{i+1} ({path}): {str(e)}")
@@ -359,8 +370,9 @@ class WorkspaceContextTool(Tool):
                 sections.append(config_content)
 
         combined = "\n".join(sections)
-        # Generous token limit since tokens are free
-        combined = truncate_text_by_tokens(combined, get_file_token_limit() * 2)
+        # Tokens are free - use full model limit for workspace context
+        max_tokens = get_file_token_limit()
+        combined = truncate_text_by_tokens(combined, max_tokens)
         return ToolResult(success=True, content=combined)
 
     def _get_tree(self, max_depth: int) -> str:
@@ -490,7 +502,6 @@ class MultiGrepTool(Tool):
     async def execute(self, searches: list[dict[str, Any]]) -> ToolResult:
         """Execute multiple grep searches."""
         searches = _ensure_list(searches)
-        import fnmatch
 
         results = []
         total_matches = 0
@@ -564,8 +575,6 @@ class MultiGrepTool(Tool):
 
     def _iterate_files(self, directory: Path, pattern: str):
         """Iterate over files matching the pattern."""
-        import fnmatch
-        import os
         if directory.is_file():
             yield directory
             return
@@ -819,8 +828,9 @@ class DeepContextTool(Tool):
         sections.append(self._analyze_structure())
 
         combined = "\n".join(sections)
-        # Generous token limit since tokens are free
-        combined = truncate_text_by_tokens(combined, get_file_token_limit() * 3)
+        # Tokens are free - use full model limit for deep context
+        max_tokens = get_file_token_limit() * 2  # 2x since deep context is the most comprehensive
+        combined = truncate_text_by_tokens(combined, max_tokens)
         return ToolResult(success=True, content=combined)
 
     def _get_tree(self, max_depth: int) -> str:
