@@ -20,6 +20,10 @@ from .utils.token_utils import get_encoder
 from .utils.error_handler import LLMErrorClassifier, format_llm_error
 from .utils.model_utils import is_m27_model, get_token_limit_for_model
 from .utils.tool_error_handler import handle_tool_error
+from .utils.context_cache import get_context_cache, ContextCache
+from .utils.tool_group_optimizer import ToolGroupOptimizer
+from .utils.summary_manager import AdaptiveSummaryManager, MessageComplexityAnalyzer
+from .utils.thinking_manager import ThinkingManager
 
 # Constants - avoid magic numbers
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
@@ -147,6 +151,21 @@ class Agent:
         # Incremental token estimation cache
         self._cached_token_count: int = 0
         self._cached_token_index: int = 0
+        
+        # Optimization: Context cache for reducing redundant file reads/searches
+        self._context_cache = get_context_cache()
+        
+        # Optimization: Adaptive summary manager with quality awareness
+        self._summary_manager = AdaptiveSummaryManager(self.token_limit)
+        self._last_summary_quality: float = 1.0
+        
+        # Optimization: Thinking manager to prevent context overflow from truncated thinking
+        # Only enable for M2.7 which uses extended thinking heavily
+        if self.is_m27:
+            # Use 80K as max thinking tokens (leave room for content/tools)
+            self._thinking_manager = ThinkingManager(max_thinking_tokens=80_000)
+        else:
+            self._thinking_manager = None
 
     @classmethod
     def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
@@ -342,8 +361,10 @@ class Agent:
 
         estimated_tokens = self._estimate_tokens()
 
-        # Check both local estimation and API reported tokens
-        should_summarize = estimated_tokens > self.token_limit or self.api_total_tokens > self.token_limit
+        # Use adaptive summary decision with quality awareness
+        should_summarize, reason = self._summary_manager.should_summarize(
+            self.messages, estimated_tokens, self.api_total_tokens
+        )
 
         # If neither exceeded, no summary needed
         if not should_summarize:
@@ -352,7 +373,7 @@ class Agent:
         print(
             f"\n{Colors.BRIGHT_YELLOW}📊 Token usage - Local estimate: {estimated_tokens}, API reported: {self.api_total_tokens}, Limit: {self.token_limit}{Colors.RESET}"
         )
-        print(f"{Colors.BRIGHT_YELLOW}🔄 Triggering message history summarization...{Colors.RESET}")
+        print(f"{Colors.BRIGHT_YELLOW}🔄 Triggering message summarization ({reason})...{Colors.RESET}")
 
         # Find all user message indices (skip system prompt)
         user_indices = [i for i, msg in enumerate(self.messages) if msg.role == "user" and i > 0]
@@ -388,7 +409,19 @@ class Agent:
 
             # If there are execution messages in this round, summarize them
             if execution_messages:
-                summary_text = self._create_local_summary(execution_messages, i + 1)
+                # Get summary config based on quality tier
+                tier = 'medium'
+                if ':' in reason and 'tier=' in reason:
+                    tier = reason.split('tier=')[1]
+                elif reason.startswith('early_trigger'):
+                    tier = 'low'
+                
+                summary_config = self._summary_manager.get_summary_config(tier)
+                summary_text = self._create_local_summary(
+                    execution_messages, i + 1, 
+                    preserve_ratio=summary_config['preserve_ratio'],
+                    max_truncation=summary_config['max_truncation']
+                )
                 if summary_text:
                     summary_message = Message(
                         role="user",
@@ -409,21 +442,86 @@ class Agent:
         self._skip_next_token_check = True
 
         new_tokens = self._estimate_tokens()
+        
+        # Estimate summary quality for adaptive next-check decision
+        self._last_summary_quality = self._summary_manager.estimate_summary_quality(
+            self.messages, str(len(new_messages) * 100)  # rough estimate
+        )
+        
+        # Skip next token check based on summary quality
+        if self._summary_manager.should_skip_next_check(self._last_summary_quality):
+            self._skip_next_token_check = True
+        
         print(f"{Colors.BRIGHT_GREEN}✓ Summary completed, local tokens: {estimated_tokens} → {new_tokens}{Colors.RESET}")
         print(f"{Colors.DIM}  Structure: system + {len(user_indices)} user messages + {summary_count} summaries{Colors.RESET}")
-        print(f"{Colors.DIM}  Note: API token count will update on next LLM call{Colors.RESET}")
+        print(f"{Colors.DIM}  Quality: {self._last_summary_quality:.2f} | Note: API token count will update on next LLM call{Colors.RESET}")
 
-    def _create_local_summary(self, messages: list[Message], round_num: int) -> str:
+    def _optimize_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolCall]:
+        """Optimize tool calls by deduplicating paths in multi_read.
+        
+        Args:
+            tool_calls: Original tool calls
+            
+        Returns:
+            Optimized tool calls with duplicate paths removed
+        """
+        # Check for multi_read with duplicate paths
+        multi_read_calls = []
+        other_calls = []
+        
+        for tc in tool_calls:
+            if tc.function.name == 'multi_read':
+                multi_read_calls.append(tc)
+            else:
+                other_calls.append(tc)
+        
+        # Deduplicate paths in multi_read calls
+        if len(multi_read_calls) > 1:
+            # Merge all paths and deduplicate
+            all_paths = []
+            for tc in multi_read_calls:
+                paths = tc.function.arguments.get('paths', [])
+                if isinstance(paths, list):
+                    all_paths.extend(paths)
+            
+            # Deduplicate while preserving order
+            seen = set()
+            unique_paths = []
+            for p in all_paths:
+                normalized = str(Path(p).resolve() if Path(p).is_absolute() else p)
+                if normalized not in seen:
+                    seen.add(normalized)
+                    unique_paths.append(p)
+            
+            # Replace all multi_read calls with one deduplicated call
+            if unique_paths:
+                first_call = multi_read_calls[0]
+                deduped_call = ToolCall(
+                    id=first_call.id,
+                    type="function",
+                    function=FunctionCall(
+                        name="multi_read",
+                        arguments={"paths": unique_paths}
+                    )
+                )
+                other_calls.insert(0, deduped_call)
+                return other_calls
+        
+        return tool_calls
+
+    def _create_local_summary(self, messages: list[Message], round_num: int,
+                                preserve_ratio: float = 0.6,
+                                max_truncation: int = 1000) -> str:
         """Create summary locally without LLM call (saves tokens).
 
         按次数计费优化：token免费，保留更多细节以减少后续重复调用。
         摘要质量越高，LLM越不需要重新获取信息。
-        提高截断限制：2000字符（assistant）、1500字符（tool result），
-        因为信息丢失导致的重调成本远高于多传一些token。
 
         Args:
             messages: List of messages to summarize
             round_num: Round number
+            preserve_ratio: How much content to preserve (0-1)
+            max_truncation: Maximum characters to truncate to
 
         Returns:
             Summary text
@@ -451,17 +549,20 @@ class Agent:
                     tool_details = []
                     for tc in msg.tool_calls:
                         args_str = str(tc.function.arguments)
-                        if len(args_str) > 150:
-                            args_str = args_str[:150] + "..."
+                        # Adaptive truncation based on preserve_ratio
+                        args_max = max(150, int(150 * preserve_ratio * 1.5))
+                        if len(args_str) > args_max:
+                            args_str = args_str[:args_max] + "..."
                         tool_details.append(f"{tc.function.name}({args_str})")
                     lines.append(f"  Tools called: {', '.join(tool_details)}")
                     tool_calls_count += len(msg.tool_calls)
             elif msg.role == "tool":
                 tool_results_count += 1
                 result = msg.content if isinstance(msg.content, str) else str(msg.content)
-                # 按次数计费优化：保留更多结果（1500字符），避免因信息不足重新获取
-                if len(result) > 1500:
-                    result = result[:1500] + "..."
+                # Adaptive truncation based on preserve_ratio
+                result_max = max(1500, int(1500 * preserve_ratio * 1.5))
+                if len(result) > result_max:
+                    result = result[:result_max] + "..."
                 lines.append(f"  Result: {result}")
 
         # Add assistant response summary if no tools were called
@@ -521,34 +622,23 @@ class Agent:
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
             try:
-                # Setup streaming callbacks for real-time output with buffering
+                # Setup streaming callbacks for real-time output
                 thinking_first = True
                 content_first = True
-                
-                # Use deque for efficient buffer management with maxlen
-                buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
-                thinking_buffer: deque[str] = deque(maxlen=buffer_size)
-                content_buffer: deque[str] = deque(maxlen=buffer_size)
 
                 def on_thinking(text: str) -> None:
-                    nonlocal thinking_first, thinking_buffer
+                    nonlocal thinking_first
                     if thinking_first:
                         print(f"\n  {Colors.BOLD}{Colors.MAGENTA}🧠 Think{Colors.RESET}")
                         thinking_first = False
-                    thinking_buffer.append(text)
-                    if len(thinking_buffer) >= buffer_size:
-                        print(f"{Colors.DIM}{''.join(thinking_buffer)}{Colors.RESET}", end="", flush=True)
-                        thinking_buffer.clear()
+                    print(f"{Colors.DIM}{text}{Colors.RESET}", end="", flush=True)
 
                 def on_text(text: str) -> None:
-                    nonlocal content_first, content_buffer
+                    nonlocal content_first
                     if content_first:
                         print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
                         content_first = False
-                    content_buffer.append(text)
-                    if len(content_buffer) >= buffer_size:
-                        print(''.join(content_buffer), end="", flush=True)
-                        content_buffer.clear()
+                    print(text, end="", flush=True)
 
                 response = await self.llm.generate(
                     messages=self.messages,
@@ -556,12 +646,6 @@ class Agent:
                     on_text=on_text,
                     on_thinking=on_thinking,
                 )
-                
-                # Flush any remaining buffer content
-                if thinking_buffer:
-                    print(f"{Colors.DIM}{''.join(thinking_buffer)}{Colors.RESET}", end="", flush=True)
-                if content_buffer:
-                    print(''.join(content_buffer), end="", flush=True)
 
                 # Print newline after streaming output if any was streamed
                 if not content_first or not thinking_first:
@@ -606,6 +690,15 @@ class Agent:
             )
             self.messages.append(assistant_msg)
 
+            # Prune thinking content if it exceeds threshold (M2.7 optimization)
+            if self._thinking_manager and len(self.messages) > 5:
+                tokens_freed = self._thinking_manager.prune_thinking(self.messages)
+                if tokens_freed > 1000:
+                    print(f"{Colors.DIM}🧠 Pruned {tokens_freed:,} thinking tokens to prevent context overflow{Colors.RESET}")
+                    # Invalidate token cache since thinking content changed
+                    self._cached_token_count = 0
+                    self._cached_token_index = 0
+
             # Check if task is complete (no tool calls)
             if not response.tool_calls:
                 step_elapsed = perf_counter() - step_start_time
@@ -618,10 +711,27 @@ class Agent:
             parallel_enabled = self.is_m27 and self.m27_config.get("enable_parallel_tool_calls", True)
             max_concurrent = self.m27_config.get("max_concurrent_tools", 5) if self.is_m27 else 1
 
-            if parallel_enabled and len(response.tool_calls) > 1:
-                results = await self.execute_tools_parallel(response.tool_calls, max_concurrent)
+            # Use tool group optimizer for intelligent batching
+            tool_calls = response.tool_calls
+            if parallel_enabled and len(tool_calls) > 1:
+                # Check if tools can be parallelized (no write conflicts)
+                if ToolGroupOptimizer.can_parallelize(tool_calls):
+                    # Further optimize by deduplicating paths in multi_read/multi_edit
+                    tool_calls = self._optimize_tool_calls(tool_calls)
+                    results = await self.execute_tools_parallel(tool_calls, max_concurrent)
+                else:
+                    # Run in dependency-ordered batches
+                    batches = ToolGroupOptimizer.group_by_dependency(tool_calls)
+                    results = []
+                    for batch in batches:
+                        if len(batch) == 1:
+                            result = await self.execute_single_tool(batch[0])
+                            results.append(result)
+                        else:
+                            batch_results = await self.execute_tools_parallel(batch, max_concurrent)
+                            results.extend(batch_results)
             else:
-                results = await self.execute_tools_sequential(response.tool_calls)
+                results = await self.execute_tools_sequential(tool_calls)
 
             # Append tool messages and handle cancellation
             for tool_call, tool_msg in results:

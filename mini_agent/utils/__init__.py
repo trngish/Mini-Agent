@@ -57,6 +57,10 @@ from .platform_utils import (
     normalize_path_separators,
 )
 from .config_validator import ConfigValidator, ConfigValidationError
+from .context_cache import ContextCache, get_context_cache
+from .tool_group_optimizer import ToolGroupOptimizer
+from .summary_manager import AdaptiveSummaryManager, MessageComplexityAnalyzer
+from .thinking_manager import ThinkingManager
 
 __all__ = [
     # Display utilities
@@ -114,4 +118,11 @@ __all__ = [
     # Config validation
     "ConfigValidator",
     "ConfigValidationError",
+    # Context management (new optimizations)
+    "ContextCache",
+    "get_context_cache",
+    "ToolGroupOptimizer",
+    "AdaptiveSummaryManager",
+    "MessageComplexityAnalyzer",
+    "ThinkingManager",
 ]

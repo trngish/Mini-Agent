@@ -20,6 +20,9 @@ from .batch_shared import get_git_status_sync, get_tree_sync
 from pathlib import Path
 from typing import Any
 
+# Import context cache for caching support in batch tools
+from ..utils.context_cache import get_context_cache
+
 
 def _ensure_list(data: list | str | None) -> list:
     """Ensure input is a list, parsing JSON string if needed.
@@ -89,11 +92,14 @@ class MultiReadTool(Tool):
         }
 
     async def execute(self, paths: list[str], offset: int | None = None, limit: int | None = None) -> ToolResult:
-        """Execute multi-file read."""
+        """Execute multi-file read with caching support."""
         paths = _ensure_list(paths)
         results = []
         total_lines = 0
         errors = []
+        
+        # Get context cache for deduplication
+        cache = get_context_cache()
 
         for path in paths:
             try:
@@ -105,6 +111,14 @@ class MultiReadTool(Tool):
                 if not file_path.exists():
                     errors.append(f"❌ {path}: File not found")
                     continue
+
+                # Check cache first (only for full reads without offset/limit)
+                if offset is None and limit is None:
+                    cached_content = cache.get_file_content(file_path)
+                    if cached_content:
+                        results.append(f"{normalized}: (cached {len(cached_content)} chars)")
+                        total_lines += cached_content.count('\n')
+                        continue
 
                 with open(file_path, encoding="utf-8") as f:
                     lines = f.readlines()
@@ -123,6 +137,10 @@ class MultiReadTool(Tool):
 
                 content = "\n".join(numbered)
                 total_lines += len(numbered)
+
+                # Cache full reads for future use
+                if offset is None and limit is None:
+                    cache.set_file_content(file_path, content)
 
                 # Add file header
                 header = f"{'='*60}\n📄 {path} ({len(lines)} lines, showing {start+1}-{end})\n{'='*60}"
@@ -500,11 +518,14 @@ class MultiGrepTool(Tool):
         }
 
     async def execute(self, searches: list[dict[str, Any]]) -> ToolResult:
-        """Execute multiple grep searches."""
+        """Execute multiple grep searches with caching."""
         searches = _ensure_list(searches)
 
         results = []
         total_matches = 0
+        
+        # Get context cache for caching grep results
+        cache = get_context_cache()
 
         for search in searches:
             pattern = search.get("pattern", "")
@@ -524,6 +545,17 @@ class MultiGrepTool(Tool):
 
             if not search_dir.exists():
                 results.append(f"{'='*60}\n🔍 Pattern: '{pattern}' - Path not found: {path}\n{'='*60}")
+                continue
+
+            # Check cache first
+            cached_result = cache.get_grep_result(pattern, str(search_dir), file_pattern, case_sensitive)
+            if cached_result is not None:
+                total_matches += len(cached_result)
+                header = f"{'='*60}\n🔍 Pattern: '{pattern}' ({len(cached_result)} matches - cached)\n{'='*60}"
+                if cached_result:
+                    results.append(f"{header}\n" + "\n".join(cached_result[:max_results]))
+                else:
+                    results.append(f"{header}\n  No matches found")
                 continue
 
             # Compile regex if needed
@@ -563,6 +595,10 @@ class MultiGrepTool(Tool):
                     continue
 
             total_matches += len(matches)
+            
+            # Cache the results
+            cache.set_grep_result(pattern, str(search_dir), file_pattern, case_sensitive, matches)
+            
             header = f"{'='*60}\n🔍 Pattern: '{pattern}' ({len(matches)} matches)\n{'='*60}"
             if matches:
                 results.append(f"{header}\n" + "\n".join(matches))
