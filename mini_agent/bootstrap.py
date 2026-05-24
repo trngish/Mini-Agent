@@ -17,7 +17,7 @@ from .tools.batch_tools import (
 from .tools.search_tools import GrepTool, FindTool, TreeTool
 from .tools.git_tool import GitTool, GitStatusTool
 from .tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
-from .tools.note_tool import SessionNoteTool
+from .tools.note_tool import SessionNoteTool, RecallNoteTool
 from .tools.skill_tool import create_skill_tools
 from .utils import Colors
 
@@ -50,7 +50,8 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
 
     if config.tools.enable_note:
         tools.append(SessionNoteTool())
-        print(f"{Colors.GREEN}✅ Note tool enabled{Colors.RESET}")
+        tools.append(RecallNoteTool())
+        print(f"{Colors.GREEN}✅ Note tools enabled (record + recall){Colors.RESET}")
 
     if config.tools.enable_skills:
         # Get skills search paths (user config dir + project dir)
