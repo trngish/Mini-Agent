@@ -170,6 +170,11 @@ class Agent:
         # Auto-save session after each step to prevent losing progress on crashes
         self.auto_save = os.environ.get("MINI_AGENT_AUTO_SAVE", "true").lower() == "true"
         self._last_auto_save_step = 0
+        
+        # Error pattern tracking for learning from failures
+        self._error_patterns: dict[str, int] = {}  # tool_name -> failure count
+        self._error_history: list[dict] = []  # Recent errors for analysis
+        self._max_error_history = 20  # Keep last 20 errors
 
     @classmethod
     def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
@@ -213,9 +218,23 @@ class Agent:
                 pass  # Silently fail - recording is best-effort
     
     def _record_error_context(self, error: str, context: str) -> None:
-        """Record error context for future reference."""
+        """Record error context for future reference and pattern learning."""
+        # Track by tool name
+        tool_name = context.split('(')[0] if '(' in context else "unknown"
+        self._error_patterns[tool_name] = self._error_patterns.get(tool_name, 0) + 1
+        
+        # Keep error history
+        self._error_history.append({
+            "error": error[:200],
+            "context": context[:100],
+            "tool": tool_name,
+        })
+        if len(self._error_history) > self._max_error_history:
+            self._error_history = self._error_history[-self._max_error_history:]
+        
+        # Also record via note tool if available
         self.record_context(
-            content=f"Error encountered: {error}. Context: {context[:200]}",
+            content=f"Error with {tool_name}: {error[:150]}",
             category="error_pattern"
         )
 
@@ -940,6 +959,17 @@ class Agent:
 
         self._on_tool_result(function_name, result)
 
+        # Track consecutive failures for health monitoring
+        if result.success:
+            self._consecutive_failures = 0
+        else:
+            self._consecutive_failures += 1
+            # Record error context for future reference
+            self._record_error_context(
+                error=result.error or "Unknown error",
+                context=f"{function_name}({json.dumps(arguments, ensure_ascii=False)[:100]})"
+            )
+
         # Keep tool results intact (user pays per call, not per token)
         content = result.content if result.success else f"Error: {result.error}"
         
@@ -1127,6 +1157,49 @@ class Agent:
             issues.append("Message history seems incomplete")
             
         return issues
+    
+    def get_error_patterns(self) -> dict:
+        """Get error pattern analysis for debugging and learning.
+        
+        Returns:
+            Dict with error patterns by tool and recent error history
+        """
+        return {
+            "error_counts_by_tool": self._error_patterns.copy(),
+            "recent_errors": self._error_history.copy(),
+            "total_consecutive_failures": self._consecutive_failures,
+        }
+    
+    def get_suggestions(self) -> list[str]:
+        """Get suggestions based on current agent state.
+        
+        Analyzes agent status and provides actionable suggestions.
+        """
+        suggestions = []
+        
+        # Check error patterns
+        if self._consecutive_failures >= 2:
+            suggestions.append(f"Consider reviewing recent errors with get_error_patterns()")
+            
+        # Check token usage
+        try:
+            tokens = self._estimate_tokens()
+            if tokens > self.token_limit * 0.8:
+                suggestions.append("Token usage is high - consider summarizing messages earlier")
+        except Exception:
+            pass
+        
+        # Check for repeated tool failures
+        for tool, count in self._error_patterns.items():
+            if count >= 3:
+                suggestions.append(f"Tool '{tool}' has failed {count} times - may need investigation")
+        
+        # Check session age
+        steps = len([m for m in self.messages if m.role == "user"])
+        if steps > 30 and not suggestions:
+            suggestions.append("Long session detected - consider saving session and starting fresh")
+            
+        return suggestions
     
     async def dispatch_sub_agents(
         self, 
