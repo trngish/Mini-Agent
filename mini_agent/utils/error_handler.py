@@ -316,6 +316,103 @@ class LLMErrorClassifier:
 
         return None
 
+
+def calculate_exponential_backoff(
+    attempt: int,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    exponential_base: float = 2.0,
+    jitter: float = 0.5
+) -> float:
+    """Calculate delay with exponential backoff and jitter.
+    
+    This is more effective for rate limit recovery than fixed delays.
+    
+    Args:
+        attempt: Current attempt number (0-indexed)
+        base_delay: Base delay in seconds
+        max_delay: Maximum delay cap
+        exponential_base: Multiplier for each attempt
+        jitter: Random factor (0-1) to add randomness
+        
+    Returns:
+        Delay in seconds to wait before next retry
+    """
+    import random
+    
+    # Calculate exponential delay
+    delay = base_delay * (exponential_base ** attempt)
+    
+    # Cap at max delay
+    delay = min(delay, max_delay)
+    
+    # Add jitter to prevent thundering herd
+    jitter_range = delay * jitter
+    delay += random.uniform(-jitter_range, jitter_range)
+    
+    return max(0.1, delay)  # At least 100ms
+
+
+class RetryStrategy:
+    """Configurable retry strategy for LLM API calls.
+    
+    Supports:
+    - Exponential backoff with jitter
+    - Per-error-type configuration
+    - Maximum retry limits
+    """
+    
+    # Default retry configuration per error type
+    DEFAULT_CONFIG = {
+        "rate_limit": {"max_retries": 5, "base_delay": 2.0, "max_delay": 120.0},
+        "server_error": {"max_retries": 3, "base_delay": 1.0, "max_delay": 30.0},
+        "timeout": {"max_retries": 3, "base_delay": 1.0, "max_delay": 60.0},
+        "network": {"max_retries": 5, "base_delay": 1.0, "max_delay": 60.0},
+    }
+    
+    def __init__(self, config: dict | None = None):
+        self.config = config or self.DEFAULT_CONFIG
+    
+    def get_delay(self, error_type: str, attempt: int) -> float | None:
+        """Get retry delay for error type and attempt.
+        
+        Args:
+            error_type: Type of error (from LLMErrorType)
+            attempt: Current attempt number
+            
+        Returns:
+            Delay in seconds, or None if should not retry
+        """
+        # Normalize error type to config key
+        config_key = error_type.value.replace("_error", "") if hasattr(error_type, 'value') else error_type
+        
+        if config_key not in self.config:
+            config_key = "network"  # Default fallback
+        
+        cfg = self.config[config_key]
+        if attempt >= cfg["max_retries"]:
+            return None
+        
+        return calculate_exponential_backoff(
+            attempt=attempt,
+            base_delay=cfg["base_delay"],
+            max_delay=cfg["max_delay"],
+        )
+    
+    def should_retry(self, error_type: str, attempt: int) -> bool:
+        """Check if should retry this error type.
+        
+        Args:
+            error_type: Type of error
+            attempt: Current attempt number
+            
+        Returns:
+            True if should retry, False otherwise
+        """
+        return self.get_delay(error_type, attempt) is not None
+
+
+
 def format_llm_error(error: Exception, status_code: Optional[int] = None) -> str:
     """Format an LLM error into a user-friendly message.
 

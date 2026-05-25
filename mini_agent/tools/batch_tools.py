@@ -23,6 +23,9 @@ from typing import Any
 # Import context cache for caching support in batch tools
 from ..utils.context_cache import get_context_cache
 
+# Import tool execution utilities for result compression
+from ..core.tool_execution import should_compress_result, compress_tool_result
+
 
 def _ensure_list(data: list | str | None) -> list:
     """Ensure input is a list, parsing JSON string if needed.
@@ -164,6 +167,11 @@ class MultiReadTool(Tool):
         # Tokens are free - use full model limit for multi-read
         max_tokens = get_file_token_limit()
         combined = truncate_text_by_tokens(combined, max_tokens)
+
+        # Apply result compression if needed
+        if should_compress_result("multi_read", len(combined)):
+            compressed = compress_tool_result(ToolResult(success=True, content=combined))
+            combined = compressed.content
 
         return ToolResult(success=True, content=combined)
 
@@ -391,6 +399,12 @@ class WorkspaceContextTool(Tool):
         # Tokens are free - use full model limit for workspace context
         max_tokens = get_file_token_limit()
         combined = truncate_text_by_tokens(combined, max_tokens)
+
+        # Apply result compression if needed
+        if should_compress_result("workspace_context", len(combined)):
+            compressed = compress_tool_result(ToolResult(success=True, content=combined))
+            combined = compressed.content
+
         return ToolResult(success=True, content=combined)
 
     def _get_tree(self, max_depth: int) -> str:
@@ -607,6 +621,12 @@ class MultiGrepTool(Tool):
 
         combined = "\n\n".join(results)
         combined += f"\n\n📊 Total: {len(searches)} patterns searched, {total_matches} total matches"
+
+        # Apply result compression if needed
+        if should_compress_result("multi_grep", len(combined)):
+            compressed = compress_tool_result(ToolResult(success=True, content=combined))
+            combined = compressed.content
+
         return ToolResult(success=True, content=combined)
 
     def _iterate_files(self, directory: Path, pattern: str):
@@ -867,6 +887,12 @@ class DeepContextTool(Tool):
         # Tokens are free - use full model limit for deep context
         max_tokens = get_file_token_limit() * 2  # 2x since deep context is the most comprehensive
         combined = truncate_text_by_tokens(combined, max_tokens)
+
+        # Apply result compression if needed (deep context is very large)
+        if should_compress_result("deep_context", len(combined)):
+            compressed = compress_tool_result(ToolResult(success=True, content=combined))
+            combined = compressed.content
+
         return ToolResult(success=True, content=combined)
 
     def _get_tree(self, max_depth: int) -> str:

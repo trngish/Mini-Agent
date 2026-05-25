@@ -181,6 +181,66 @@ class ContextCache:
                 'grep_entries': len(self._grep_cache),
             }
 
+    def filter_uncached_paths(self, paths: list[str | Path]) -> list[str]:
+        """Filter out paths that are already cached.
+
+        Args:
+            paths: List of file paths to check
+
+        Returns:
+            List of paths that are NOT in cache (need to be read)
+        """
+        uncached = []
+        for path in paths:
+            normalized = str(Path(path).resolve())
+            with self._lock:
+                if normalized not in self._file_cache:
+                    uncached.append(path)
+                else:
+                    entry = self._file_cache[normalized]
+                    if not self._is_valid(entry):
+                        uncached.append(path)
+        return uncached
+
+    def warmup(self, workspace_dir: str | Path, priority_files: list[str] | None = None) -> int:
+        """Warm up cache with frequently accessed files.
+
+        Args:
+            workspace_dir: Workspace directory
+            priority_files: List of file patterns to prioritize (e.g., ['*.json', '*.yaml'])
+
+        Returns:
+            Number of files cached
+        """
+        if priority_files is None:
+            priority_files = [
+                'package.json', 'requirements.txt', 'pyproject.toml',
+                '*.yaml', '*.yml', '*.json', '*.toml',
+                'README*', '*.md', 'config*',
+            ]
+
+        cached_count = 0
+        workspace = Path(workspace_dir)
+
+        for pattern in priority_files:
+            # Use glob to find matching files
+            matches = list(workspace.glob(f"**/{pattern}"))
+            if pattern.startswith('*'):
+                matches = list(workspace.glob(pattern))
+            elif '/' not in pattern:
+                matches = list(workspace.glob(f"**/{pattern}"))
+
+            for match in matches[:10]:  # Limit to 10 files per pattern
+                if match.is_file():
+                    try:
+                        content = match.read_text(encoding='utf-8')
+                        self.set_file_content(match, content, ttl=600)  # 10 min TTL for warmup
+                        cached_count += 1
+                    except Exception:
+                        pass  # Skip files that can't be read
+
+        return cached_count
+
 
 # Global singleton instance
 _global_cache: ContextCache | None = None

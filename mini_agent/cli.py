@@ -138,6 +138,17 @@ async def run_agent(workspace_dir: Path, task: str = None, cli_overrides: None =
         mode=AgentMode.YOLO,
     )
 
+    # 6.5 Add team dispatch tool for multi-agent collaboration
+    from .tools.team_dispatch_tool import TeamDispatchTool
+    team_tool = TeamDispatchTool(
+        llm_client=llm_client,
+        tools=tools,
+        system_prompt=system_prompt,
+        m27_config=m27_config,
+    )
+    agent.tools["team_dispatch"] = team_tool
+    agent.tool_list.append(team_tool)
+
     # 7. Interactive mode (original prompt_toolkit loop)
     if task:
         task_text = task

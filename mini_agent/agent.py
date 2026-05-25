@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .schema import AgentMode, Message, ToolCall
+from .schema import AgentMode, FunctionCall, Message, ToolCall
 from .schema.schema import WRITE_TOOLS
 from .session import SessionManager
 from .tools.base import Tool, ToolResult
@@ -29,31 +29,15 @@ from .utils.tool_group_optimizer import ToolGroupOptimizer
 from .utils.summary_manager import AdaptiveSummaryManager, MessageComplexityAnalyzer
 from .utils.thinking_manager import ThinkingManager
 
+# Import core modules for refactored functionality
+from .core.error_recovery import ErrorRecoveryManager
+from .core.metrics import PerformanceMetrics
+from .core.health_check import HealthChecker
+from .core.thinking_budget import ThinkingBudgetManager
+
 # Constants - avoid magic numbers
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
 DEFAULT_ENCODING_NAME = "cl100k_base"
-
-# Adaptive thinking budget levels (按次数计费优化：token免费，思考越深命中率越高)
-# 提高基础预算：更深思考 → 更高命中率 → 更少重试 → 更少总调用次数
-THINKING_BUDGET_SIMPLE = 16384      # 简单任务：原8K→16K，确保一次做对
-THINKING_BUDGET_MEDIUM = 24576      # 中等任务：原16K→24K，减少返工
-THINKING_BUDGET_COMPLEX = 32768     # 复杂任务：原24K→32K，深度规划
-THINKING_BUDGET_SUPER = 32768       # 超复杂任务：32K上限
-
-# Complexity indicators for auto-detection
-COMPLEXITY_HIGH_KEYWORDS = {
-    "重构", "refactor", "架构", "architecture", "重写", "rewrite",
-    "迁移", "migrate", "全面", "comprehensive", "整体", "entire",
-    "所有", "all files", "批量", "batch", "多个文件", "multi-file",
-    "设计", "design", "调试", "debug", "排查", "investigate",
-    "优化", "optimize", "性能", "performance",
-}
-
-COMPLEXITY_MEDIUM_KEYWORDS = {
-    "修改", "modify", "fix", "修复", "实现", "implement", "添加", "add",
-    "更新", "update", "创建", "create", "搜索", "search", "分析", "analyze",
-    "检查", "check", "比较", "compare", "转换", "convert",
-}
 
 
 class Agent:
@@ -102,7 +86,11 @@ class Agent:
         # Max budget from config, actual budget is dynamically adjusted per task
         self._max_thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384) if self.is_m27 else 0
         self.thinking_budget = self._max_thinking_budget  # Start with max, will be adjusted per task
-        
+
+        # Use core module for thinking budget management
+        self._thinking_budget_manager = ThinkingBudgetManager(self)
+        self._thinking_budget_manager.configure(self._max_thinking_budget, self.is_m27)
+
         # Optimization: track consecutive tool failures - handle locally before reporting
         self._consecutive_failures = 0
         self._max_consecutive_failures = 3  # 连续失败3次才回话报告
@@ -156,8 +144,20 @@ class Agent:
         self._cached_token_count: int = 0
         self._cached_token_index: int = 0
         
+        # Token cache version for invalidation on message changes
+        self._token_cache_version: int = 0
+        
         # Optimization: Context cache for reducing redundant file reads/searches
         self._context_cache = get_context_cache()
+
+        # Warmup cache with frequently accessed files
+        if os.environ.get("MINI_AGENT_CACHE_WARMUP", "true").lower() == "true":
+            try:
+                cached_count = self._context_cache.warmup(self.workspace_dir)
+                if cached_count > 0:
+                    print(f"{Colors.DIM}📦 Cache warmed with {cached_count} files{Colors.RESET}")
+            except Exception:
+                pass  # Warmup is best-effort
         
         # Optimization: Adaptive summary manager with quality awareness
         self._summary_manager = AdaptiveSummaryManager(self.token_limit)
@@ -174,17 +174,15 @@ class Agent:
         # Auto-save session after each step to prevent losing progress on crashes
         self.auto_save = os.environ.get("MINI_AGENT_AUTO_SAVE", "true").lower() == "true"
         self._last_auto_save_step = 0
-        
-        # Error pattern tracking for learning from failures
-        self._error_patterns: dict[str, int] = {}  # tool_name -> failure count
-        self._error_history: list[dict] = []  # Recent errors for analysis
-        self._max_error_history = 20  # Keep last 20 errors
-        
-        # Performance metrics tracking
-        self._step_durations: list[float] = []  # Duration of each step in seconds
-        self._tool_execution_times: dict[str, list[float]] = {}  # tool_name -> durations
-        self._api_latencies: list[float] = []  # API call response times
-        self._max_step_history = 50  # Keep last 50 steps for metrics
+
+        # Use core modules for error recovery and metrics
+        self._error_recovery = ErrorRecoveryManager(self)
+        self._metrics = PerformanceMetrics(self)
+
+        # Proxy to core modules for backward compatibility
+        self._error_patterns = self._error_recovery._error_patterns
+        self._error_history = self._error_recovery._error_history
+        self._consecutive_failures = 0  # Will be managed by ErrorRecoveryManager
 
     @classmethod
     def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
@@ -204,7 +202,7 @@ class Agent:
         """Add a user message to history."""
         self.messages.append(Message(role="user", content=content))
         # Adaptively adjust thinking budget based on task complexity
-        self._adjust_thinking_budget(content)
+        self._thinking_budget_manager.adjust(content)
     
     def record_context(self, content: str, category: str = "auto") -> None:
         """Automatically record important context without needing explicit tool call.
@@ -229,88 +227,7 @@ class Agent:
     
     def _record_error_context(self, error: str, context: str) -> None:
         """Record error context for future reference and pattern learning."""
-        # Track by tool name
-        tool_name = context.split('(')[0] if '(' in context else "unknown"
-        self._error_patterns[tool_name] = self._error_patterns.get(tool_name, 0) + 1
-        
-        # Keep error history
-        self._error_history.append({
-            "error": error[:200],
-            "context": context[:100],
-            "tool": tool_name,
-        })
-        if len(self._error_history) > self._max_error_history:
-            self._error_history = self._error_history[-self._max_error_history:]
-        
-        # Also record via note tool if available
-        self.record_context(
-            content=f"Error with {tool_name}: {error[:150]}",
-            category="error_pattern"
-        )
-
-    def _update_thinking_budget(self, budget: int) -> None:
-        """Update thinking budget for M2.7 models via proper interface.
-        
-        This is the official API for dynamically adjusting thinking budget
-        based on task complexity. Agents should use this instead of directly
-        accessing private attributes.
-        
-        Args:
-            budget: New thinking budget in tokens
-        """
-        self.thinking_budget = budget
-        # Update the LLM client's thinking budget via public API
-        if hasattr(self.llm, 'configure_thinking_budget'):
-            self.llm.configure_thinking_budget(budget)
-
-    def _adjust_thinking_budget(self, user_message: str) -> None:
-        """Adaptively adjust thinking budget based on task complexity.
-
-        按次数计费优化：token免费，思考越深→命中率越高→重试越少→总调用次数越少。
-        简单任务给足思考空间也能提高单次完成率。
-
-        Args:
-            user_message: The user's message to analyze for complexity
-        """
-        if not self.is_m27:
-            return
-
-        msg_lower = user_message.lower()
-
-        # Detect complexity level from keywords
-        high_matches = sum(1 for kw in COMPLEXITY_HIGH_KEYWORDS if kw in msg_lower)
-        medium_matches = sum(1 for kw in COMPLEXITY_MEDIUM_KEYWORDS if kw in msg_lower)
-
-        # Estimate file count mentioned
-        file_mentions = len(re.findall(r'\.(py|js|ts|jsx|tsx|java|go|rs|c|cpp|h|rb|php|yaml|yml|json|toml|md|txt|csv|sql|sh|bash|ps1)', msg_lower))
-
-        # Determine complexity
-        if high_matches >= 2 or file_mentions >= 4:
-            new_budget = THINKING_BUDGET_SUPER
-            level = "超复杂"
-        elif high_matches >= 1 or file_mentions >= 2 or medium_matches >= 3:
-            new_budget = THINKING_BUDGET_COMPLEX
-            level = "复杂"
-        elif medium_matches >= 1 or file_mentions >= 1:
-            new_budget = THINKING_BUDGET_MEDIUM
-            level = "中等"
-        else:
-            new_budget = THINKING_BUDGET_SIMPLE
-            level = "简单"
-
-        # Also consider message length as a signal
-        msg_tokens = len(user_message) // 3  # rough estimation
-        if msg_tokens > 2000:
-            new_budget = max(new_budget, THINKING_BUDGET_COMPLEX)
-            level = "复杂(长消息)"
-
-        # Constrain to max budget from config
-        new_budget = min(new_budget, self._max_thinking_budget)
-
-        if new_budget != self.thinking_budget:
-            old_budget = self.thinking_budget
-            self._update_thinking_budget(new_budget)
-            print(f"{Colors.DIM}🧠 Thinking budget adjusted: {old_budget} → {new_budget} ({level}任务){Colors.RESET}")
+        self._error_recovery.record_error(error, context)
 
     def _check_cancelled(self) -> bool:
         """Check if agent execution has been cancelled.
@@ -497,6 +414,8 @@ class Agent:
         # Reset token cache since message list was rebuilt
         self._cached_token_count = 0
         self._cached_token_index = 0
+        if hasattr(self, "_token_cache_version"):
+            self._token_cache_version += 1
 
         # Skip next token check to avoid consecutive summary triggers
         # (api_total_tokens will be updated after next LLM call)
@@ -785,6 +704,8 @@ class Agent:
                     # Invalidate token cache since thinking content changed
                     self._cached_token_count = 0
                     self._cached_token_index = 0
+                    if hasattr(self, "_token_cache_version"):
+                        self._token_cache_version += 1
 
             # Check if task is complete (no tool calls)
             if not response.tool_calls:
@@ -836,12 +757,10 @@ class Agent:
 
             step_elapsed = perf_counter() - step_start_time
             total_elapsed = perf_counter() - run_start_time
-            
-            # Track performance metrics
-            self._step_durations.append(step_elapsed)
-            if len(self._step_durations) > self._max_step_history:
-                self._step_durations = self._step_durations[-self._max_step_history:]
-            
+
+            # Track performance metrics via core module
+            self._metrics.record_step_duration(step_elapsed)
+
             print(f"\n  {Colors.DIM}✔  Step {step + 1}  ({step_elapsed:.1f}s | total: {total_elapsed:.1f}s){Colors.RESET}")
 
             # Auto-save session after each step to prevent losing progress on crashes
@@ -978,19 +897,15 @@ class Agent:
             
             # Record tool execution time
             tool_duration = perf_counter() - tool_start
-            if function_name not in self._tool_execution_times:
-                self._tool_execution_times[function_name] = []
-            self._tool_execution_times[function_name].append(tool_duration)
-            if len(self._tool_execution_times[function_name]) > 20:
-                self._tool_execution_times[function_name] = self._tool_execution_times[function_name][-20:]
+            self._metrics.record_tool_duration(function_name, tool_duration)
 
         self._on_tool_result(function_name, result)
 
         # Track consecutive failures for health monitoring
         if result.success:
-            self._consecutive_failures = 0
+            self._error_recovery.record_success()
         else:
-            self._consecutive_failures += 1
+            self._error_recovery.record_failure()
             # Record error context for future reference
             self._record_error_context(
                 error=result.error or "Unknown error",
@@ -1115,7 +1030,7 @@ class Agent:
     
     def get_status(self) -> dict:
         """Get agent status report for self-diagnosis.
-        
+
         Returns a dict with current state information including:
         - token_usage: Estimated tokens used
         - token_limit: Maximum allowed tokens
@@ -1130,7 +1045,7 @@ class Agent:
             "token_limit": self.token_limit,
             "api_call_count": self.api_call_count,
             "session_age_steps": len([m for m in self.messages if m.role == "user"]),
-            "consecutive_failures": self._consecutive_failures,
+            "consecutive_failures": self._error_recovery.consecutive_failures,
             "auto_save_enabled": self.auto_save,
             "last_auto_save_step": self._last_auto_save_step,
             "thinking_budget": self.thinking_budget,
@@ -1164,7 +1079,7 @@ class Agent:
     def _check_health(self) -> list[str]:
         """Self-health check after each step. Returns list of issues found."""
         issues = []
-        
+
         # Check token usage
         try:
             tokens = self._estimate_tokens()
@@ -1174,92 +1089,39 @@ class Agent:
                 issues.append(f"Token usage high: {tokens:,} / {self.token_limit:,}")
         except Exception:
             pass
-        
+
         # Check consecutive failures
-        if self._consecutive_failures >= 3:
-            issues.append(f"Multiple consecutive tool failures: {self._consecutive_failures}")
-        
+        if self._error_recovery.consecutive_failures >= 3:
+            issues.append(f"Multiple consecutive tool failures: {self._error_recovery.consecutive_failures}")
+
         # Check for message consistency
         if len(self.messages) < 2:
             issues.append("Message history seems incomplete")
-            
+
         return issues
     
     def get_error_patterns(self) -> dict:
         """Get error pattern analysis for debugging and learning.
-        
+
         Returns:
             Dict with error patterns by tool and recent error history
         """
-        return {
-            "error_counts_by_tool": self._error_patterns.copy(),
-            "recent_errors": self._error_history.copy(),
-            "total_consecutive_failures": self._consecutive_failures,
-        }
-    
+        return self._error_recovery.get_patterns()
+
     def get_suggestions(self) -> list[str]:
         """Get suggestions based on current agent state.
-        
+
         Analyzes agent status and provides actionable suggestions.
         """
-        suggestions = []
-        
-        # Check error patterns
-        if self._consecutive_failures >= 2:
-            suggestions.append(f"Consider reviewing recent errors with get_error_patterns()")
-            
-        # Check token usage
-        try:
-            tokens = self._estimate_tokens()
-            if tokens > self.token_limit * 0.8:
-                suggestions.append("Token usage is high - consider summarizing messages earlier")
-        except Exception:
-            pass
-        
-        # Check for repeated tool failures
-        for tool, count in self._error_patterns.items():
-            if count >= 3:
-                suggestions.append(f"Tool '{tool}' has failed {count} times - may need investigation")
-        
-        # Check session age
-        steps = len([m for m in self.messages if m.role == "user"])
-        if steps > 30 and not suggestions:
-            suggestions.append("Long session detected - consider saving session and starting fresh")
-            
-        return suggestions
+        return self._error_recovery.get_suggestions()
     
     def get_performance_metrics(self) -> dict:
         """Get performance metrics for the current session.
-        
+
         Returns:
             Dict with timing metrics for steps, tools, and API calls
         """
-        # Calculate step duration stats
-        step_stats = {}
-        if self._step_durations:
-            step_stats = {
-                "count": len(self._step_durations),
-                "avg_seconds": sum(self._step_durations) / len(self._step_durations),
-                "min_seconds": min(self._step_durations),
-                "max_seconds": max(self._step_durations),
-                "total_seconds": sum(self._step_durations),
-            }
-        
-        # Calculate tool execution stats
-        tool_stats = {}
-        for tool_name, durations in self._tool_execution_times.items():
-            if durations:
-                tool_stats[tool_name] = {
-                    "calls": len(durations),
-                    "avg_seconds": sum(durations) / len(durations),
-                    "total_seconds": sum(durations),
-                }
-        
-        return {
-            "step_metrics": step_stats,
-            "tool_metrics": tool_stats,
-            "api_call_count": self.api_call_count,
-        }
+        return self._metrics.get_metrics()
     
     async def dispatch_sub_agents(
         self, 
@@ -1316,6 +1178,8 @@ class Agent:
         # Reset token cache
         self._cached_token_count = 0
         self._cached_token_index = 0
+        if hasattr(self, "_token_cache_version"):
+            self._token_cache_version += 1
         
         # Note: Do NOT clear _encoder_cache here — it is a module-level
         # shared cache. Clearing it would affect all Agent instances.

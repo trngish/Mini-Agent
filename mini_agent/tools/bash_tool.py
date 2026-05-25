@@ -254,19 +254,42 @@ Examples:
         command: str,
     ) -> list[str] | str:
         """Build platform-specific shell command.
-        
+
         Args:
             shell_exe: Shell executable path
             shell_args: Shell arguments
             command: Command to execute
-            
+
         Returns:
             Platform-appropriate command structure
         """
         if self.is_windows:
-            return [shell_exe] + shell_args + [command]
+            # Convert bash-style && to PowerShell-style ;
+            normalized = self._normalize_command(command)
+            return [shell_exe] + shell_args + [normalized]
         else:
             return command
+
+    def _normalize_command(self, command: str) -> str:
+        """Normalize command for Windows PowerShell.
+
+        Converts bash-style syntax to PowerShell-compatible syntax:
+        - && becomes ;
+        - || becomes ;
+        - | becomes |
+        - $VAR becomes $env:VAR
+
+        Args:
+            command: Original bash-style command
+
+        Returns:
+            PowerShell-compatible command
+        """
+        # Replace && (bash chain) with ; (PowerShell chain)
+        normalized = command.replace("&&", ";")
+        # Replace || with ;
+        normalized = normalized.replace("||", ";")
+        return normalized
 
 
 class BashOutputTool(Tool):

@@ -119,6 +119,8 @@ class MCPTool(Tool):
             return ToolResult(success=False, content="", error=f"MCP tool execution failed: {str(e)}")
 
 
+
+
 class MCPServerConnection:
     """Manages connection to a single MCP server (STDIO or URL-based) with timeout handling."""
 
@@ -325,6 +327,73 @@ def _resolve_mcp_config_path(config_path: str) -> Path | None:
             return example_file
 
     return None
+
+
+
+
+class LazyMCPToolLoader:
+    """Lazy loading wrapper for MCP tools.
+
+    Tools are only loaded when actually needed, reducing startup time
+    and resource usage for MCP servers that may not be used.
+
+    Usage:
+        loader = LazyMCPToolLoader(connection)
+        # Tools not loaded yet
+        tools = await loader.load_tools()  # Now they're loaded
+    """
+
+    def __init__(self, connection: MCPServerConnection):
+        self._connection = connection
+        self._tools: list[Tool] | None = None
+        self._loading = False
+        self._loaded = False
+
+    @property
+    def tools(self) -> list[Tool]:
+        """Get tools (returns empty list if not yet loaded).
+
+        Note: For actual loading, use load_tools() method.
+        This property is for compatibility with existing code.
+        """
+        return self._tools or []
+
+    @property
+    def is_loaded(self) -> bool:
+        """Check if tools have been loaded."""
+        return self._loaded
+
+    @property
+    def connection_name(self) -> str:
+        """Get the connection name."""
+        return self._connection.name
+
+    async def load_tools(self) -> list[Tool]:
+        """Load tools from the MCP connection.
+
+        Returns:
+            List of tools from the MCP server
+        """
+        if self._loaded or self._loading:
+            return self._tools or []
+
+        self._loading = True
+        try:
+            # Connect if not already connected
+            if self._connection.session is None:
+                success = await self._connection.connect()
+                if not success:
+                    return []
+
+            # Load tools from connection
+            self._tools = self._connection.tools
+            self._loaded = True
+            return self._tools
+        except Exception as e:
+            print(f"Failed to load MCP tools from '{self._connection.name}': {e}")
+            return []
+        finally:
+            self._loading = False
 
 
 async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:

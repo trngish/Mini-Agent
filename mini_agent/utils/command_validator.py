@@ -196,6 +196,105 @@ def sanitize_file_path(path: str) -> str:
     return path.strip()
 
 
+
+
+def validate_command_safety(command: str, is_windows: bool = True) -> tuple[bool, str, DangerLevel]:
+    """Comprehensive command safety validation.
+    
+    Combines danger assessment, platform check, and input validation.
+    
+    Args:
+        command: The command to validate
+        is_windows: True if running on Windows
+        
+    Returns:
+        Tuple of (is_safe, warning_message, danger_level)
+    """
+    # Step 1: Basic input validation
+    if not command or not command.strip():
+        return False, "Empty command", DangerLevel.BLOCKED
+    
+    if len(command) > 10000:
+        return False, f"Command too long ({len(command)} > 10000 chars)", DangerLevel.BLOCKED
+    
+    # Step 2: Danger level check
+    danger_level, reason = assess_command_danger(command)
+    if danger_level == DangerLevel.BLOCKED:
+        return False, reason or "Blocked command", danger_level
+    
+    # Step 3: Platform mismatch check
+    platform_warning = detect_platform_mismatch(command, is_windows)
+    
+    # Step 4: Check for suspicious patterns in arguments
+    suspicious_args = check_suspicious_arguments(command)
+    
+    if suspicious_args:
+        warning = f"Suspicious arguments detected: {suspicious_args}"
+        if platform_warning:
+            warning = f"{platform_warning}\n{warning}"
+        return False, warning, DangerLevel.CAUTION
+    
+    if platform_warning:
+        return True, platform_warning, danger_level
+    
+    return True, "", danger_level
+
+
+def check_suspicious_arguments(command: str) -> list[str]:
+    """Check for suspicious patterns in command arguments.
+    
+    Args:
+        command: The command to check
+        
+    Returns:
+        List of suspicious patterns found
+    """
+    suspicious = []
+    lower_cmd = command.lower()
+    
+    # Check for potential command injection via semicolons
+    if ';rm' in lower_cmd or '; del' in lower_cmd:
+        suspicious.append("Potential command injection (semicolon)")
+    
+    # Check for pipe to shell (common attack pattern)
+    if '| sh' in lower_cmd or '| bash' in lower_cmd or '&& sh' in lower_cmd:
+        suspicious.append("Pipe to shell detected")
+    
+    # Check for download and execute patterns
+    if ('curl' in lower_cmd or 'wget' in lower_cmd) and ('| sh' in lower_cmd or '| python' in lower_cmd):
+        suspicious.append("Download and execute pattern")
+    
+    # Check for environment variable manipulation
+    if 'export ' in lower_cmd and '=' in command:
+        suspicious.append("Environment variable assignment")
+    
+    return suspicious
+
+
+def sanitize_command_output(output: str, max_length: int = 50000) -> str:
+    """Sanitize command output to prevent terminal escape codes.
+    
+    Args:
+        output: Raw command output
+        max_length: Maximum output length
+        
+    Returns:
+        Sanitized output
+    """
+    if not output:
+        return ""
+    
+    # Remove ANSI escape codes
+    ansi_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+    output = ansi_pattern.sub('', output)
+    
+    # Truncate if too long
+    if len(output) > max_length:
+        output = output[:max_length] + f"... [truncated {len(output) - max_length} chars]"
+    
+    return output
+
+
 def validate_command_input(command: str, max_length: int = 10000) -> tuple[bool, str]:
     """Validate command input for safety.
     
