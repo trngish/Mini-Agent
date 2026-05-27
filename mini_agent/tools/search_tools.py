@@ -4,13 +4,15 @@ Provides grep-like functionality for searching file contents and
 finding files by patterns.
 """
 
+from __future__ import annotations
+
 import fnmatch
 import re
 from pathlib import Path
 from typing import Any
 
-from .base import Tool, ToolResult
 from ..utils.platform_utils import normalize_path_separators
+from .base import Tool, ToolResult
 
 
 class GrepTool(Tool):
@@ -130,7 +132,7 @@ Examples:
                 search_text = pattern if case_sensitive else pattern.lower()
 
             # Search files
-            results = []
+            results: list[dict[str, Any]] = []
             files_searched = 0
 
             for file_path in self._iterate_files(search_dir, file_pattern):
@@ -152,11 +154,13 @@ Examples:
                                     matched = True
 
                             if matched:
-                                results.append({
-                                    "file": str(file_path.relative_to(self.workspace_dir)),
-                                    "line": line_num,
-                                    "content": line.rstrip("\n"),
-                                })
+                                results.append(
+                                    {
+                                        "file": str(file_path.relative_to(self.workspace_dir)),
+                                        "line": line_num,
+                                        "content": line.rstrip("\n"),
+                                    }
+                                )
 
                                 if len(results) >= max_results:
                                     break
@@ -188,16 +192,17 @@ Examples:
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
 
-    def _iterate_files(self, directory: Path, pattern: str):
+    def _iterate_files(self, directory: Path, pattern: str) -> Any:
         """Iterate over files matching the pattern in directory."""
         import os
+
         if directory.is_file():
             yield directory
             return
 
         for root, dirs, files in os.walk(directory):
             # Skip hidden directories and common non-source directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('__pycache__', 'node_modules', '.git')]
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", "node_modules", ".git")]
 
             for filename in files:
                 if fnmatch.fnmatch(filename, pattern):
@@ -292,9 +297,10 @@ Examples:
             search_pattern = pattern if case_sensitive else pattern.lower()
 
             import os
+
             for root, dirs, files in os.walk(search_dir):
                 # Skip hidden directories
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
 
                 for filename in files:
                     match = False
@@ -417,7 +423,7 @@ Examples:
                 )
 
             # Build tree
-            lines = []
+            lines: list[str] = []
             self._build_tree(root_dir, "", lines, max_depth, 0, include_hidden)
 
             output = f"Directory tree: {root_dir.name}\n"
@@ -433,21 +439,21 @@ Examples:
         self,
         directory: Path,
         prefix: str,
-        lines: list,
+        lines: list[str],
         max_depth: int,
         current_depth: int,
         include_hidden: bool,
-    ):
+    ) -> None:
         """Recursively build tree lines."""
         try:
             entries = sorted(directory.iterdir(), key=lambda x: (not x.is_dir(), x.name))
 
             for i, entry in enumerate(entries):
                 # Skip hidden files if not including them
-                if not include_hidden and entry.name.startswith('.'):
+                if not include_hidden and entry.name.startswith("."):
                     continue
 
-                is_last = (i == len(entries) - 1)
+                is_last = i == len(entries) - 1
                 connector = "└── " if is_last else "├── "
 
                 if entry.is_dir():

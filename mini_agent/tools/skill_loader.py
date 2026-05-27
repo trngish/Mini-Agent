@@ -4,10 +4,11 @@ Skill Loader - Load Claude Skills
 Supports loading skills from SKILL.md files and providing them to Agent
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import yaml
 
@@ -19,10 +20,10 @@ class Skill:
     name: str
     description: str
     content: str
-    license: Optional[str] = None
-    allowed_tools: Optional[List[str]] = None
-    metadata: Optional[Dict[str, str]] = None
-    skill_path: Optional[Path] = None
+    license: str | None = None
+    allowed_tools: list[str] | None = None
+    metadata: dict[str, str] | None = None
+    skill_path: Path | None = None
 
     def to_prompt(self) -> str:
         """Convert skill to prompt format"""
@@ -55,10 +56,10 @@ class SkillLoader:
             skills_dir: Skills directory path
         """
         self.skills_dir = Path(skills_dir)
-        self.loaded_skills: Dict[str, Skill] = {}
-        self._discovered_paths: Optional[List[Path]] = None  # Cache for discovered skill paths
+        self.loaded_skills: dict[str, Skill] = {}
+        self._discovered_paths: list[Path] | None = None  # Cache for discovered skill paths
 
-    def load_skill(self, skill_path: Path) -> Optional[Skill]:
+    def load_skill(self, skill_path: Path) -> Skill | None:
         """
         Load single skill from SKILL.md file
 
@@ -131,9 +132,10 @@ class SkillLoader:
         Returns:
             Processed content with absolute paths
         """
+
         # Pattern 1: Directory-based paths (scripts/, references/, assets/)
         # See https://agentskills.io/specification#optional-directories
-        def replace_dir_path(match: re.Match) -> str:
+        def replace_dir_path(match: re.Match[str]) -> str:
             prefix = match.group(1)  # e.g., "python " or "`"
             rel_path = match.group(2)  # e.g., "scripts/with_server.py"
 
@@ -147,7 +149,7 @@ class SkillLoader:
 
         # Pattern 2: Direct markdown/document references (forms.md, reference.md, etc.)
         # Matches phrases like "see reference.md" or "read forms.md"
-        def replace_doc_path(match: re.Match) -> str:
+        def replace_doc_path(match: re.Match[str]) -> str:
             prefix = match.group(1)  # e.g., "see ", "read "
             filename = match.group(2)  # e.g., "reference.md"
             suffix = match.group(3)  # e.g., punctuation
@@ -167,7 +169,7 @@ class SkillLoader:
         # - [text](./reference/file.md) - relative path with ./
         # - [text](scripts/file.js) - directory-based path
         # Matches patterns like: "Read [`docx-js.md`](docx-js.md)" or "Load [Guide](./reference/guide.md)"
-        def replace_markdown_link(match: re.Match) -> str:
+        def replace_markdown_link(match: re.Match[str]) -> str:
             prefix = match.group(1) if match.group(1) else ""  # e.g., "Read ", "Load ", or empty
             link_text = match.group(2)  # e.g., "`docx-js.md`" or "Guide"
             filepath = match.group(3)  # e.g., "docx-js.md", "./reference/file.md", "scripts/file.js"
@@ -184,14 +186,15 @@ class SkillLoader:
         # Match markdown link patterns with optional prefix words
         # Captures: (optional prefix word) [link text] (complete file path including ./)
         pattern_markdown = (
-            r"(?:(Read|See|Check|Refer to|Load|View)\s+)?\[(`?[^`\]]+`?)\]\(((?:\./)?[^)]+\.(?:md|txt|json|yaml|js|py|html))\)"
+            r"(?:(Read|See|Check|Refer to|Load|View)\s+)?\[(`?[^`\]]+`?)\]"
+            r"\(((?:\./)?[^)]+\.(?:md|txt|json|yaml|js|py|html))\)"
         )
         content = re.sub(pattern_markdown, replace_markdown_link, content, flags=re.IGNORECASE)
 
         return content
 
-    def discover_skills(self, additional_search_paths: Optional[List[Path]] = None) -> List[Skill]:
-        """"
+    def discover_skills(self, additional_search_paths: list[Path] | None = None) -> list[Skill]:
+        """ "
         Discover and load all skills from multiple directories.
 
         Search order (first found wins for duplicates by name):
@@ -210,8 +213,7 @@ class SkillLoader:
             return [self.loaded_skills[skill.name] for skill in self.loaded_skills.values()]
 
         skills = []
-        skill_files_by_name: Dict[str, Path] = {}  # Track first found SKILL.md per skill name
-
+        skill_files_by_name: dict[str, Path] = {}  # Track first found SKILL.md per skill name
 
         def collect_skill_files(search_dir: Path) -> None:
             """Collect SKILL.md files from a directory into skill_files_by_name."""
@@ -226,7 +228,6 @@ class SkillLoader:
         if additional_search_paths:
             for search_path in additional_search_paths:
                 collect_skill_files(search_path)
-
 
         # Priority 2: Default skills_dir
         if self.skills_dir.exists():
@@ -243,7 +244,7 @@ class SkillLoader:
 
         return skills
 
-    def get_skill(self, name: str) -> Optional[Skill]:
+    def get_skill(self, name: str) -> Skill | None:
         """
         Get loaded skill
 
@@ -255,7 +256,7 @@ class SkillLoader:
         """
         return self.loaded_skills.get(name)
 
-    def list_skills(self) -> List[str]:
+    def list_skills(self) -> list[str]:
         """
         List all loaded skill names
 
@@ -276,7 +277,9 @@ class SkillLoader:
             return ""
 
         prompt_parts = ["## Available Skills\n"]
-        prompt_parts.append("You have access to specialized skills. Each skill provides expert guidance for specific tasks.\n")
+        prompt_parts.append(
+            "You have access to specialized skills. Each skill provides expert guidance for specific tasks.\n"
+        )
         prompt_parts.append("Load a skill's full content using the appropriate skill tool when needed.\n")
 
         # List all skills with their descriptions

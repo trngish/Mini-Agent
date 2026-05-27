@@ -17,7 +17,8 @@ def _skip_if_no_config():
         pytest.skip("config.yaml not found")
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
-    if not config.get("api_key") or config["api_key"] == "YOUR_MINIMAX_API_KEY_HERE":
+    api_key = config.get("api_key", "")
+    if not api_key or "YOUR" in api_key.upper():
         pytest.skip("API key not configured")
     return config
 
@@ -110,9 +111,7 @@ async def test_wrapper_tool_calling():
 
     # Messages requesting tool use
     messages = [
-        Message(
-            role="system", content="You are a helpful assistant with access to tools."
-        ),
+        Message(role="system", content="You are a helpful assistant with access to tools."),
         Message(role="user", content="Calculate 123 + 456 using the calculator tool."),
     ]
 
@@ -145,9 +144,7 @@ async def test_wrapper_tool_calling():
 
     response = await client.generate(messages=messages, tools=tools)
 
-    assert response.content or response.tool_calls, (
-        "Response should have content or tool calls"
-    )
+    assert response.content or response.tool_calls, "Response should have content or tool calls"
     if response.tool_calls:
         assert len(response.tool_calls) > 0, "Tool calls list should not be empty"
         assert response.tool_calls[0].function.name == "calculator", (

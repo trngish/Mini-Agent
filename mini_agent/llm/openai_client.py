@@ -8,8 +8,8 @@ from openai import AsyncOpenAI
 
 from ..retry import RetryConfig, async_retry
 from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
-from .base import LLMClientBase
 from ..utils.model_utils import get_max_output_tokens
+from .base import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
@@ -52,18 +52,18 @@ class OpenAIClient(LLMClientBase):
 
     def configure_thinking_budget(self, budget: int) -> None:
         """Configure thinking budget dynamically.
-        
+
         This is the official API for adjusting thinking budget at runtime
         based on task complexity analysis.
-        
+
         Args:
             budget: Thinking budget in tokens (0 to disable)
         """
         self._thinking_budget_tokens = max(0, min(budget, 32768))
 
-    def configure_m27(self, config: dict) -> None:
+    def configure_m27(self, config: dict[str, Any]) -> None:
         """Configure M2.7 specific settings.
-        
+
         Args:
             config: M2.7 configuration dict from Config.m27
         """
@@ -101,7 +101,7 @@ class OpenAIClient(LLMClientBase):
             params["tools"] = self._convert_tools(tools)
 
         # Use OpenAI SDK's chat.completions.create
-        response = await self.client.chat.completions.create(**params)
+        response = await self.client.chat.completions.create(**params)  # type: ignore[call-overload]
         # Return full response to access usage info
         return response
 
@@ -200,7 +200,7 @@ class OpenAIClient(LLMClientBase):
                 api_messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": msg.tool_call_id,
+                        "tool_call_id": msg.tool_call_id,  # type: ignore[dict-item]
                         "content": msg.content,
                     }
                 )
@@ -278,11 +278,13 @@ class OpenAIClient(LLMClientBase):
                 total_tokens=response.usage.total_tokens or 0,
             )
 
+        finish_reason = getattr(response.choices[0], "finish_reason", None) or "stop"
+
         return LLMResponse(
             content=text_content,
             thinking=thinking_content if thinking_content else None,
             tool_calls=tool_calls if tool_calls else None,
-            finish_reason="stop",  # OpenAI doesn't provide finish_reason in the message
+            finish_reason=finish_reason,
             usage=usage,
         )
 
@@ -290,6 +292,7 @@ class OpenAIClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        **_kwargs: Any,
     ) -> LLMResponse:
         """Generate response from OpenAI LLM.
 

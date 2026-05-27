@@ -71,9 +71,7 @@ async def test_basic_agent_usage():
 
         # Load MCP tools (optional) - with timeout protection
         try:
-            mcp_tools = await load_mcp_tools_async(
-                config_path="mini_agent/config/mcp.json"
-            )
+            mcp_tools = await load_mcp_tools_async(config_path="mini_agent/config/mcp.json")
             if mcp_tools:
                 tools.extend(mcp_tools)
         except Exception:

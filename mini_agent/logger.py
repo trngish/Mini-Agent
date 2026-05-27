@@ -10,6 +10,7 @@ Responsible for recording the complete interaction process of each agent run, in
 import asyncio
 import gzip
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -35,10 +36,14 @@ class AgentLogger:
     # Async write settings
     ASYNC_WRITE_ENABLED: bool = True
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize logger with rotation settings."""
         self.log_dir = self.LOG_DIR
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_disabled = False
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            self._log_disabled = True
         self.log_file: Path | None = None
         self.log_index = 0
         self._current_size = 0
@@ -58,21 +63,21 @@ class AgentLogger:
         """Rotate log file if size limit exceeded, with optional compression."""
         if self.log_file is None:
             return
-        
+
         # Check file size
         if self.log_file.exists():
             self._current_size = self.log_file.stat().st_size
         else:
             self._current_size = 0
-        
+
         if self._current_size < self.MAX_LOG_SIZE_BYTES:
             return
-        
+
         # Rename current log with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         rotated_name = f"{self.log_file.stem}_{timestamp}.rotated"
         rotated_path = self.log_dir / rotated_name
-        
+
         try:
             self.log_file.rename(rotated_path)
             # Compress the rotated log in background
@@ -80,14 +85,14 @@ class AgentLogger:
         except OSError:
             # If rename fails, just delete and start fresh
             self.log_file.unlink(missing_ok=True)
-        
+
         self.log_file = None
         self.log_index = 0
         self._current_size = 0
 
     def _compress_log_async(self, log_path: Path) -> None:
         """Compress a log file using gzip in a background thread.
-        
+
         Args:
             log_path: Path to the log file to compress
         """
@@ -106,9 +111,9 @@ class AgentLogger:
         """Remove log files older than MAX_LOG_AGE_DAYS."""
         if not self.log_dir.exists():
             return
-        
+
         cutoff = datetime.now() - timedelta(days=self.MAX_LOG_AGE_DAYS)
-        
+
         for path in self.log_dir.glob("*.log"):
             try:
                 mtime = datetime.fromtimestamp(path.stat().st_mtime)
@@ -116,7 +121,7 @@ class AgentLogger:
                     path.unlink(missing_ok=True)
             except OSError:
                 continue
-        
+
         # Also clean up rotated files
         for path in self.log_dir.glob("*.rotated"):
             try:
@@ -128,35 +133,44 @@ class AgentLogger:
 
     def _ensure_log_file(self) -> None:
         """Ensure log file exists and is ready for writing."""
+        if self._log_disabled:
+            return
+
         if self._rotation_check_done and self.log_file is not None:
             return
-        
+
         # Run cleanup on first log access
         if not self._rotation_check_done:
             self._cleanup_old_logs()
             self._rotation_check_done = True
-        
+
         if self.log_file is None:
             self.start_new_run()
 
     def start_new_run(self) -> None:
         """Start new run, create new log file."""
+        if self._log_disabled:
+            return
+
         # Check rotation before creating new file
         if self.log_file is not None:
             self._rotate_log()
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         log_filename = f"agent_run_{timestamp}.log"
         self.log_file = self.log_dir / log_filename
         self.log_index = 0
         self._current_size = 0
 
-        # Write log header
-        with open(self.log_file, "w", encoding="utf-8") as f:
-            f.write("=" * 80 + "\n")
-            f.write(f"Agent Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 80 + "\n\n")
-        self._current_size = self.log_file.stat().st_size
+        try:
+            with open(self.log_file, "w", encoding="utf-8") as f:
+                f.write("=" * 80 + "\n")
+                f.write(f"Agent Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("=" * 80 + "\n\n")
+            self._current_size = self.log_file.stat().st_size
+        except PermissionError:
+            self._log_disabled = True
+            self.log_file = None
 
     def log_request(self, messages: list[Message], tools: list[Any] | None = None) -> None:
         """Log LLM request.
@@ -169,7 +183,7 @@ class AgentLogger:
         self.log_index += 1
 
         # Build complete request data structure
-        request_data = {
+        request_data: dict[str, Any] = {
             "messages": [],
             "tools": [],
         }
@@ -302,24 +316,30 @@ class AgentLogger:
 
     def _write_log_sync(self, entry: str) -> None:
         """Synchronously write log entry to file.
-        
+
         Args:
             entry: Log entry string
         """
+        if self._log_disabled or self.log_file is None:
+            return
+
         # Handle surrogates (invalid Unicode) that can't be encoded to UTF-8
         encoded = entry.encode("utf-8", errors="replace")
         self._current_size += len(encoded)
-        with open(self.log_file, "a", encoding="utf-8", errors="replace") as f:
-            f.write(entry)
+        try:
+            with open(self.log_file, "a", encoding="utf-8", errors="replace") as f:
+                f.write(entry)
+        except PermissionError:
+            self._log_disabled = True
+            self.log_file = None
 
     def get_log_file_path(self) -> Path:
         """Get current log file path."""
         return self.log_file or self.LOG_DIR / "placeholder.log"
-    
+
     def flush(self) -> None:
         """Flush any pending writes to disk."""
         if self._write_queue is not None:
-            # Drain the queue synchronously
             while not self._write_queue.empty():
                 try:
                     entry = self._write_queue.get_nowait()
@@ -327,26 +347,28 @@ class AgentLogger:
                 except asyncio.QueueEmpty:
                     break
         if self.log_file is not None:
-            # Open and close to flush
             with open(self.log_file, "a", encoding="utf-8"):
                 pass
-    
+
+    def debug(self, message: str) -> None:
+        logging.getLogger(__name__).debug(message)
+
     def get_log_stats(self) -> dict[str, Any]:
         """Get statistics about logs.
-        
+
         Returns:
             Dict with log statistics
         """
         if not self.log_dir.exists():
             return {"total_logs": 0, "total_size": 0, "oldest_log": None, "newest_log": None}
-        
+
         log_files = list(self.log_dir.glob("*.log"))
         rotated_files = list(self.log_dir.glob("*.rotated"))
         compressed_files = list(self.log_dir.glob("*.log.gz"))
-        
+
         total_size = sum(f.stat().st_size for f in log_files)
         compressed_size = sum(f.stat().st_size for f in compressed_files)
-        
+
         oldest = None
         newest = None
         for f in log_files:
@@ -358,7 +380,7 @@ class AgentLogger:
                     newest = mtime
             except OSError:
                 continue
-        
+
         return {
             "total_logs": len(log_files),
             "rotated_logs": len(rotated_files),

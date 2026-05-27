@@ -60,28 +60,30 @@ class SessionNoteTool(Tool):
                 },
                 "category": {
                     "type": "string",
-                    "description": "Optional category/tag for this note (e.g., 'user_preference', 'project_info', 'decision')",
+                    "description": (
+                        "Optional category/tag for this note (e.g., 'user_preference', 'project_info', 'decision')"
+                    ),
                 },
             },
             "required": ["content"],
         }
 
-    def _load_from_file(self) -> list:
+    def _load_from_file(self) -> list[Any]:
         """Load notes from file.
-        
+
         Returns empty list if file doesn't exist (lazy loading).
         """
         if not self.memory_file.exists():
             return []
-        
+
         try:
-            return json.loads(self.memory_file.read_text())
+            return json.loads(self.memory_file.read_text())  # type: ignore[no-any-return]
         except Exception:
             return []
 
-    def _save_to_file(self, notes: list):
+    def _save_to_file(self, notes: list[Any]) -> None:
         """Save notes to file.
-        
+
         Creates parent directory and file if they don't exist (lazy initialization).
         """
         # Ensure parent directory exists when actually saving
@@ -91,7 +93,7 @@ class SessionNoteTool(Tool):
     # Maximum content length for a single note (prevents disk exhaustion)
     MAX_NOTE_CONTENT_LENGTH = 10000
 
-    async def execute(self, content: str, category: str = "general") -> ToolResult:
+    async def execute(self, content: str, category: str | None = "general") -> ToolResult:
         """Record a session note.
 
         Args:
@@ -107,7 +109,10 @@ class SessionNoteTool(Tool):
                 return ToolResult(
                     success=False,
                     content="",
-                    error=f"Note content too long ({len(content)} chars, max {self.MAX_NOTE_CONTENT_LENGTH}). Please summarize.",
+                    error=(
+                        f"Note content too long ({len(content)} chars,"
+                        f" max {self.MAX_NOTE_CONTENT_LENGTH}). Please summarize."
+                    ),
                 )
 
             # Load existing notes
@@ -171,7 +176,7 @@ class RecallNoteTool(Tool):
             },
         }
 
-    async def execute(self, category: str = None) -> ToolResult:
+    async def execute(self, category: str | None = None) -> ToolResult:
         """Recall session notes.
 
         Args:

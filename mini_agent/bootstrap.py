@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from .config import Config
 from .llm import LLMClient
@@ -9,22 +10,24 @@ from .retry import RetryConfig
 from .schema import LLMProvider
 from .tools.base import Tool
 from .tools.bash_tool import BashKillTool, BashOutputTool, BashTool
+from .tools.deep_context import DeepContextTool
 from .tools.file_tools import EditTool, ReadTool, WriteTool
-from .tools.batch_tools import (
-    MultiReadTool, MultiEditTool, WorkspaceContextTool,
-    MultiGrepTool, MultiBashTool, DeepContextTool,
-)
-from .tools.search_tools import GrepTool, FindTool, TreeTool
-from .tools.git_tool import GitTool, GitStatusTool
+from .tools.git_tool import GitStatusTool, GitTool
 from .tools.mcp_loader import cleanup_mcp_connections, load_mcp_tools_async, set_mcp_timeout_config
-from .tools.note_tool import SessionNoteTool, RecallNoteTool
+from .tools.multi_bash import MultiBashTool
+from .tools.multi_edit import MultiEditTool
+from .tools.multi_grep import MultiGrepTool
+from .tools.multi_read import MultiReadTool
+from .tools.note_tool import RecallNoteTool, SessionNoteTool
+from .tools.search_tools import FindTool, GrepTool, TreeTool
 from .tools.skill_tool import create_skill_tools
+from .tools.workspace_context import WorkspaceContextTool
 from .utils import Colors
 
 logger = logging.getLogger(__name__)
 
 
-async def initialize_base_tools(config: Config, skill_loader_arg=None):
+async def initialize_base_tools(config: Config, skill_loader_arg: Any = None) -> tuple[list[Tool], Any]:
     """Initialize basic tools (no workspace dependency)."""
     tools: list[Tool] = []
     skill_loader = skill_loader_arg
@@ -33,7 +36,7 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
         tools.append(ReadTool())
         tools.append(WriteTool())
         tools.append(EditTool())
-        # Batch operation tools - 按次数计费优化：合并操作减少API调用
+        # Batch operation tools - per-call billing optimization: merge operations to reduce API calls
         tools.append(MultiReadTool())
         tools.append(MultiEditTool())
         tools.append(WorkspaceContextTool())
@@ -44,7 +47,7 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
         tools.append(BashTool(platform_mode=config.platform.mode, default_timeout=config.tools.bash_timeout))
         tools.append(BashOutputTool())
         tools.append(BashKillTool())
-        # Batch bash tool - 按次数计费优化：合并多个独立命令为一次调用
+        # Batch bash tool - per-call billing optimization: merge multiple independent commands into one call
         tools.append(MultiBashTool(platform_mode=config.platform.mode))
         print(f"{Colors.GREEN}✅ Bash tools enabled (with batch execution){Colors.RESET}")
 
@@ -69,7 +72,7 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
     tools.append(GrepTool())
     tools.append(FindTool())
     tools.append(TreeTool())
-    # Batch search tool - 按次数计费优化：合并多次搜索为一次调用
+    # Batch search tool - per-call billing optimization: merge multiple searches into one call
     tools.append(MultiGrepTool())
     print(f"{Colors.GREEN}✅ Search tools enabled (with batch search){Colors.RESET}")
 
@@ -80,7 +83,7 @@ async def initialize_base_tools(config: Config, skill_loader_arg=None):
     return tools, skill_loader
 
 
-async def add_workspace_tools(tools: list, config: Config, workspace_dir: Path) -> None:
+async def add_workspace_tools(tools: list[Tool], config: Config, workspace_dir: Path) -> None:
     """Add workspace-dependent tools."""
     if config.tools.enable_mcp:
         print(f"{Colors.DIM}⏳ Loading MCP tools...{Colors.RESET}")
@@ -114,7 +117,11 @@ async def add_workspace_tools(tools: list, config: Config, workspace_dir: Path) 
 
             if all_mcp_tools:
                 tools.extend(all_mcp_tools)
-                print(f"{Colors.GREEN}✅ MCP tools enabled ({len(all_mcp_tools)} tools from {len(mcp_config_paths)} config(s)){Colors.RESET}")
+                print(
+                    f"{Colors.GREEN}✅ MCP tools enabled "
+                    f"({len(all_mcp_tools)} tools from "
+                    f"{len(mcp_config_paths)} config(s)){Colors.RESET}"
+                )
             else:
                 print(f"{Colors.BRIGHT_YELLOW}⚠️  MCP enabled but no tools loaded{Colors.RESET}")
         else:
@@ -123,7 +130,7 @@ async def add_workspace_tools(tools: list, config: Config, workspace_dir: Path) 
             print(f"{Colors.DIM}  - ./mcp.json (project dir){Colors.RESET}")
 
 
-async def cleanup_mcp():
+async def cleanup_mcp() -> None:
     """Clean up MCP connections quietly."""
     try:
         await cleanup_mcp_connections()
@@ -131,7 +138,7 @@ async def cleanup_mcp():
         logger.debug("MCP cleanup completed (with warnings)")
 
 
-def create_llm_client(config: Config, on_retry_callback=None) -> LLMClient:
+def create_llm_client(config: Config, on_retry_callback: Any = None) -> LLMClient:
     """Create and configure an LLM client."""
     provider = LLMProvider.ANTHROPIC if config.llm.provider.lower() == "anthropic" else LLMProvider.OPENAI
 
@@ -155,14 +162,16 @@ def create_llm_client(config: Config, on_retry_callback=None) -> LLMClient:
 
     if retry_config and on_retry_callback:
         client.retry_callback = on_retry_callback
-        print(f"{Colors.GREEN}✅ LLM retry mechanism enabled (max {config.llm.retry.max_retries} retries){Colors.RESET}")
+        print(
+            f"{Colors.GREEN}✅ LLM retry mechanism enabled (max {config.llm.retry.max_retries} retries){Colors.RESET}"
+        )
 
     return client
 
 
-def build_m27_config(config: Config) -> dict:
+def build_m27_config(config: Config) -> dict[str, Any]:
     """Build M2.7 configuration dict."""
-    if not hasattr(config, 'm27'):
+    if not hasattr(config, "m27"):
         return {}
     return {
         "enable_extended_thinking": config.m27.enable_extended_thinking,

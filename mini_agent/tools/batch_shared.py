@@ -5,17 +5,29 @@ to eliminate code duplication and ensure consistent behavior.
 """
 
 import os
-import subprocess
+import subprocess  # nosec B404
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 # Directories to skip when walking the file tree
-DEFAULT_SKIP_DIRS = frozenset({
-    'node_modules', '__pycache__', '.git',
-    'venv', '.venv', 'dist', 'build',
-    '.next', '.nuxt', 'target', 'vendor',
-    '.mypy_cache', '.pytest_cache', '.ruff_cache',
-})
+DEFAULT_SKIP_DIRS = frozenset(
+    {
+        "node_modules",
+        "__pycache__",
+        ".git",
+        "venv",
+        ".venv",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        "target",
+        "vendor",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
+)
 
 
 def get_git_status_sync(
@@ -39,8 +51,12 @@ def get_git_status_sync(
         # Check if in a git repo
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(workspace_dir), timeout=5,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(workspace_dir),
+            timeout=5,
         )
         if result.returncode != 0:
             return "Not a git repository"
@@ -48,8 +64,12 @@ def get_git_status_sync(
         # Get branch
         result = subprocess.run(
             ["git", "branch", "--show-current"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(workspace_dir), timeout=5,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(workspace_dir),
+            timeout=5,
         )
         branch = result.stdout.strip()
         lines.append(f"Branch: {branch}")
@@ -57,8 +77,12 @@ def get_git_status_sync(
         # Get short status
         result = subprocess.run(
             ["git", "status", "--short"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(workspace_dir), timeout=5,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(workspace_dir),
+            timeout=5,
         )
         status = result.stdout.strip()
         if status:
@@ -74,8 +98,12 @@ def get_git_status_sync(
         # Get recent commits
         result = subprocess.run(
             ["git", "log", "--oneline", f"-{max_commits}"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(workspace_dir), timeout=5,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(workspace_dir),
+            timeout=5,
         )
         if result.returncode == 0:
             lines.append("\nRecent commits:")
@@ -115,7 +143,7 @@ def get_tree_sync(
     try:
         for root, dirs, files in os.walk(workspace_dir):
             # Skip hidden and common non-essential directories
-            dirs[:] = sorted(d for d in dirs if not d.startswith('.') and d not in all_skip)
+            dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in all_skip)
 
             rel_root = Path(root).relative_to(workspace_dir)
             depth = len(rel_root.parts) if str(rel_root) != "." else 0
@@ -128,7 +156,7 @@ def get_tree_sync(
             folder_name = str(rel_root) if str(rel_root) != "." else "."
 
             if show_sizes:
-                visible_count = len([f for f in files if not f.startswith('.')])
+                visible_count = len([f for f in files if not f.startswith(".")])
                 lines.append(f"{indent}{folder_name}/ ({visible_count} files)")
             else:
                 lines.append(f"{indent}{folder_name}/")
@@ -136,7 +164,7 @@ def get_tree_sync(
             # List files
             file_count = 0
             for f in sorted(files):
-                if f.startswith('.'):
+                if f.startswith("."):
                     continue
                 file_count += 1
 
@@ -146,7 +174,7 @@ def get_tree_sync(
                 if show_sizes:
                     try:
                         size = (Path(root) / f).stat().st_size
-                        size_str = f"{size}B" if size < 1024 else f"{size/1024:.1f}K"
+                        size_str = f"{size}B" if size < 1024 else f"{size / 1024:.1f}K"
                         lines.append(f"{indent}  {f} ({size_str})")
                     except OSError:
                         lines.append(f"{indent}  {f}")

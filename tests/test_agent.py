@@ -5,7 +5,6 @@ They are marked with @pytest.mark.integration so they can be excluded
 from fast test runs via: pytest -m "not integration"
 """
 
-import asyncio
 import tempfile
 from pathlib import Path
 

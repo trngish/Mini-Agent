@@ -1,50 +1,52 @@
 """Core Agent implementation."""
 
-# ⚠️ 硬性规则：所有 Git 操作必须用户明确同意才能执行
-# 包括但不限于：git add, git commit, git push, git merge 等
-# 违反此规则的操作将被视为未授权
+from __future__ import annotations
 
+# HARD RULE: All Git operations require explicit user consent
+# Including but not limited to: git add, git commit, git push, git merge
+# Violations will be treated as unauthorized
 import asyncio
-import json
+import logging
 import os
-import re
-from collections import deque
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Optional
+from typing import Any
 
+from .core.approval import ApprovalManager
+from .core.error_recovery import ErrorRecoveryManager
+from .core.execution_engine import ExecutionEngine
+from .core.health_check import HealthChecker
+from .core.message_manager import MessageManager
+from .core.metrics import PerformanceMetrics
+from .core.rate_limiter import RateLimiter
+from .core.retry_handler import create_retry_handler
+from .core.step_runner import StepRunner
+from .core.thinking_budget import ThinkingBudgetManager
+from .core.token_tracker import TokenTracker
 from .llm import LLMClient
 from .logger import AgentLogger
-from .schema import AgentMode, FunctionCall, Message, ToolCall
+from .schema import AgentMode, Message, ToolCall
 from .schema.schema import WRITE_TOOLS
 from .session import SessionManager
-from .tools.base import Tool, ToolResult
-from .utils import Colors, calculate_display_width
-from .utils.token_utils import get_encoder
+from .subagent import SubAgentResult
+from .tools.base import Tool
+from .utils import Colors
+from .utils.context_cache import get_context_cache
 from .utils.error_handler import LLMErrorClassifier, format_llm_error
-from .utils.model_utils import is_m27_model, get_token_limit_for_model
-from .utils.tool_error_handler import handle_tool_error
-from .utils.context_cache import get_context_cache, ContextCache
-from .utils.tool_group_optimizer import ToolGroupOptimizer
-from .utils.summary_manager import AdaptiveSummaryManager, MessageComplexityAnalyzer
+from .utils.model_utils import get_token_limit_for_model, is_m27_model
 from .utils.thinking_manager import ThinkingManager
 
-# Import core modules for refactored functionality
-from .core.error_recovery import ErrorRecoveryManager
-from .core.metrics import PerformanceMetrics
-from .core.health_check import HealthChecker
-from .core.thinking_budget import ThinkingBudgetManager
+logger = logging.getLogger(__name__)
 
 # Constants - avoid magic numbers
-STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "10"))
+STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "8"))
 DEFAULT_ENCODING_NAME = "cl100k_base"
 
 
 class Agent:
     """Single agent with basic tools and MCP support."""
 
-    # Module-level tiktoken encoder cache for reuse (shared safely via dict lookup)
-    _encoder_cache: dict[str, Any] = {}
+    # Will be removed in future versions - use _token_tracker instead
 
     def __init__(
         self,
@@ -54,7 +56,7 @@ class Agent:
         max_steps: int = 50,
         workspace_dir: str = "./workspace",
         token_limit: int = 80000,
-        m27_config: Optional[dict] = None,
+        m27_config: dict[str, Any] | None = None,
         mode: AgentMode = AgentMode.YOLO,
     ):
         self.mode = mode
@@ -63,25 +65,24 @@ class Agent:
         self.tool_list = list(tools)
         self.max_steps = max_steps
         self.workspace_dir = Path(workspace_dir)
-        self.cancel_event: Optional[asyncio.Event] = None
-        self.session_manager = SessionManager()
+        self.cancel_event: asyncio.Event | None = None
+        self._session_manager = SessionManager(workspace_dir=self.workspace_dir)
         # Make write tools configurable at instance level
         self.write_tools = WRITE_TOOLS
 
         # M2.7 specific configuration
         self.m27_config = m27_config or {}
-        model_name = getattr(llm_client, 'model', '')
+        model_name = getattr(llm_client, "model", "")
         self.is_m27 = is_m27_model(model_name)
-        
+
         # Use unified token limit calculation
         self.token_limit = get_token_limit_for_model(
-            model_name,
-            self.m27_config.get("token_limit") if self.is_m27 else token_limit
+            model_name, self.m27_config.get("token_limit") if self.is_m27 else token_limit
         )
-        
+
         # M2.7 supports up to 32K output tokens, store for reference
         self.max_output_tokens = self.m27_config.get("max_output_tokens", 16384) if self.is_m27 else 8192
-        
+
         # Optimization: adaptive thinking budget
         # Max budget from config, actual budget is dynamically adjusted per task
         self._max_thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384) if self.is_m27 else 0
@@ -91,10 +92,8 @@ class Agent:
         self._thinking_budget_manager = ThinkingBudgetManager(self)
         self._thinking_budget_manager.configure(self._max_thinking_budget, self.is_m27)
 
-        # Optimization: track consecutive tool failures - handle locally before reporting
-        self._consecutive_failures = 0
-        self._max_consecutive_failures = 3  # 连续失败3次才回话报告
-        
+        # Optimization: track consecutive tool failures via ErrorRecoveryManager
+
         # Optimization: batch size for parallel tool execution
         # More tools per call = fewer API calls
         # M2.7 supports 20+ parallel tool calls with 97% following rate
@@ -105,7 +104,11 @@ class Agent:
 
         # Inject workspace information into system prompt if not already present
         if "Current Workspace" not in system_prompt:
-            workspace_info = f"\n\n## Current Workspace\nYou are currently working in: `{self.workspace_dir.absolute()}`\nAll relative paths will be resolved relative to this directory."
+            workspace_info = (
+                f"\n\n## Current Workspace\n"
+                f"You are currently working in: `{self.workspace_dir.absolute()}`"
+                f"\nAll relative paths will be resolved relative to this directory."
+            )
             system_prompt = system_prompt + workspace_info
 
         self.system_prompt = system_prompt
@@ -122,8 +125,7 @@ class Agent:
                 " You can use all tools. Each tool call will require user approval."
             ),
             AgentMode.YOLO: (
-                "\n\n## Mode: YOLO\nYou are in YOLO mode."
-                " All tool calls are auto-approved. Execute efficiently."
+                "\n\n## Mode: YOLO\nYou are in YOLO mode. All tool calls are auto-approved. Execute efficiently."
             ),
         }
         self.system_prompt += mode_instructions.get(self.mode, "")
@@ -138,15 +140,9 @@ class Agent:
         self.api_call_count: int = 0
         # Token usage from last API response (updated after each LLM call)
         self.api_total_tokens: int = 0
-        # Flag to skip token check right after summary (avoid consecutive triggers)
-        self._skip_next_token_check: bool = False
-        # Incremental token estimation cache
-        self._cached_token_count: int = 0
-        self._cached_token_index: int = 0
-        
-        # Token cache version for invalidation on message changes
-        self._token_cache_version: int = 0
-        
+        # Token tracker with incremental estimation
+        self._token_tracker = TokenTracker()
+
         # Optimization: Context cache for reducing redundant file reads/searches
         self._context_cache = get_context_cache()
 
@@ -156,21 +152,18 @@ class Agent:
                 cached_count = self._context_cache.warmup(self.workspace_dir)
                 if cached_count > 0:
                     print(f"{Colors.DIM}📦 Cache warmed with {cached_count} files{Colors.RESET}")
-            except Exception:
-                pass  # Warmup is best-effort
-        
+            except Exception as e:
+                logger.debug("Cache warmup failed: %s", e)
+
         # Optimization: Adaptive summary manager with quality awareness
-        self._summary_manager = AdaptiveSummaryManager(self.token_limit)
-        self._last_summary_quality: float = 1.0
-        
+        self._message_manager = MessageManager(self.token_limit)
+
         # Optimization: Thinking manager to prevent context overflow from truncated thinking
         # Only enable for M2.7 which uses extended thinking heavily
+        self._thinking_manager: ThinkingManager | None = None
         if self.is_m27:
-            # Use 80K as max thinking tokens (leave room for content/tools)
             self._thinking_manager = ThinkingManager(max_thinking_tokens=80_000)
-        else:
-            self._thinking_manager = None
-        
+
         # Auto-save session after each step to prevent losing progress on crashes
         self.auto_save = os.environ.get("MINI_AGENT_AUTO_SAVE", "true").lower() == "true"
         self._last_auto_save_step = 0
@@ -178,38 +171,49 @@ class Agent:
         # Use core modules for error recovery and metrics
         self._error_recovery = ErrorRecoveryManager(self)
         self._metrics = PerformanceMetrics(self)
+        self._retry_handler = create_retry_handler(self)
+        self._approval_manager = ApprovalManager(mode=mode, write_tools=self.write_tools)
+        self._health_checker = HealthChecker(self)
+        self._rate_limiter = RateLimiter()
 
         # Proxy to core modules for backward compatibility
-        self._error_patterns = self._error_recovery._error_patterns
-        self._error_history = self._error_recovery._error_history
-        self._consecutive_failures = 0  # Will be managed by ErrorRecoveryManager
+        self._error_patterns = self._error_recovery.get_error_patterns()
+        self._error_history = self._error_recovery.get_error_history()
 
-    @classmethod
-    def _get_cached_encoder(cls, encoding_name: str = DEFAULT_ENCODING_NAME):
-        """Get cached tiktoken encoder or create new one.
-        
-        Args:
-            encoding_name: Name of the encoding (default: cl100k_base)
-            
-        Returns:
-            Cached encoder instance
-        """
-        if encoding_name not in cls._encoder_cache:
-            cls._encoder_cache[encoding_name] = get_encoder(encoding_name)
-        return cls._encoder_cache[encoding_name]
+        self._execution_engine = ExecutionEngine(
+            tools=self.tools,
+            logger=self.logger,
+            retry_handler=self._retry_handler,
+            metrics=self._metrics,
+            error_recovery=self._error_recovery,
+            write_tools=self.write_tools,
+            rate_limiter=self._rate_limiter,
+        )
+
+        # Performance: pre-compute step header template
+        self._step_header_template = (
+            f"\n  {Colors.DIM}╭{{}}\n"
+            f"  {Colors.DIM}│{{}} {{}}  Step {{}}/{{}}{{}}{Colors.DIM}│{{}}\n"
+            f"  {Colors.DIM}╰{{}}{Colors.RESET}"
+        )
+        # Performance: throttle health checks and token estimates
+        self._last_health_check_step = -1
+        self._health_check_interval = 5
+        self._last_token_estimate_step = -1
+        self._cached_estimate_for_step = 0
 
     def add_user_message(self, content: str) -> None:
         """Add a user message to history."""
         self.messages.append(Message(role="user", content=content))
         # Adaptively adjust thinking budget based on task complexity
         self._thinking_budget_manager.adjust(content)
-    
+
     def record_context(self, content: str, category: str = "auto") -> None:
         """Automatically record important context without needing explicit tool call.
-        
+
         This is called internally by the agent when it encounters important
         information worth remembering for future reference.
-        
+
         Args:
             content: The context to record
             category: Category tag (default: "auto" for automatic recordings)
@@ -218,16 +222,12 @@ class Agent:
         note_tool = self.tools.get("record_note")
         if note_tool:
             try:
-                # Run in background - don't block on this
-                import asyncio
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 loop.create_task(note_tool.execute(content=content, category=category))
-            except Exception:
-                pass  # Silently fail - recording is best-effort
-    
-    def _record_error_context(self, error: str, context: str) -> None:
-        """Record error context for future reference and pattern learning."""
-        self._error_recovery.record_error(error, context)
+            except RuntimeError:
+                self.logger.debug("No running event loop for background recording")
+            except Exception as e:
+                self.logger.debug(f"Background recording failed: {e}")
 
     def _check_cancelled(self) -> bool:
         """Check if agent execution has been cancelled.
@@ -235,11 +235,9 @@ class Agent:
         Returns:
             True if cancelled, False otherwise.
         """
-        if self.cancel_event is not None and self.cancel_event.is_set():
-            return True
-        return False
+        return bool(self.cancel_event is not None and self.cancel_event.is_set())
 
-    def _cleanup_incomplete_messages(self):
+    def _cleanup_incomplete_messages(self) -> None:
         """Remove the incomplete assistant message and its partial tool results.
 
         This ensures message consistency after cancellation by removing
@@ -263,299 +261,19 @@ class Agent:
             print(f"{Colors.DIM}   Cleaned up {removed_count} incomplete message(s){Colors.RESET}")
 
     def _estimate_tokens(self) -> int:
-        """Accurately calculate token count for message history using tiktoken
-
-        Uses incremental estimation: only encodes new messages since last check.
-        Full recalculation after summarization (when message list is rebuilt).
+        """Accurately calculate token count for message history.
+        Delegates to TokenTracker for incremental estimation.
         """
-        try:
-            # Use cached encoder instead of creating new one
-            encoding = self._get_cached_encoder("cl100k_base")
-        except Exception:
-            return self._estimate_tokens_fallback()
+        return self._token_tracker.estimate_tokens(self.messages)
 
-        # Incremental: only encode messages from cached index onward
-        if self._cached_token_index >= len(self.messages):
-            return self._cached_token_count
+    async def _summarize_messages(self) -> None:
+        """Message history summarization: delegate to MessageManager."""
+        new_messages = await self._message_manager.summarize_messages(self.messages, self.api_total_tokens, logger)
+        if new_messages is not self.messages:
+            self.messages = new_messages
+            self._token_tracker.invalidate_cache()
 
-        new_tokens = 0
-        for msg in self.messages[self._cached_token_index:]:
-            if isinstance(msg.content, str):
-                new_tokens += len(encoding.encode(msg.content))
-            elif isinstance(msg.content, list):
-                for block in msg.content:
-                    if isinstance(block, dict):
-                        new_tokens += len(encoding.encode(str(block)))
-
-            if msg.thinking:
-                new_tokens += len(encoding.encode(msg.thinking))
-
-            if msg.tool_calls:
-                new_tokens += len(encoding.encode(str(msg.tool_calls)))
-
-            new_tokens += 4
-
-        self._cached_token_count = self._cached_token_count + new_tokens
-        self._cached_token_index = len(self.messages)
-        return self._cached_token_count
-
-    def _estimate_tokens_fallback(self) -> int:
-        """Fallback token estimation method (when tiktoken is unavailable)"""
-        total_chars = 0
-        for msg in self.messages:
-            if isinstance(msg.content, str):
-                total_chars += len(msg.content)
-            elif isinstance(msg.content, list):
-                for block in msg.content:
-                    if isinstance(block, dict):
-                        total_chars += len(str(block))
-
-            if msg.thinking:
-                total_chars += len(msg.thinking)
-
-            if msg.tool_calls:
-                total_chars += len(str(msg.tool_calls))
-
-        # Rough estimation: average 2.5 characters = 1 token
-        return int(total_chars / 2.5)
-
-    async def _summarize_messages(self):
-        """Message history summarization: summarize conversations between user messages when tokens exceed limit
-
-        Strategy (Agent mode):
-        - Keep all user messages (these are user intents)
-        - Summarize content between each user-user pair (agent execution process)
-        - If last round is still executing (has agent/tool messages but no next user), also summarize
-        - Structure: system -> user1 -> summary1 -> user2 -> summary2 -> user3 -> summary3 (if executing)
-
-        Summary is triggered when EITHER:
-        - Local token estimation exceeds limit
-        - API reported total_tokens exceeds limit
-        """
-        # Skip check if we just completed a summary (wait for next LLM call to update api_total_tokens)
-        if self._skip_next_token_check:
-            self._skip_next_token_check = False
-            return
-
-        estimated_tokens = self._estimate_tokens()
-
-        # Use adaptive summary decision with quality awareness
-        should_summarize, reason = self._summary_manager.should_summarize(
-            self.messages, estimated_tokens, self.api_total_tokens
-        )
-
-        # If neither exceeded, no summary needed
-        if not should_summarize:
-            return
-
-        print(
-            f"\n{Colors.BRIGHT_YELLOW}📊 Token usage - Local estimate: {estimated_tokens}, API reported: {self.api_total_tokens}, Limit: {self.token_limit}{Colors.RESET}"
-        )
-        print(f"{Colors.BRIGHT_YELLOW}🔄 Triggering message summarization ({reason})...{Colors.RESET}")
-
-        # Find all user message indices (skip system prompt)
-        user_indices = [i for i, msg in enumerate(self.messages) if msg.role == "user" and i > 0]
-
-        # Need at least 1 user message to perform summary
-        if len(user_indices) < 1:
-            print(f"{Colors.BRIGHT_YELLOW}⚠️  Insufficient messages, cannot summarize{Colors.RESET}")
-            return
-
-        # Build new message list
-        new_messages = [self.messages[0]]  # Keep system prompt
-        summary_count = 0
-
-        # Iterate through each user message and summarize the execution process after it
-        for i, user_idx in enumerate(user_indices):
-            # Add current user message
-            new_messages.append(self.messages[user_idx])
-
-            # Truncate long user messages to avoid token limit issues
-            user_content = self.messages[user_idx].content
-            if len(user_content) > 5000:  # ~2000 tokens
-                self.messages[user_idx].content = user_content[:5000] + "...[truncated]..."
-
-            # Determine message range to summarize
-            # If last user, go to end of message list; otherwise to before next user
-            if i < len(user_indices) - 1:
-                next_user_idx = user_indices[i + 1]
-            else:
-                next_user_idx = len(self.messages)
-
-            # Extract execution messages for this round
-            execution_messages = self.messages[user_idx + 1 : next_user_idx]
-
-            # If there are execution messages in this round, summarize them
-            if execution_messages:
-                # Get summary config based on quality tier
-                tier = 'medium'
-                if ':' in reason and 'tier=' in reason:
-                    tier = reason.split('tier=')[1]
-                elif reason.startswith('early_trigger'):
-                    tier = 'low'
-                
-                summary_config = self._summary_manager.get_summary_config(tier)
-                summary_text = self._create_local_summary(
-                    execution_messages, i + 1, 
-                    preserve_ratio=summary_config['preserve_ratio'],
-                    max_truncation=summary_config['max_truncation']
-                )
-                if summary_text:
-                    summary_message = Message(
-                        role="user",
-                        content=f"[Execution Summary {i + 1}]\n\n{summary_text}",
-                    )
-                    new_messages.append(summary_message)
-                    summary_count += 1
-
-        # Replace message list
-        self.messages = new_messages
-
-        # Reset token cache since message list was rebuilt
-        self._cached_token_count = 0
-        self._cached_token_index = 0
-        if hasattr(self, "_token_cache_version"):
-            self._token_cache_version += 1
-
-        # Skip next token check to avoid consecutive summary triggers
-        # (api_total_tokens will be updated after next LLM call)
-        self._skip_next_token_check = True
-
-        new_tokens = self._estimate_tokens()
-        
-        # Estimate summary quality for adaptive next-check decision
-        self._last_summary_quality = self._summary_manager.estimate_summary_quality(
-            self.messages, str(len(new_messages) * 100)  # rough estimate
-        )
-        
-        # Skip next token check based on summary quality
-        if self._summary_manager.should_skip_next_check(self._last_summary_quality):
-            self._skip_next_token_check = True
-        
-        print(f"{Colors.BRIGHT_GREEN}✓ Summary completed, local tokens: {estimated_tokens} → {new_tokens}{Colors.RESET}")
-        print(f"{Colors.DIM}  Structure: system + {len(user_indices)} user messages + {summary_count} summaries{Colors.RESET}")
-        print(f"{Colors.DIM}  Quality: {self._last_summary_quality:.2f} | Note: API token count will update on next LLM call{Colors.RESET}")
-
-    def _optimize_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolCall]:
-        """Optimize tool calls by deduplicating paths in multi_read.
-        
-        Args:
-            tool_calls: Original tool calls
-            
-        Returns:
-            Optimized tool calls with duplicate paths removed
-        """
-        # Check for multi_read with duplicate paths
-        multi_read_calls = []
-        other_calls = []
-        
-        for tc in tool_calls:
-            if tc.function.name == 'multi_read':
-                multi_read_calls.append(tc)
-            else:
-                other_calls.append(tc)
-        
-        # Deduplicate paths in multi_read calls
-        if len(multi_read_calls) > 1:
-            # Merge all paths and deduplicate
-            all_paths = []
-            for tc in multi_read_calls:
-                paths = tc.function.arguments.get('paths', [])
-                if isinstance(paths, list):
-                    all_paths.extend(paths)
-            
-            # Deduplicate while preserving order
-            seen = set()
-            unique_paths = []
-            for p in all_paths:
-                normalized = str(Path(p).resolve() if Path(p).is_absolute() else p)
-                if normalized not in seen:
-                    seen.add(normalized)
-                    unique_paths.append(p)
-            
-            # Replace all multi_read calls with one deduplicated call
-            if unique_paths:
-                first_call = multi_read_calls[0]
-                deduped_call = ToolCall(
-                    id=first_call.id,
-                    type="function",
-                    function=FunctionCall(
-                        name="multi_read",
-                        arguments={"paths": unique_paths}
-                    )
-                )
-                other_calls.insert(0, deduped_call)
-                return other_calls
-        
-        return tool_calls
-
-    def _create_local_summary(self, messages: list[Message], round_num: int,
-                                preserve_ratio: float = 0.6,
-                                max_truncation: int = 1000) -> str:
-        """Create summary locally without LLM call (saves tokens).
-
-        按次数计费优化：token免费，保留更多细节以减少后续重复调用。
-        摘要质量越高，LLM越不需要重新获取信息。
-
-        Args:
-            messages: List of messages to summarize
-            round_num: Round number
-            preserve_ratio: How much content to preserve (0-1)
-            max_truncation: Maximum characters to truncate to
-
-        Returns:
-            Summary text
-        """
-        if not messages:
-            return ""
-
-        # Build structured summary
-        lines = [f"Round {round_num}:"]
-        tool_calls_count = 0
-        tool_results_count = 0
-        assistant_responses = []
-
-        for msg in messages:
-            if msg.role == "assistant":
-                content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                if content:
-                    # 按次数计费优化：保留更多内容（2000字符），大幅减少信息丢失导致的重调
-                    if len(content) > 2000:
-                        content = content[:2000] + "..."
-                    assistant_responses.append(content)
-                if msg.tool_calls:
-                    tool_names = [tc.function.name for tc in msg.tool_calls]
-                    # 保留工具参数概要，帮助后续理解上下文
-                    tool_details = []
-                    for tc in msg.tool_calls:
-                        args_str = str(tc.function.arguments)
-                        # Adaptive truncation based on preserve_ratio
-                        args_max = max(150, int(150 * preserve_ratio * 1.5))
-                        if len(args_str) > args_max:
-                            args_str = args_str[:args_max] + "..."
-                        tool_details.append(f"{tc.function.name}({args_str})")
-                    lines.append(f"  Tools called: {', '.join(tool_details)}")
-                    tool_calls_count += len(msg.tool_calls)
-            elif msg.role == "tool":
-                tool_results_count += 1
-                result = msg.content if isinstance(msg.content, str) else str(msg.content)
-                # Adaptive truncation based on preserve_ratio
-                result_max = max(1500, int(1500 * preserve_ratio * 1.5))
-                if len(result) > result_max:
-                    result = result[:result_max] + "..."
-                lines.append(f"  Result: {result}")
-
-        # Add assistant response summary if no tools were called
-        if not tool_calls_count and assistant_responses:
-            lines.append(f"  Response: {assistant_responses[0]}")
-
-        # Add statistics
-        if tool_calls_count or tool_results_count:
-            lines.append(f"  Stats: {tool_calls_count} tool(s), {tool_results_count} result(s)")
-
-        return "\n".join(lines)
-
-    async def run(self, cancel_event: Optional[asyncio.Event] = None) -> str:
+    async def run(self, cancel_event: asyncio.Event | None = None) -> str:
         """Execute agent loop until task is complete or max steps reached.
 
         Args:
@@ -576,6 +294,7 @@ class Agent:
 
         step = 0
         run_start_time = perf_counter()
+        step_runner = StepRunner(self, run_start_time)
 
         while step < self.max_steps:
             # Check for cancellation at start of each step
@@ -589,11 +308,15 @@ class Agent:
             # Check and summarize message history to prevent context overflow
             await self._summarize_messages()
 
-            # Step header
-            step_text = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}  Step {step + 1}/{self.max_steps}{Colors.RESET}"
-            print(f"\n  {Colors.DIM}╭{'─' * 44}╮{Colors.RESET}")
-            print(f"  {Colors.DIM}│{Colors.RESET} {step_text}{' ' * (44 - calculate_display_width(step_text) - 1)}{Colors.DIM}│{Colors.RESET}")
-            print(f"  {Colors.DIM}╰{'─' * 44}╯{Colors.RESET}")
+            # Step header - unified single print for performance
+            step_text = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}Step {step + 1}/{self.max_steps}{Colors.RESET}"
+            box_width = 44
+            pad = box_width - len(f"  Step {step + 1}/{self.max_steps}") - 1
+            print(
+                f"\n  {Colors.DIM}╭{'─' * box_width}╮{Colors.RESET}\n"
+                f"  {Colors.DIM}│{Colors.RESET}  {step_text}{' ' * max(0, pad)}{Colors.DIM}│{Colors.RESET}\n"
+                f"  {Colors.DIM}╰{'─' * box_width}╯{Colors.RESET}"
+            )
 
             # Get tool list for LLM call (cached during session)
             tool_list = self.tool_list
@@ -604,29 +327,24 @@ class Agent:
             try:
                 # Track streaming state for correct ordering
                 thinking_started = False
-                thinking_output = []  # Buffer for thinking content when text arrives first
-                text_pending = []  # Buffer for text content when thinking arrives first
+                text_pending: list[str] = []
 
                 def on_thinking(text: str) -> None:
-                    nonlocal thinking_started
+                    nonlocal thinking_started, text_pending  # noqa: B023
                     if not thinking_started:
-                        # Thinking arrived first - print header immediately
                         print(f"\n  {Colors.BOLD}{Colors.MAGENTA}🧠 Think{Colors.RESET}")
                         thinking_started = True
                     print(f"{Colors.DIM}{text}{Colors.RESET}", end="", flush=True)
-                    # Flush any pending text content
-                    while text_pending:
-                        pending = text_pending.pop(0)
-                        print(pending, end="", flush=True)
+                    while text_pending:  # noqa: B023
+                        pending = text_pending.pop(0)  # noqa: B023
+                        print(pending, end="", flush=True)  # noqa: B023
 
-                def on_text(text: str) -> None:
-                    nonlocal thinking_started
-                    if thinking_started:
-                        # Thinking already started/finished - safe to output text immediately
+                def on_text(text: str) -> None:  # noqa: B023
+                    nonlocal thinking_started, text_pending  # noqa: B023
+                    if thinking_started:  # noqa: B023
                         print(text, end="", flush=True)
                     else:
-                        # Thinking not started yet - buffer text
-                        text_pending.append(text)
+                        text_pending.append(text)  # noqa: B023
 
                 response = await self.llm.generate(
                     messages=self.messages,
@@ -656,121 +374,63 @@ class Agent:
                 llm_error = LLMErrorClassifier.classify(e)
 
                 if llm_error.is_retryable and llm_error.retry_after:
-                    print(f"\n{Colors.BRIGHT_YELLOW}Rate limited. Waiting {llm_error.retry_after}s before returning...{Colors.RESET}")
+                    print(
+                        f"\n{Colors.BRIGHT_YELLOW}Rate limited."
+                        f" Waiting {llm_error.retry_after}s before returning...{Colors.RESET}"
+                    )
 
                 error_msg = format_llm_error(e)
                 print(f"\n{error_msg}")
                 return f"LLM call failed: {llm_error.user_guidance}"
 
-            # Accumulate API call count and token usage
-            self.api_call_count += 1
-            if response.usage:
-                self.api_total_tokens = response.usage.total_tokens
+            step_runner.process_response(response, step)
 
-            # 按次数计费统计：显示调用次数和工具调用数
-            tool_count = len(response.tool_calls) if response.tool_calls else 0
-            print(f"\n  {Colors.DIM}📊 API Call #{self.api_call_count} | Tools: {tool_count} | "
-                  f"Thinking budget: {self.thinking_budget} | "
-                  f"Total tokens: {self.api_total_tokens:,}{Colors.RESET}")
-
-            # Log LLM response
-            self.logger.log_response(
-                content=response.content,
-                thinking=response.thinking,
-                tool_calls=response.tool_calls,
-                finish_reason=response.finish_reason,
-            )
-
-            # Add assistant message
-            assistant_msg = Message(
-                role="assistant",
-                content=response.content,
-                thinking=response.thinking,
-                tool_calls=response.tool_calls,
-            )
-            self.messages.append(assistant_msg)
-
-            # Self-health check after each step
-            health_issues = self._check_health()
+            health_issues = step_runner.check_health(step)
             if health_issues:
                 for issue in health_issues:
                     print(f"  {Colors.YELLOW}⚠️  {issue}{Colors.RESET}")
 
-            # Prune thinking content if it exceeds threshold (M2.7 optimization)
-            if self._thinking_manager and len(self.messages) > 5:
-                tokens_freed = self._thinking_manager.prune_thinking(self.messages)
-                if tokens_freed > 1000:
-                    print(f"{Colors.DIM}🧠 Pruned {tokens_freed:,} thinking tokens to prevent context overflow{Colors.RESET}")
-                    # Invalidate token cache since thinking content changed
-                    self._cached_token_count = 0
-                    self._cached_token_index = 0
-                    if hasattr(self, "_token_cache_version"):
-                        self._token_cache_version += 1
+            step_runner.prune_thinking()
 
-            # Check if task is complete (no tool calls)
-            if not response.tool_calls:
-                step_elapsed = perf_counter() - step_start_time
-                total_elapsed = perf_counter() - run_start_time
-                print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
-                print(f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self.api_call_count} (按次数计费统计){Colors.RESET}")
-                # Auto-save on successful completion
-                if self.auto_save:
-                    try:
-                        sid = self.session_manager.save(self.messages, f"completed_step_{step}")
-                        print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
-                    except Exception as e:
-                        print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
+            if step_runner.is_complete(response):
+                step_runner.print_completion_summary(step, step_start_time)
+                step_runner.auto_save(step, prefix="completed_step")
                 return response.content
 
-            # Execute tool calls (parallel if M2.7)
+            assert response.tool_calls is not None
             parallel_enabled = self.is_m27 and self.m27_config.get("enable_parallel_tool_calls", True)
             max_concurrent = self.m27_config.get("max_concurrent_tools", 5) if self.is_m27 else 1
 
-            # Use tool group optimizer for intelligent batching
-            tool_calls = response.tool_calls
-            if parallel_enabled and len(tool_calls) > 1:
-                # Check if tools can be parallelized (no write conflicts)
-                if ToolGroupOptimizer.can_parallelize(tool_calls):
-                    # Further optimize by deduplicating paths in multi_read/multi_edit
-                    tool_calls = self._optimize_tool_calls(tool_calls)
-                    results = await self.execute_tools_parallel(tool_calls, max_concurrent)
-                else:
-                    # Run in dependency-ordered batches
-                    batches = ToolGroupOptimizer.group_by_dependency(tool_calls)
-                    results = []
-                    for batch in batches:
-                        if len(batch) == 1:
-                            result = await self.execute_single_tool(batch[0])
-                            results.append(result)
-                        else:
-                            batch_results = await self.execute_tools_parallel(batch, max_concurrent)
-                            results.extend(batch_results)
-            else:
-                results = await self.execute_tools_sequential(tool_calls)
+            results = await self._execution_engine.execute_tools(
+                response.tool_calls,
+                max_concurrent,
+                parallel_enabled,
+                self.mode,
+                self._check_approved,
+            )
+
+            if len(results) < len(response.tool_calls):
+                optimized_calls = [tc for tc, _ in results]
+                assistant_msg = Message(
+                    role="assistant",
+                    content=response.content,
+                    thinking=response.thinking,
+                    tool_calls=optimized_calls,
+                )
+                self.messages[-1] = assistant_msg
 
             # Append tool messages and handle cancellation
-            for tool_call, tool_msg in results:
+            for _tool_call, tool_msg in results:
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
                     return "Task cancelled by user."
                 self.messages.append(tool_msg)
 
             step_elapsed = perf_counter() - step_start_time
-            total_elapsed = perf_counter() - run_start_time
-
-            # Track performance metrics via core module
             self._metrics.record_step_duration(step_elapsed)
 
-            print(f"\n  {Colors.DIM}✔  Step {step + 1}  ({step_elapsed:.1f}s | total: {total_elapsed:.1f}s){Colors.RESET}")
-
-            # Auto-save session after each step to prevent losing progress on crashes
-            if self.auto_save and step > 0 and step != self._last_auto_save_step:
-                try:
-                    sid = self.session_manager.save(self.messages, f"auto_step_{step}")
-                    print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
-                    self._last_auto_save_step = step
-                except Exception as e:
-                    print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
+            step_runner.print_step_timing(step, step_start_time)
+            step_runner.auto_save(step)
 
             step += 1
 
@@ -780,327 +440,75 @@ class Agent:
         # Auto-save on max steps (for potential resume)
         if self.auto_save:
             try:
-                sid = self.session_manager.save(self.messages, f"max_steps_{self.max_steps}")
+                sid = self._session_manager.save(self.messages, f"max_steps_{self.max_steps}")
                 print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
             except Exception as e:
                 print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
         return error_msg
 
-    def _format_arguments(self, arguments: dict) -> str:
-        """Format tool arguments for display with truncation."""
-        truncated = {}
-        for key, value in arguments.items():
-            value_str = str(value)
-            truncated[key] = value_str[:200] + "..." if len(value_str) > 200 else value
-        return json.dumps(truncated, indent=2, ensure_ascii=False)
-
-    def _print_tool_call(self, function_name: str, arguments: dict):
-        """Print tool call header and arguments."""
-        print(f"\n  {Colors.BRIGHT_YELLOW}🔧  {function_name}{Colors.RESET}")
-        for line in self._format_arguments(arguments).split("\n"):
-            print(f"  {Colors.DIM}{line}{Colors.RESET}")
-
-    def _print_tool_result(self, result: ToolResult):
-        """Print tool execution result."""
-        if result.success:
-            text = result.content
-            if len(text) > 300:
-                text = text[:300] + f"{Colors.DIM}...{Colors.RESET}"
-            print(f"{Colors.BRIGHT_GREEN}✓ Result:\n{Colors.RESET}{text}")
-        else:
-            print(f"{Colors.BRIGHT_RED}✗ Error:\n{Colors.RESET}{Colors.RED}{result.error}{Colors.RESET}")
-
-    def _on_tool_result(self, function_name: str, result: ToolResult) -> None:
-        """Handle tool result - print and log."""
-        self._print_tool_result(result)
-        self.logger.log_tool_result(
-            tool_name=function_name,
-            arguments={},  # Already logged in execute_single_tool
-            result_success=result.success,
-            result_content=result.content if result.success else None,
-            result_error=result.error if not result.success else None,
-        )
-
     async def execute_single_tool(self, tool_call: ToolCall) -> tuple[ToolCall, Message]:
         """Execute a single tool with Agent-specific behavior (print, log, approve)."""
-        tool_call_id = tool_call.id
-        function_name = tool_call.function.name
-        arguments = tool_call.function.arguments
-
-        self._print_tool_call(function_name, arguments)
-
-        # Plan mode: block write tools
-        if self.mode == AgentMode.PLAN and function_name in self.write_tools:
-            result = ToolResult(
-                success=False, content="",
-                error=f"Blocked in PLAN mode (read-only). Switch to /mode agent to use {function_name}.",
-            )
-            self._on_tool_result(function_name, result)
-            tool_msg = Message(
-                role="tool",
-                content=f"Error: {result.error}",
-                tool_call_id=tool_call_id,
-                name=function_name,
-            )
-            return (tool_call, tool_msg)
-
-        # Agent mode: needs confirmation
-        if self.mode == AgentMode.AGENT and not self._check_approved(function_name):
-            result = ToolResult(
-                success=False, content="",
-                error=f"Tool call rejected by user. Type 'y' to approve, or switch to /mode yolo for auto-approve.",
-            )
-            self._on_tool_result(function_name, result)
-            tool_msg = Message(
-                role="tool",
-                content=f"Error: {result.error}",
-                tool_call_id=tool_call_id,
-                name=function_name,
-            )
-            return (tool_call, tool_msg)
-
-        if function_name not in self.tools:
-            result = ToolResult(success=False, content="", error=f"Unknown tool: {function_name}")
-        else:
-            # Track tool execution time
-            tool_start = perf_counter()
-            
-            # Tool execution with automatic retry for transient failures
-            last_error = None
-            max_tool_retries = 3
-            for attempt in range(max_tool_retries):
-                try:
-                    tool = self.tools[function_name]
-                    result = await tool.execute(**arguments)
-                    # Only retry on transient errors, not user-rejected or blocked tools
-                    if result.success or "rejected" in result.error.lower() or "blocked" in result.error.lower():
-                        break
-                    last_error = result.error
-                except Exception as e:
-                    last_error = str(e)
-                    tool_error = handle_tool_error(function_name, arguments, e)
-                    result = ToolResult(
-                        success=False,
-                        content="",
-                        error=tool_error.message,
-                    )
-                    # Don't retry on fatal errors
-                    if "rejected" in str(e).lower() or "blocked" in str(e).lower():
-                        break
-                    
-                # Wait before retry (exponential backoff for transient failures)
-                if attempt < max_tool_retries - 1:
-                    await asyncio.sleep(0.5 * (2 ** attempt))
-            else:
-                # All retries exhausted, result already has the last error
-                pass
-            
-            # Record tool execution time
-            tool_duration = perf_counter() - tool_start
-            self._metrics.record_tool_duration(function_name, tool_duration)
-
-        self._on_tool_result(function_name, result)
-
-        # Track consecutive failures for health monitoring
-        if result.success:
-            self._error_recovery.record_success()
-        else:
-            self._error_recovery.record_failure()
-            # Record error context for future reference
-            self._record_error_context(
-                error=result.error or "Unknown error",
-                context=f"{function_name}({json.dumps(arguments, ensure_ascii=False)[:100]})"
-            )
-
-        # Keep tool results intact (user pays per call, not per token)
-        content = result.content if result.success else f"Error: {result.error}"
-        
-        tool_msg = Message(
-            role="tool",
-            content=content,
-            tool_call_id=tool_call_id,
-            name=function_name,
-        )
-        return (tool_call, tool_msg)
+        return await self._execution_engine._execute_single_tool(tool_call, self.mode, self._check_approved)
 
     async def execute_tools_sequential(self, tool_calls: list[ToolCall]) -> list[tuple[ToolCall, Message]]:
         """Execute tools one at a time."""
-        results = []
-        for tc in tool_calls:
-            tool_call, tool_msg = await self.execute_single_tool(tc)
-            results.append((tool_call, tool_msg))
-        return results
+        return await self._execution_engine._execute_sequential(tool_calls, self.mode, self._check_approved)
 
-    async def execute_tools_parallel(self, tool_calls: list[ToolCall], max_concurrent: int = 5) -> list[tuple[ToolCall, Message]]:
+    async def execute_tools_parallel(
+        self, tool_calls: list[ToolCall], max_concurrent: int = 5
+    ) -> list[tuple[ToolCall, Message]]:
         """Execute tools in parallel using a semaphore to limit concurrency."""
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def bounded_execute(tc):
-            async with semaphore:
-                return await self.execute_single_tool(tc)
-
-        # Print all tool headers first
-        for tc in tool_calls:
-            self._print_tool_call(tc.function.name, tc.function.arguments)
-
-        # Execute all tools concurrently
-        task_results = await asyncio.gather(
-            *[bounded_execute(tc) for tc in tool_calls],
-            return_exceptions=True
+        return await self._execution_engine._execute_parallel(
+            tool_calls, max_concurrent, self.mode, self._check_approved
         )
-        
-        # Handle any exceptions that occurred
-        processed_results = []
-        for tc, result in zip(tool_calls, task_results):
-            if isinstance(result, Exception):
-                tool_msg = Message(
-                    role="tool",
-                    content=f"Error: {type(result).__name__}: {str(result)}",
-                    tool_call_id=tc.id,
-                    name=tc.function.name,
-                )
-                processed_results.append((tc, tool_msg))
-            else:
-                processed_results.append(result)
-
-        return processed_results
 
     def _check_approved(self, function_name: str) -> bool:
         """Prompt user to approve a tool call in Agent mode.
 
         Returns True if approved, False if rejected.
         """
-        if self.mode != AgentMode.AGENT:
-            return True
-        try:
-            import threading
-            import os
-            result = [None]
-            
-            # Configurable timeout via environment (default 10 seconds)
-            approval_timeout = int(os.environ.get("MINI_AGENT_APPROVAL_TIMEOUT", "10"))
-
-            def get_input() -> None:
-                result[0] = input(f"  {Colors.BRIGHT_YELLOW}Approve {function_name}? [Y/n/q]{Colors.RESET} ").strip().lower()
-
-            thread = threading.Thread(target=get_input, daemon=True)
-            thread.start()
-            thread.join(timeout=approval_timeout)
-
-            if result[0] is None:
-                return False
-            if result[0] in ("q", "quit"):
-                return False
-            if result[0] in ("n", "no"):
-                return False
-            return True
-        except Exception:
-            return True
+        return self._approval_manager.is_approved(function_name)
 
     def set_mode(self, mode: AgentMode) -> None:
         """Switch agent mode."""
         old_mode = self.mode
         self.mode = mode
+        self._approval_manager.mode = mode
         print(f"{Colors.GREEN}✅ Mode switched: {old_mode.value} → {mode.value}{Colors.RESET}")
 
     def save_session(self, label: str = "") -> str:
         """Save current session. Returns session ID."""
-        sid = self.session_manager.save(self.messages, label)
-        print(f"{Colors.GREEN}✅ Session saved: {sid}{Colors.RESET}")
-        return sid
+        return self._session_manager.save_session(self.messages, label=label)
 
     def load_session(self, session_id: str) -> bool:
         """Load a saved session. Returns True on success."""
-        messages = self.session_manager.load(session_id)
+        messages = self._session_manager.load_session(session_id)
         if messages is None:
-            print(f"{Colors.RED}❌ Session not found: {session_id}{Colors.RESET}")
             return False
         self.messages = messages
-        system_count = sum(1 for m in messages if m.role == "system")
-        print(f"{Colors.GREEN}✅ Session restored: {session_id} ({len(messages)} messages, {system_count} system prompts){Colors.RESET}")
         return True
 
-    def list_sessions(self) -> list[dict]:
+    def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions."""
-        return self.session_manager.list_sessions()
-    
+        return self._session_manager.list_sessions()
+
     def get_history(self) -> list[Message]:
         """Get message history."""
         return self.messages.copy()
-    
-    def get_status(self) -> dict:
-        """Get agent status report for self-diagnosis.
 
-        Returns a dict with current state information including:
-        - token_usage: Estimated tokens used
-        - token_limit: Maximum allowed tokens
-        - api_call_count: Number of API calls made
-        - session_age_steps: How many steps in current session
-        - consecutive_failures: Recent failure count
-        - auto_save_enabled: Whether auto-save is on
-        - last_auto_save_step: Last step that was auto-saved
-        """
-        return {
-            "token_usage": self._estimate_tokens(),
-            "token_limit": self.token_limit,
-            "api_call_count": self.api_call_count,
-            "session_age_steps": len([m for m in self.messages if m.role == "user"]),
-            "consecutive_failures": self._error_recovery.consecutive_failures,
-            "auto_save_enabled": self.auto_save,
-            "last_auto_save_step": self._last_auto_save_step,
-            "thinking_budget": self.thinking_budget,
-            "mode": self.mode.value,
-        }
-    
+    def get_status(self) -> dict[str, Any]:
+        """Get agent status report for self-diagnosis."""
+        return self._health_checker.get_status()
+
     def get_status_report(self) -> str:
         """Generate a human-readable status report."""
-        status = self.get_status()
-        
-        lines = [
-            f"{Colors.BOLD}📊 Agent Status Report{Colors.RESET}",
-            f"{'=' * 40}",
-            f"Token usage: {status['token_usage']:,} / {status['token_limit']:,}",
-            f"API calls: {status['api_call_count']}",
-            f"Session steps: {status['session_age_steps']}",
-            f"Mode: {status['mode']}",
-            f"Thinking budget: {status['thinking_budget']:,}",
-            f"Consecutive failures: {status['consecutive_failures']}",
-            f"Auto-save: {status['auto_save_enabled']} (last: step {status['last_auto_save_step']})",
-        ]
-        
-        # Add warning indicators
-        if status['token_usage'] > status['token_limit'] * 0.8:
-            lines.append(f"{Colors.YELLOW}⚠️  Token usage high{Colors.RESET}")
-        if status['consecutive_failures'] >= 2:
-            lines.append(f"{Colors.YELLOW}⚠️  Multiple recent failures{Colors.RESET}")
-            
-        return '\n'.join(lines)
-    
+        return self._health_checker.get_status_report()
+
     def _check_health(self) -> list[str]:
         """Self-health check after each step. Returns list of issues found."""
-        issues = []
+        return self._health_checker.check().issues
 
-        # Check token usage
-        try:
-            tokens = self._estimate_tokens()
-            if tokens > self.token_limit * 0.9:
-                issues.append(f"Token usage critical: {tokens:,} / {self.token_limit:,}")
-            elif tokens > self.token_limit * 0.8:
-                issues.append(f"Token usage high: {tokens:,} / {self.token_limit:,}")
-        except Exception:
-            pass
-
-        # Check consecutive failures
-        if self._error_recovery.consecutive_failures >= 3:
-            issues.append(f"Multiple consecutive tool failures: {self._error_recovery.consecutive_failures}")
-
-        # Check for message consistency
-        if len(self.messages) < 2:
-            issues.append("Message history seems incomplete")
-
-        return issues
-    
-    def get_error_patterns(self) -> dict:
+    def get_error_patterns(self) -> dict[str, Any]:
         """Get error pattern analysis for debugging and learning.
 
         Returns:
@@ -1114,39 +522,39 @@ class Agent:
         Analyzes agent status and provides actionable suggestions.
         """
         return self._error_recovery.get_suggestions()
-    
-    def get_performance_metrics(self) -> dict:
+
+    def get_performance_metrics(self) -> dict[str, Any]:
         """Get performance metrics for the current session.
 
         Returns:
             Dict with timing metrics for steps, tools, and API calls
         """
         return self._metrics.get_metrics()
-    
+
     async def dispatch_sub_agents(
-        self, 
-        tasks: list[str], 
+        self,
+        tasks: list[str],
         max_concurrent: int = 3,
-        system_prompt: str = "You are a helpful assistant. Complete the assigned task concisely.",
-    ) -> list:
+        _system_prompt: str = "You are a helpful assistant. Complete the assigned task concisely.",  # noqa: ARG002
+    ) -> list[SubAgentResult]:
         """Dispatch multiple sub-agents to work in parallel on independent tasks.
-        
+
         This enables the agent to "clone itself" and tackle multiple problems
         simultaneously, then synthesize the results.
-        
+
         Args:
             tasks: List of task descriptions for sub-agents
             max_concurrent: Maximum number of concurrent sub-agents
             system_prompt: Custom system prompt for sub-agents
-            
+
         Returns:
             List of SubAgentResult objects with task, content, success, elapsed, error
         """
         from .subagent import run_sub_agents as run_subs
-        
+
         # Get a copy of tools for sub-agents
         tools = self.tool_list
-        
+
         # Run sub-agents in parallel
         results = await run_subs(
             llm_client=self.llm,
@@ -1154,50 +562,46 @@ class Agent:
             tools=tools,
             max_concurrent=max_concurrent,
         )
-        
+
         # Log the dispatch
-        print(f"\n{Colors.BRIGHT_CYAN}🔄 Dispatched {len(tasks)} sub-agents ({max_concurrent} concurrent){Colors.RESET}")
+        print(
+            f"\n{Colors.BRIGHT_CYAN}🔄 Dispatched {len(tasks)} sub-agents ({max_concurrent} concurrent){Colors.RESET}"
+        )
         successful = sum(1 for r in results if r.success)
         print(f"{Colors.BRIGHT_GREEN}✅ {successful}/{len(tasks)} succeeded{Colors.RESET}")
-        
+
         return results
-    
+
     def cleanup(self) -> None:
         """Clean up resources held by the agent.
-        
+
         Should be called when agent is no longer needed to ensure
         proper cleanup of background processes and connections.
         """
         # Flush logger
-        if hasattr(self, 'logger'):
+        if hasattr(self, "logger"):
             self.logger.flush()
-        
+
         # Clear cancel event
         self.cancel_event = None
-        
+
         # Reset token cache
-        self._cached_token_count = 0
-        self._cached_token_index = 0
-        if hasattr(self, "_token_cache_version"):
-            self._token_cache_version += 1
-        
+        self._token_tracker.invalidate_cache()
+
         # Note: Do NOT clear _encoder_cache here — it is a module-level
         # shared cache. Clearing it would affect all Agent instances.
-        
+
         # Clean up background shells
         from .tools.bash_background import BackgroundShellManager
+
         try:
             loop = asyncio.get_running_loop()
             # Create cleanup task, fire and forget within same event loop
             # Use create_task to schedule cleanup without blocking
-            cleanup_task = loop.create_task(BackgroundShellManager.cleanup_all())
+            loop.create_task(BackgroundShellManager.cleanup_all())
             # Don't await - let it run in background, we can't block here
             # The task will complete even if we return
         except RuntimeError:
-            # No running event loop - this should NOT happen in normal async context
-            # but handle it gracefully without creating a new event loop
-            import logging
-            logging.warning("No running event loop during cleanup - cleanup may be skipped")
+            logger.warning("No running event loop during cleanup - cleanup may be skipped")
         except Exception as e:
-            import logging
-            logging.warning(f"Event loop cleanup failed: {e}")
+            logger.warning("Event loop cleanup failed: %s", e)

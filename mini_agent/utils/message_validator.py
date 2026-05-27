@@ -140,7 +140,7 @@ class MessageValidator:
                     f"Message {i}: {str(e)}",
                     field=f"messages[{i}].{e.field}" if e.field else None,
                     value=e.value,
-                )
+                ) from None
 
     @staticmethod
     def validate_tool_result_match(

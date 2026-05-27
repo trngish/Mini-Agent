@@ -1,14 +1,25 @@
 """Sub-agent for concurrent background task execution."""
 
+from __future__ import annotations
+
 import asyncio
+from enum import Enum
 from time import perf_counter
-from typing import Optional
+from typing import Any, cast
 
 from .llm import LLMClient
-from .schema import AgentMode, Message
+from .schema import AgentMode, Message, ToolCall
 from .schema.schema import WRITE_TOOLS
 from .tools.base import Tool, ToolResult
 from .utils.model_utils import is_m27_model
+
+BLOCKED_TOOLS_FOR_SUBAGENT = frozenset({"bash_kill", "team_dispatch"})
+
+
+class SubAgentSecurityPolicy(str, Enum):
+    YOLO = "yolo"
+    APPROVE_WRITE = "approve_write"
+    APPROVE_ALL = "approve_all"
 
 
 class SubAgentResult:
@@ -35,7 +46,8 @@ class SubAgent:
         tools: list[Tool],
         system_prompt: str = "You are a helpful assistant. Complete the assigned task concisely.",
         max_steps: int = 50,
-        m27_config: Optional[dict] = None,
+        m27_config: dict[str, Any] | None = None,
+        security_policy: SubAgentSecurityPolicy = SubAgentSecurityPolicy.YOLO,
     ):
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -43,35 +55,43 @@ class SubAgent:
         self.system_prompt = system_prompt
         self.max_steps = max_steps
         self.m27_config = m27_config or {}
-        model_name = getattr(llm_client, 'model', '')
+        model_name = getattr(llm_client, "model", "")
         self.is_m27 = is_m27_model(model_name)
-        self.mode = AgentMode.YOLO  # SubAgent always runs in YOLO mode
+        if security_policy == SubAgentSecurityPolicy.APPROVE_ALL:
+            self.mode = AgentMode.AGENT
+            self._approve_write_only = False
+        elif security_policy == SubAgentSecurityPolicy.APPROVE_WRITE:
+            self.mode = AgentMode.AGENT
+            self._approve_write_only = True
+        else:
+            self.mode = AgentMode.YOLO
+            self._approve_write_only = False
         self.write_tools = WRITE_TOOLS
 
     async def run(self, task: str) -> SubAgentResult:
         """Execute a sub-task and return the result."""
         start = perf_counter()
-        
+
         # Configure M2.7 thinking budget if available
         if self.is_m27 and self.m27_config:
             thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384)
-            if hasattr(self.llm, 'configure_m27'):
+            if hasattr(self.llm, "configure_m27"):
                 self.llm.configure_m27(self.m27_config)
-            elif hasattr(self.llm, 'configure_thinking_budget'):
+            elif hasattr(self.llm, "configure_thinking_budget"):
                 self.llm.configure_thinking_budget(thinking_budget)
-        
-        messages = [
-            Message(role="system", content=self.system_prompt),
-            Message(role="user", content=task)
-        ]
 
-        for step in range(self.max_steps):
+        messages = [Message(role="system", content=self.system_prompt), Message(role="user", content=task)]
+
+        for _step in range(self.max_steps):
             try:
                 response = await self.llm.generate(messages=messages, tools=self.tool_list)
             except Exception as e:
                 return SubAgentResult(
-                    task=task, content="", success=False,
-                    elapsed=perf_counter() - start, error=str(e),
+                    task=task,
+                    content="",
+                    success=False,
+                    elapsed=perf_counter() - start,
+                    error=str(e),
                 )
 
             if response.tool_calls:
@@ -80,10 +100,8 @@ class SubAgent:
                 max_concurrent = self.m27_config.get("max_concurrent_tools", 10)
 
                 if parallel_enabled and len(response.tool_calls) > 1:
-                    print(f"[DEBUG] Executing {len(response.tool_calls)} tools in parallel")
                     results = await self._execute_tools_parallel(response.tool_calls, max_concurrent)
                 else:
-                    print(f"[DEBUG] Executing {len(response.tool_calls)} tools sequentially")
                     results = await self._execute_tools_sequential(response.tool_calls)
 
                 # CRITICAL: Add assistant message with tool_calls BEFORE tool result
@@ -98,43 +116,45 @@ class SubAgent:
 
                 # Add tool messages in order
                 for _, tool_msg in results:
-                    print(f"[DEBUG] Appending tool result: tool_call_id={tool_msg.tool_call_id}, name={tool_msg.name}")
                     messages.append(tool_msg)
                 continue
 
             return SubAgentResult(
-                task=task, content=response.content or "", success=True,
+                task=task,
+                content=response.content or "",
+                success=True,
                 elapsed=perf_counter() - start,
             )
 
         return SubAgentResult(
-            task=task, content="", success=False,
-            elapsed=perf_counter() - start, error="Max steps reached",
+            task=task,
+            content="",
+            success=False,
+            elapsed=perf_counter() - start,
+            error="Max steps reached",
         )
 
-    async def _execute_tools_sequential(self, tool_calls: list) -> list[tuple]:
+    async def _execute_tools_sequential(self, tool_calls: list[ToolCall]) -> list[tuple[ToolCall, Message]]:
         """Execute tools one at a time."""
-        results = []
+        results: list[tuple[ToolCall, Message]] = []
         for tc in tool_calls:
             result = await self._execute_single_tool(tc)
             results.append(result)
         return results
 
-    async def _execute_tools_parallel(self, tool_calls: list, max_concurrent: int = 5) -> list[tuple]:
+    async def _execute_tools_parallel(
+        self, tool_calls: list[ToolCall], max_concurrent: int = 5
+    ) -> list[tuple[ToolCall, Message]]:
         """Execute tools in parallel using a semaphore to limit concurrency."""
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def bounded_execute(tc):
+        async def bounded_execute(tc: ToolCall) -> tuple[ToolCall, Message]:
             async with semaphore:
                 return await self._execute_single_tool(tc)
 
-        task_results = await asyncio.gather(
-            *[bounded_execute(tc) for tc in tool_calls],
-            return_exceptions=True
-        )
-        
-        # Handle any exceptions
-        processed_results = []
+        task_results = await asyncio.gather(*[bounded_execute(tc) for tc in tool_calls], return_exceptions=True)
+
+        processed_results: list[tuple[ToolCall, Message]] = []
         for tc, result in zip(tool_calls, task_results):
             if isinstance(result, Exception):
                 tool_msg = Message(
@@ -145,18 +165,36 @@ class SubAgent:
                 )
                 processed_results.append((tc, tool_msg))
             else:
-                processed_results.append(result)
+                processed_results.append(cast(tuple[ToolCall, Message], result))
 
         return processed_results
 
-    async def _execute_single_tool(self, tool_call) -> tuple:
-        """Execute a single tool and return (tool_call, tool_msg)."""
+    async def _execute_single_tool(self, tool_call: ToolCall) -> tuple[ToolCall, Message]:
         tool_call_id = tool_call.id
         function_name = tool_call.function.name
         arguments = tool_call.function.arguments
-        
-        print(f"[DEBUG] _execute_single_tool: tool_call_id={tool_call_id}, function={function_name}, args={arguments}")
-        
+
+        if self._approve_write_only and function_name in self.write_tools:
+            tool_msg = Message(
+                role="tool",
+                content=(
+                    f"Write operation '{function_name}' requires approval "
+                    f"in approve_write mode. Please use the parent agent for write operations."
+                ),
+                tool_call_id=tool_call_id,
+                name=function_name,
+            )
+            return (tool_call, tool_msg)
+
+        if function_name in BLOCKED_TOOLS_FOR_SUBAGENT:
+            tool_msg = Message(
+                role="tool",
+                content=f"Error: Tool '{function_name}' is blocked for sub-agents for security reasons",
+                tool_call_id=tool_call_id,
+                name=function_name,
+            )
+            return (tool_call, tool_msg)
+
         tool = self.tools.get(function_name)
         if not tool:
             tool_msg = Message(
@@ -182,18 +220,20 @@ class SubAgent:
 
     def cleanup(self) -> None:
         """Clean up resources held by the sub-agent.
-        
+
         Should be called when sub-agent is no longer needed.
         """
         # Clear tool references to free memory
         self.tools.clear()
         self.tool_list.clear()
-        
+
         # Clean up background shells if any were created
         try:
-            from .tools.bash_background import BackgroundShellManager
             # Schedule cleanup without blocking
             import asyncio
+
+            from .tools.bash_background import BackgroundShellManager
+
             loop = asyncio.get_running_loop()
             loop.create_task(BackgroundShellManager.cleanup_all())
         except Exception:
@@ -205,6 +245,7 @@ async def run_sub_agents(
     tasks: list[str],
     tools: list[Tool],
     max_concurrent: int = 3,
+    security_policy: SubAgentSecurityPolicy = SubAgentSecurityPolicy.YOLO,
 ) -> list[SubAgentResult]:
     """Run multiple sub-agents concurrently.
 
@@ -223,8 +264,8 @@ async def run_sub_agents(
         async with semaphore:
             # Clone the LLMClient for each subagent to avoid tool_call id conflicts
             # Sharing a client causes API errors: "tool result's tool id not found"
-            agent_llm = llm_client.clone() if hasattr(llm_client, 'clone') else llm_client
-            agent = SubAgent(llm_client=agent_llm, tools=tools)
+            agent_llm = llm_client.clone() if hasattr(llm_client, "clone") else llm_client
+            agent = SubAgent(llm_client=agent_llm, tools=tools, security_policy=security_policy)
             try:
                 return await agent.run(task)
             finally:

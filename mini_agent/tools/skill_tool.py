@@ -5,7 +5,7 @@ Implements Progressive Disclosure (Level 2): Load full skill content when needed
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import Tool, ToolResult
 from .skill_loader import SkillLoader
@@ -26,7 +26,7 @@ class GetSkillTool(Tool):
         return "Get complete content and guidance for a specified skill, used for executing specific types of tasks"
 
     @property
-    def parameters(self) -> Dict[str, Any]:
+    def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
@@ -57,8 +57,8 @@ class GetSkillTool(Tool):
 
 def create_skill_tools(
     skills_dir: str = "./skills",
-    additional_search_paths: Optional[List[Path]] = None,
-) -> tuple[List[Tool], Optional[SkillLoader]]:
+    additional_search_paths: list[Path] | None = None,
+) -> tuple[list[GetSkillTool], SkillLoader]:
     """
     Create skill tool for Progressive Disclosure
 

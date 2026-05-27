@@ -14,7 +14,8 @@ import asyncio
 import builtins
 import functools
 import logging
-from typing import Any, Callable, Type, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,12 @@ T = TypeVar("T")
 NON_RETRYABLE = (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit)
 
 # Pre-computed set of retryable exception types (cached at module load)
-_RETRYABLE_EXCEPTIONS: tuple[Type[Exception], ...] | None = None
+_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] | None = None
 
 
-def _get_retryable_exceptions() -> tuple[Type[Exception], ...]:
+def _get_retryable_exceptions() -> tuple[type[Exception], ...]:
     """Return default retryable exceptions (all exceptions except fatal types).
-    
+
     Cached at module level for performance.
     """
     global _RETRYABLE_EXCEPTIONS
@@ -37,9 +38,8 @@ def _get_retryable_exceptions() -> tuple[Type[Exception], ...]:
         result = []
         for name in dir(builtins):
             obj = getattr(builtins, name)
-            if isinstance(obj, type) and issubclass(obj, Exception):
-                if not issubclass(obj, NON_RETRYABLE):
-                    result.append(obj)
+            if isinstance(obj, type) and issubclass(obj, Exception) and not issubclass(obj, NON_RETRYABLE):
+                result.append(obj)
         _RETRYABLE_EXCEPTIONS = tuple(result)
     return _RETRYABLE_EXCEPTIONS
 
@@ -54,7 +54,7 @@ class RetryConfig:
         initial_delay: float = 1.0,
         max_delay: float = 60.0,
         exponential_base: float = 2.0,
-        retryable_exceptions: tuple[Type[Exception], ...] | None = None,
+        retryable_exceptions: tuple[type[Exception], ...] | None = None,
     ):
         """
         Args:
@@ -97,7 +97,7 @@ class RetryExhaustedError(Exception):
 def async_retry(
     config: RetryConfig | None = None,
     on_retry: Callable[[Exception, int], None] | None = None,
-) -> Callable:
+) -> Callable[..., Any]:
     """Async function retry decorator
 
     Args:
@@ -121,23 +121,19 @@ def async_retry(
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception: Exception | None = None
-
             for attempt in range(config.max_retries + 1):
                 try:
                     return await func(*args, **kwargs)
 
                 except NON_RETRYABLE:
-                    # Never retry fatal exceptions
                     raise
 
                 except config.retryable_exceptions as e:
-                    last_exception = e
-
-                    # If this is the last attempt, don't retry
                     if attempt >= config.max_retries:
-                        logger.error(f"Function {func.__name__} retry failed, reached maximum retry count {config.max_retries}")
-                        raise RetryExhaustedError(e, attempt + 1)
+                        logger.error(
+                            f"Function {func.__name__} retry failed, reached maximum retry count {config.max_retries}"
+                        )
+                        raise RetryExhaustedError(e, attempt + 1) from e
 
                     # Calculate delay time
                     delay = config.calculate_delay(attempt)
@@ -154,11 +150,6 @@ def async_retry(
 
                     # Wait before retry
                     await asyncio.sleep(delay)
-
-            # Should not reach here in theory
-            if last_exception:
-                raise last_exception
-            raise Exception("Unknown error")
 
         return wrapper
 

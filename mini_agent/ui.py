@@ -1,15 +1,16 @@
 """Terminal UI helpers for Mini Agent."""
 
+from __future__ import annotations
+
 import io
 import platform
-import subprocess
+import subprocess  # nosec B404
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from .agent import Agent
 from .utils import Colors
-from .utils.terminal_utils import calculate_display_width
 
 SEP = f"{Colors.DIM}┄{'─' * 56}┄{Colors.RESET}"
 
@@ -18,23 +19,56 @@ if isinstance(sys.stdout, io.TextIOWrapper):
 
 
 def print_image(width: int = 80) -> bool:
-    """Display logo image in terminal using ANSI true color + half-blocks."""
-    path = Path(__file__).parent / "config" / "minimax.webp"
-    if not path.exists():
-        return False
+    """Display logo image in terminal using ANSI true color + half-blocks.
+
+    Tries SVG first, then falls back to the legacy WEBP logo.
+    """
+    from PIL import Image
+
+    config_dir = Path(__file__).parent / "config"
+    svg_path = config_dir / "logo.svg"
+    webp_path = config_dir / "minimax.webp"
+
+    img: Image.Image | None = None
     try:
-        from PIL import Image
-    except ImportError:
+        if svg_path.exists():
+            # Attempt to rasterise the SVG via cairosvg or svglib
+            try:
+                import cairosvg  # type: ignore[import-not-found]
+
+                png_bytes = cairosvg.svg2png(
+                    url=str(svg_path),
+                    output_width=width,
+                    output_height=int(width),
+                )
+                from io import BytesIO
+
+                img = Image.open(BytesIO(png_bytes)).convert("RGBA")
+            except ImportError:
+                try:
+                    from reportlab.graphics import renderPM  # type: ignore[import-untyped]
+                    from svglib.svglib import svg2rlg  # type: ignore[import-not-found]
+
+                    drawing = svg2rlg(str(svg_path))
+                    img = renderPM.drawToPIL(drawing)
+                except ImportError:
+                    pass
+        if img is None and webp_path.exists():
+            img = Image.open(webp_path).convert("RGBA")
+    except Exception:
         return False
+
+    if img is None:
+        return False
+
     try:
-        img = Image.open(path).convert("RGBA")
-        bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
+        bg = Image.new("RGBA", img.size, (15, 23, 42, 255))
         img = Image.alpha_composite(bg, img).convert("RGB")
         aspect = img.height / img.width
         height = int(width * aspect * 0.5)
         if height < 1:
             return False
-        resample = getattr(Image, "Resampling", getattr(Image, "LANCZOS", Image.BICUBIC))
+        resample = getattr(Image, "Resampling", getattr(Image, "LANCZOS", Image.Resampling.BICUBIC))
         if hasattr(Image, "Resampling"):
             resample = Image.Resampling.LANCZOS
         img = img.resize((width, height * 2), resample)
@@ -42,8 +76,8 @@ def print_image(width: int = 80) -> bool:
         for y in range(0, img.height, 2):
             parts = []
             for x in range(img.width):
-                r1, g1, b1 = pixels[x, y]
-                r2, g2, b2 = pixels[x, y + 1]
+                r1, g1, b1 = pixels[x, y]  # type: ignore[index,misc]
+                r2, g2, b2 = pixels[x, y + 1]  # type: ignore[index,misc]
                 parts.append(f"\x1b[38;2;{r1};{g1};{b1}m\x1b[48;2;{r2};{g2};{b2}m\u2580")
             print("".join(parts) + "\x1b[0m")
         return True
@@ -102,7 +136,7 @@ def read_log_file(filename: str) -> None:
     print(f"\n{Colors.BRIGHT_CYAN}📄 Reading: {log_file}{Colors.RESET}")
     print(f"{Colors.DIM}{'─' * 80}{Colors.RESET}")
     try:
-        with open(log_file, "r", encoding="utf-8") as f:
+        with open(log_file, encoding="utf-8") as f:
             content = f.read()
         print(content)
         print(f"{Colors.DIM}{'─' * 80}{Colors.RESET}")
@@ -112,69 +146,41 @@ def read_log_file(filename: str) -> None:
 
 
 def print_banner() -> None:
-    """Print welcome banner — Claude Code style with gradient M logo."""
-    W = 78
+    """Print a compact welcome banner with a minimal coloured ASCII logo.
 
-    # Gradient M logo with ANSI color escape sequences
-    # Each line has multiple color segments for gradient effect
-    # logo = [
-    #     f"{Colors.CYAN}███╗   ███╗███╗   ███╗██╗  ██╗",
-    #     f"{Colors.BRIGHT_CYAN}████╗ ████║████╗ ████║╚██╗██╔╝",
-    #     f"{Colors.BRIGHT_CYAN}██╔████╔██║██╔████╔██║ ╚███╔╝",
-    #     f"{Colors.CYAN}██║╚██╔╝██║██║╚██╔╝██║ ██╔██╗",
-    #     f"{Colors.CYAN}██║ ╚═╝ ██║██║ ╚═╝ ██║██╔╝ ██╗",
-    #     f"{Colors.CYAN}╚═╝     ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝",
-    # ]
+    No image dependencies — pure terminal text with ANSI colour.
+    """
+    w = 52  # banner content width
 
+    # Compact ASCII art logo — 3 lines, magenta (MINI) → cyan (AGENT)
     logo = [
-        f"{Colors.CYAN}███╗   ███╗███╗   ███╗  ███╗  ",
-        f"{Colors.BRIGHT_CYAN}████╗ ████║████╗ ████║ ██╔██╗ ",
-        f"{Colors.BRIGHT_CYAN}██╔████╔██║██╔████╔██║ ██║██║ ",
-        f"{Colors.CYAN}██║╚██╔╝██║██║╚██╔╝██║ █████║ ",
-        f"{Colors.CYAN}██║ ╚═╝ ██║██║ ╚═╝ ██║ ██║██║ ",
-        f"{Colors.CYAN}╚═╝     ╚═╝╚═╝     ╚═╝ ╚═╝╚═╝ ",
+        f"  {Colors.BRIGHT_MAGENTA}╔╦╗╦╔╗╔╦{Colors.RESET}  {Colors.CYAN}╔═╗╔═╗╔═╗╔╗╔╔╦╗{Colors.RESET}",
+        f"  {Colors.BRIGHT_MAGENTA}║║║║║║║║{Colors.RESET}  {Colors.CYAN}╠═╣║ ╦║╣ ║║║ ║ {Colors.RESET}",
+        f"  {Colors.BRIGHT_MAGENTA}╩ ╩╩╝╚╝╩{Colors.RESET}  {Colors.CYAN}╩ ╩╚═╝╚═╝╝╚╝ ╩ {Colors.RESET}",
     ]
-    tips = [
-        "Type a task to begin",
-        "/help for all commands",
-        "Tab to cycle modes",
-        "Ctrl+C to exit",
-    ]
+    logo_w = 27  # visible width (ANSI codes excluded): 2+8+2+15
 
-    def pad(n: int) -> str:
-        return f"{'':>{n}}"
+    print()
+    print(f"  {Colors.DIM}╭{'─' * w}╮{Colors.RESET}")
+    print(f"  {Colors.DIM}│{Colors.RESET}{' ' * w}{Colors.DIM}│{Colors.RESET}")
 
-    # Calculate actual display width of title (excluding ANSI codes)
-    title = f"{Colors.BOLD}{Colors.BRIGHT_WHITE} Mini Agent {Colors.RESET}"
-    tv_display_width = calculate_display_width(" Mini Agent ")
-    ld = 4
-    rd = W - ld - tv_display_width
-    print(f"\n  {Colors.DIM}╭{'─' * ld}{Colors.RESET}{title}{Colors.DIM}{'─' * rd}╮{Colors.RESET}")
-    print(f"  {Colors.DIM}│{Colors.RESET}  {pad(W-2)}{Colors.DIM}│{Colors.RESET}")
+    for line in logo:
+        pad = w - logo_w
+        print(f"  {Colors.DIM}│{Colors.RESET}{line}{' ' * pad}{Colors.DIM}│{Colors.RESET}")
 
-    rows = max(len(logo), len(tips) + 1)
-    for i in range(rows):
-        left = logo[i] if i < len(logo) else pad(60)
-        if i == 0:
-            right = f"{Colors.BOLD}{Colors.BRIGHT_WHITE}Welcome!{Colors.RESET}"
-        elif i - 1 < len(tips):
-            right = f"{Colors.DIM}{tips[i-1]}{Colors.RESET}"
-        else:
-            right = ""
-        
-        # Calculate display widths instead of raw string lengths
-        lv = calculate_display_width(left) if i < len(logo) else 60
-        rv = calculate_display_width(right)
-        
-        # Calculate remaining space for padding
-        # Layout: left content + 4 spaces + right content + padding + borders
-        content_width = lv + 4 + rv
-        rp = W - 2 - content_width  # -2 for left and right border characters
-        
-        print(f"  {Colors.DIM}│{Colors.RESET}  {left}    {right}{pad(max(0, rp))}{Colors.DIM}│{Colors.RESET}")
+    print(f"  {Colors.DIM}│{Colors.RESET}{' ' * w}{Colors.DIM}│{Colors.RESET}")
 
-    print(f"  {Colors.DIM}│{Colors.RESET}  {pad(W-2)}{Colors.DIM}│{Colors.RESET}")
-    print(f"  {Colors.DIM}╰{'─' * W}╯{Colors.RESET}")
+    tips = (
+        f"  Type a task  {Colors.DIM}·{Colors.RESET}"
+        f"  /help  {Colors.DIM}·{Colors.RESET}"
+        f"  Tab  {Colors.DIM}·{Colors.RESET}"
+        f"  Ctrl+C exit"
+    )
+    tips_w = 47  # visible width (ANSI codes excluded)
+    print(f"  {Colors.DIM}│{Colors.RESET}{tips}{' ' * (w - tips_w)}{Colors.DIM}│{Colors.RESET}")
+
+    print(f"  {Colors.DIM}│{Colors.RESET}{' ' * w}{Colors.DIM}│{Colors.RESET}")
+    print(f"  {Colors.DIM}╰{'─' * w}╯{Colors.RESET}")
     print()
 
 
@@ -216,7 +222,12 @@ def print_help() -> None:
 def print_session_info(agent: Agent, workspace_dir: Path, model: str) -> None:
     """Print session information in a compact line."""
     pm = "Windows" if platform.system() == "Windows" else "Unix"
-    print(f"  {Colors.GREEN}{model}{Colors.RESET}  {Colors.DIM}·{Colors.RESET}  {workspace_dir.absolute()}  {Colors.DIM}·{Colors.RESET}  mode: {Colors.BOLD}{agent.mode.value.upper()}{Colors.RESET}  {Colors.DIM}·{Colors.RESET}  {pm}")
+    print(
+        f"  {Colors.GREEN}{model}{Colors.RESET}  {Colors.DIM}·{Colors.RESET}"
+        f"  {workspace_dir.absolute()}  {Colors.DIM}·{Colors.RESET}"
+        f"  mode: {Colors.BOLD}{agent.mode.value.upper()}{Colors.RESET}"
+        f"  {Colors.DIM}·{Colors.RESET}  {pm}"
+    )
     print()
 
 
@@ -230,7 +241,7 @@ def print_stats(agent: Agent, session_start: datetime) -> None:
     for icon, label, value in [
         ("⏱", "Duration", f"{minutes}m {seconds}s"),
         ("💬", "Messages", str(len(agent.messages))),
-        ("🔢", "调用次数", f"{agent.api_call_count}"),
+        ("🔢", "API Calls", f"{agent.api_call_count}"),
     ]:
         print(f"  {icon}  {Colors.DIM}{label}:{Colors.RESET} {value}")
     print()

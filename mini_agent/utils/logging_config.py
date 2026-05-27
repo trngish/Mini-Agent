@@ -4,6 +4,8 @@ Provides consistent logging across the application with support for
 multiple output handlers and log levels.
 """
 
+from __future__ import annotations
+
 import logging
 import sys
 from datetime import datetime
@@ -11,10 +13,10 @@ from pathlib import Path
 from typing import Any
 
 
-class AgentLoggerAdapter(logging.LoggerAdapter):
+class AgentLoggerAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
     """Custom logger adapter with additional context."""
 
-    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def process(self, msg: str, kwargs: Any) -> tuple[str, Any]:
         """Add extra context to log messages."""
         if self.extra:
             context_str = " | ".join(f"{k}={v}" for k, v in self.extra.items())
@@ -52,9 +54,9 @@ class StructuredFormatter(logging.Formatter):
 class AgentLoggingConfig:
     """Logging configuration for the agent."""
 
-    _instance: "AgentLoggingConfig | None" = None
+    _instance: AgentLoggingConfig | None = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.log_dir = Path.home() / ".mini-agent" / "log"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.console_level = logging.INFO
@@ -62,7 +64,7 @@ class AgentLoggingConfig:
         self._configured = False
 
     @classmethod
-    def get_instance(cls) -> "AgentLoggingConfig":
+    def get_instance(cls) -> AgentLoggingConfig:
         """Get singleton instance."""
         if cls._instance is None:
             cls._instance = cls()
@@ -80,9 +82,7 @@ class AgentLoggingConfig:
         # Console handler (INFO level)
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(self.console_level)
-        console_handler.setFormatter(
-            StructuredFormatter(include_timestamp=False, include_level=True)
-        )
+        console_handler.setFormatter(StructuredFormatter(include_timestamp=False, include_level=True))
         root_logger.addHandler(console_handler)
 
         # File handler (DEBUG level)
@@ -90,9 +90,7 @@ class AgentLoggingConfig:
         log_file = self.log_dir / f"mini-agent_{timestamp}.log"
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(self.file_level)
-        file_handler.setFormatter(
-            StructuredFormatter(include_timestamp=True, include_level=True)
-        )
+        file_handler.setFormatter(StructuredFormatter(include_timestamp=True, include_level=True))
         root_logger.addHandler(file_handler)
 
         self._configured = True
@@ -101,7 +99,7 @@ class AgentLoggingConfig:
         self,
         name: str,
         extra: dict[str, Any] | None = None,
-    ) -> logging.LoggerAdapter:
+    ) -> AgentLoggerAdapter:
         """Get a logger with the given name.
 
         Args:
@@ -117,21 +115,21 @@ class AgentLoggingConfig:
         logger = logging.getLogger(name)
         return AgentLoggerAdapter(logger, extra or {})
 
-    def get_agent_logger(self) -> logging.LoggerAdapter:
+    def get_agent_logger(self) -> AgentLoggerAdapter:
         """Get logger for agent module."""
         return self.get_logger("mini_agent.agent")
 
-    def get_llm_logger(self) -> logging.LoggerAdapter:
+    def get_llm_logger(self) -> AgentLoggerAdapter:
         """Get logger for LLM module."""
         return self.get_logger("mini_agent.llm")
 
-    def get_tool_logger(self) -> logging.LoggerAdapter:
+    def get_tool_logger(self) -> AgentLoggerAdapter:
         """Get logger for tools module."""
         return self.get_logger("mini_agent.tools")
 
 
 # Convenience function
-def get_logger(name: str, **kwargs: Any) -> logging.LoggerAdapter:
+def get_logger(name: str, **kwargs: Any) -> AgentLoggerAdapter:
     """Get a logger for the given module.
 
     Usage:

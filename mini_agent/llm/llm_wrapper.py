@@ -111,21 +111,21 @@ class LLMClient:
         """Set retry callback."""
         self._client.retry_callback = value
 
-    def configure_m27(self, config: dict) -> None:
+    def configure_m27(self, config: dict[str, Any]) -> None:
         """Configure M2.7 specific settings on the underlying LLM client.
 
         Args:
             config: M2.7 configuration dictionary
         """
         if config.get("enable_extended_thinking") is not None:
-            setattr(self._client, '_enable_extended_thinking', config["enable_extended_thinking"])
+            self._client._enable_extended_thinking = config["enable_extended_thinking"]  # type: ignore[attr-defined]
         if config.get("thinking_budget_tokens") is not None:
-            setattr(self._client, '_thinking_budget_tokens', config["thinking_budget_tokens"])
+            self._client._thinking_budget_tokens = config["thinking_budget_tokens"]  # type: ignore[attr-defined]
 
     async def generate(
         self,
         messages: list[Message],
-        tools: list | None = None,
+        tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         """Generate response from LLM.
@@ -140,20 +140,21 @@ class LLMClient:
         """
         # Validate messages before sending to catch structural errors early
         from ..utils.message_validator import MessageValidator, ValidationError
+
         try:
-            for i, msg in enumerate(messages):
+            for _idx, msg in enumerate(messages):
                 MessageValidator.validate_message(msg)
         except ValidationError as e:
-            logger.warning("Message validation issue at index %d: %s", i, e)
+            logger.warning("Message validation issue at index %d: %s", _idx, e)
 
         return await self._client.generate(messages, tools, **kwargs)
 
     def clone(self) -> "LLMClient":
         """Create a deep copy of this LLMClient.
-        
+
         Each SubAgent needs its own LLMClient to avoid tool_call.id conflicts
         when running concurrently. The API rejects requests with duplicate tool ids.
-        
+
         Returns:
             New LLMClient instance with the same configuration
         """

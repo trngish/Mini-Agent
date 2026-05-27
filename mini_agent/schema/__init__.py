@@ -1,6 +1,7 @@
 """Schema definitions for Mini-Agent."""
 
 from .schema import (
+    WRITE_TOOLS,
     AgentMode,
     FunctionCall,
     LLMProvider,
@@ -8,7 +9,6 @@ from .schema import (
     Message,
     TokenUsage,
     ToolCall,
-    WRITE_TOOLS,
 )
 
 __all__ = [

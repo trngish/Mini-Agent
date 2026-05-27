@@ -3,7 +3,7 @@
 Provides self-health checks after each step to detect and warn about issues.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..agent import Agent
@@ -66,7 +66,7 @@ class HealthChecker:
             pass
 
         # Check consecutive failures
-        failures = self._agent._consecutive_failures
+        failures = self._agent._error_recovery.consecutive_failures
         if failures >= self.CONSECUTIVE_FAILURE_CRITICAL:
             issues.append(f"Multiple consecutive tool failures: {failures}")
         elif failures >= self.CONSECUTIVE_FAILURE_WARNING:
@@ -78,7 +78,7 @@ class HealthChecker:
 
         return HealthCheckResult(issues)
 
-    def get_status(self) -> dict:
+    def get_status(self) -> dict[str, Any]:
         """Get agent status for diagnostics.
 
         Returns:
@@ -89,7 +89,7 @@ class HealthChecker:
             "token_limit": self._agent.token_limit,
             "api_call_count": self._agent.api_call_count,
             "session_age_steps": len([m for m in self._agent.messages if m.role == "user"]),
-            "consecutive_failures": self._agent._consecutive_failures,
+            "consecutive_failures": self._agent._error_recovery.consecutive_failures,
             "auto_save_enabled": self._agent.auto_save,
             "last_auto_save_step": self._agent._last_auto_save_step,
             "thinking_budget": self._agent.thinking_budget,
@@ -115,9 +115,9 @@ class HealthChecker:
         ]
 
         # Add warning indicators
-        if status['token_usage'] > status['token_limit'] * 0.8:
+        if status["token_usage"] > status["token_limit"] * 0.8:
             lines.append(f"{Colors.YELLOW}⚠️  Token usage high{Colors.RESET}")
-        if status['consecutive_failures'] >= 2:
+        if status["consecutive_failures"] >= 2:
             lines.append(f"{Colors.YELLOW}⚠️  Multiple recent failures{Colors.RESET}")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)

@@ -77,9 +77,7 @@ def test_create_skill_tools_returns_single_tool(skill_loader):
     with tempfile.TemporaryDirectory() as tmpdir:
         skill_dir = Path(tmpdir) / "test-skill"
         skill_dir.mkdir()
-        create_test_skill(
-            skill_dir, "test-skill", "Test skill", "Test content"
-        )
+        create_test_skill(skill_dir, "test-skill", "Test skill", "Test content")
 
         tools, loader = create_skill_tools(tmpdir)
 
@@ -95,9 +93,7 @@ def test_tool_count_optimization():
         # Create a simple test skill
         skill_dir = Path(tmpdir) / "simple-skill"
         skill_dir.mkdir()
-        create_test_skill(
-            skill_dir, "simple-skill", "Simple test", "Content"
-        )
+        create_test_skill(skill_dir, "simple-skill", "Simple test", "Content")
 
         tools, _ = create_skill_tools(tmpdir)
 

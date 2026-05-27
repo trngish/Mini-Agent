@@ -34,7 +34,7 @@ def calculate_display_width(text: str) -> int:
     Examples:
         >>> calculate_display_width("Hello")
         5
-        >>> calculate_display_width("你好")
+        >>> calculate_display_width("World")
         4
         >>> calculate_display_width("🤖")
         2
@@ -82,8 +82,8 @@ def truncate_with_ellipsis(text: str, max_width: int, ellipsis: str = "…") -> 
     Examples:
         >>> truncate_with_ellipsis("Hello World", 8)
         'Hello W…'
-        >>> truncate_with_ellipsis("你好世界", 5)
-        '你好…'
+        >>> truncate_with_ellipsis("Good morning", 5)
+        'Good…'
     """
     if max_width <= 0:
         return ""
@@ -132,8 +132,8 @@ def pad_to_width(text: str, target_width: int, align: str = "left", fill_char: s
     Examples:
         >>> pad_to_width("Hello", 10)
         'Hello     '
-        >>> pad_to_width("你好", 10)
-        '你好      '
+        >>> pad_to_width("World", 10)
+        'World     '
         >>> pad_to_width("Test", 10, align="center")
         '   Test   '
     """

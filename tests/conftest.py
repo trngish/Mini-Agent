@@ -1,7 +1,6 @@
 """Shared test fixtures for Mini-Agent test suite."""
 
 import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +38,7 @@ def mock_llm_client():
 def sample_messages():
     """Create a sample message list for testing."""
     from mini_agent.schema import Message
+
     return [
         Message(role="system", content="You are a helpful assistant."),
         Message(role="user", content="Hello!"),

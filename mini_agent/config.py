@@ -7,9 +7,10 @@ Provides unified configuration loading and management functionality with support
 - Config validation
 """
 
+import contextlib
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -33,17 +34,18 @@ class LLMConfig(BaseModel):
     model: str = "MiniMax-M2.5"
     provider: str = "anthropic"  # "anthropic" or "openai"
     retry: RetryConfig = Field(default_factory=RetryConfig)
-    
+
     @field_validator("api_key")
     @classmethod
     def validate_api_key(cls, v: str) -> str:
         if not v or v == "YOUR_API_KEY_HERE":
             raise ValueError(
-                "API key not configured. Set MINIMAX_API_KEY environment variable "
-                "or configure api_key in config.yaml"
+                "API key not configured. Set MINIMAX_API_KEY environment variable or configure api_key in config.yaml"
             )
         if len(v) < 8:
-            raise ValueError(f"Invalid API Key format: expected at least 8 characters, got {repr(v[:4])}... (length={len(v)})")
+            raise ValueError(
+                f"Invalid API Key format: expected at least 8 characters, got {repr(v[:4])}... (length={len(v)})"
+            )
         return v
 
 
@@ -64,7 +66,7 @@ class MCPConfig(BaseModel):
 
 
 class ToolsConfig(BaseModel):
-    """"Tools configuration"""
+    """ "Tools configuration"""
 
     # Basic tools (file operations, bash)
     enable_file_tools: bool = True
@@ -82,33 +84,32 @@ class ToolsConfig(BaseModel):
 
     # Tool timeouts (in seconds)
     bash_timeout: int = Field(
-        default=120,
-        description="Default timeout for bash tool execution (default: 120, max: 600)"
+        default=120, description="Default timeout for bash tool execution (default: 120, max: 600)"
     )
 
     def get_skills_search_paths(self) -> list[Path]:
-        """"Get skills directories to search, in priority order.
+        """ "Get skills directories to search, in priority order.
 
-        
+
         Priority:
         1. User config directory: ~/.mini-agent/skills/
         2. Project directory: {project_root}/mini_agent/skills/
-        
+
         Returns:
             List of skills directory paths to search
         """
         paths = []
-        
+
         # Priority 1: User config directory skills (~/.mini-agent/skills/)
         user_skills_dir = Path.home() / ".mini-agent" / "skills"
         if user_skills_dir.exists():
             paths.append(user_skills_dir)
-        
+
         # Priority 2: Project directory skills (./mini_agent/skills/)
         project_skills_dir = Path("mini_agent") / "skills"
         if project_skills_dir.exists():
             paths.append(project_skills_dir)
-        
+
         return paths
 
     def get_mcp_config_paths(self) -> list[Path]:
@@ -139,9 +140,19 @@ class ToolsConfig(BaseModel):
 class PlatformConfig(BaseModel):
     """Platform-specific configuration"""
 
-    mode: str = Field(
-        default="auto",
-        description="Platform mode: 'windows', 'linux', or 'auto' (auto-detect from OS)"
+    mode: str = Field(default="auto", description="Platform mode: 'windows', 'linux', or 'auto' (auto-detect from OS)")
+
+
+class SecurityConfig(BaseModel):
+    """Security configuration for path access control"""
+
+    extra_blocked_dirs: list[str] = Field(
+        default_factory=list,
+        description="Additional directories to block (beyond built-in system directories)",
+    )
+    extra_blocked_home_subdirs: list[str] = Field(
+        default_factory=list,
+        description="Additional home subdirectories to block (beyond .ssh, .gnupg, .config/ssh)",
     )
 
 
@@ -149,7 +160,7 @@ class M27Config(BaseModel):
     """MiniMax M2.7 specific configuration"""
 
     enable_extended_thinking: bool = True
-    thinking_budget_tokens: int = 32768  # 按次数计费：用满32K思考预算，深度思考=高命中率=少调用
+    thinking_budget_tokens: int = 32768  # Per-call billing: full 32K budget, deeper = more accurate = fewer calls
     thinking_budget_adaptive: bool = True  # Adaptive thinking budget
     enable_message_cache: bool = True
     enable_parallel_tool_calls: bool = True
@@ -160,16 +171,16 @@ class M27Config(BaseModel):
 
 class CLIOverrideConfig(BaseModel):
     """CLI override configuration for runtime parameter passing"""
-    
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
-    model: Optional[str] = None
-    provider: Optional[str] = None
-    max_steps: Optional[int] = None
-    workspace_dir: Optional[str] = None
-    platform_mode: Optional[str] = None
-    enable_skills: Optional[bool] = None
-    enable_mcp: Optional[bool] = None
+
+    api_key: str | None = None
+    api_base: str | None = None
+    model: str | None = None
+    provider: str | None = None
+    max_steps: int | None = None
+    workspace_dir: str | None = None
+    platform_mode: str | None = None
+    enable_skills: bool | None = None
+    enable_mcp: bool | None = None
 
 
 class Config(BaseModel):
@@ -179,6 +190,7 @@ class Config(BaseModel):
     agent: AgentConfig
     tools: ToolsConfig
     platform: PlatformConfig = Field(default_factory=PlatformConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
     m27: M27Config = Field(default_factory=M27Config)
 
     @classmethod
@@ -186,7 +198,9 @@ class Config(BaseModel):
         """Load configuration from the default search path."""
         config_path = cls.get_default_config_path()
         if not config_path.exists():
-            raise FileNotFoundError("Configuration file not found. Run scripts/setup-config.sh or place config.yaml in mini_agent/config/.")
+            raise FileNotFoundError(
+                "Configuration file not found. Run scripts/setup-config.sh or place config.yaml in mini_agent/config/."
+            )
         return cls.from_yaml(config_path)
 
     @classmethod
@@ -230,6 +244,7 @@ class Config(BaseModel):
 
         # Validate configuration with ConfigValidator
         from .utils.config_validator import ConfigValidator
+
         ConfigValidator.validate_or_raise(config)
 
         return config
@@ -237,11 +252,11 @@ class Config(BaseModel):
     @classmethod
     def _parse_config(cls, data: dict[str, Any], config_path: Path) -> "Config":
         """Parse all configuration sections from data dictionary.
-        
+
         Args:
             data: Configuration dictionary from YAML
             config_path: Original config file path for resolving relative paths
-            
+
         Returns:
             Config instance
         """
@@ -249,6 +264,7 @@ class Config(BaseModel):
         agent_config = cls._parse_agent_config(data)
         tools_config = cls._parse_tools_config(data, config_path)
         platform_config = cls._parse_platform_config(data)
+        security_config = cls._parse_security_config(data)
         m27_config = cls._parse_m27_config(data)
 
         return cls(
@@ -256,6 +272,7 @@ class Config(BaseModel):
             agent=agent_config,
             tools=tools_config,
             platform=platform_config,
+            security=security_config,
             m27=m27_config,
         )
 
@@ -271,8 +288,14 @@ class Config(BaseModel):
             exponential_base=retry_data.get("exponential_base", 2.0),
         )
 
+        api_key = data.get("api_key")
+        if not api_key:
+            raise ValueError(
+                "api_key is required but not found. Set MINIMAX_API_KEY env var or add api_key to config.yaml"
+            )
+
         return LLMConfig(
-            api_key=data["api_key"],
+            api_key=api_key,
             api_base=data.get("api_base", "https://api.minimax.io"),
             model=data.get("model", "MiniMax-M2.5"),
             provider=data.get("provider", "anthropic"),
@@ -328,6 +351,15 @@ class Config(BaseModel):
         return PlatformConfig(mode=platform_mode)
 
     @classmethod
+    def _parse_security_config(cls, data: dict[str, Any]) -> SecurityConfig:
+        """Parse Security configuration section."""
+        security_data = data.get("security", {})
+        return SecurityConfig(
+            extra_blocked_dirs=security_data.get("extra_blocked_dirs", []),
+            extra_blocked_home_subdirs=security_data.get("extra_blocked_home_subdirs", []),
+        )
+
+    @classmethod
     def _parse_m27_config(cls, data: dict[str, Any]) -> M27Config:
         """Parse M2.7 configuration section."""
         m27_data = data.get("m27", {})
@@ -370,10 +402,8 @@ class Config(BaseModel):
 
         # Agent configuration overrides
         if max_steps := os.environ.get("MINI_AGENT_MAX_STEPS"):
-            try:
+            with contextlib.suppress(ValueError):
                 data["max_steps"] = int(max_steps)
-            except ValueError:
-                pass  # Keep default if invalid
 
         if workspace_dir := os.environ.get("MINI_AGENT_WORKSPACE_DIR"):
             data["workspace_dir"] = workspace_dir
@@ -431,6 +461,10 @@ class Config(BaseModel):
             self.tools.enable_skills = cli_overrides.enable_skills
         if cli_overrides.enable_mcp is not None:
             self.tools.enable_mcp = cli_overrides.enable_mcp
+
+        from .utils.config_validator import ConfigValidator
+
+        ConfigValidator.validate_or_raise(self)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary for serialization.

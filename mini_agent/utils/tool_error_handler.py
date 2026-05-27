@@ -3,12 +3,12 @@
 Provides standardized exception types and error handling for tool execution.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 class ToolExecutionError(Exception):
     """Base exception for tool execution failures.
-    
+
     Attributes:
         tool_name: Name of the tool that failed
         arguments: Arguments passed to the tool
@@ -22,7 +22,7 @@ class ToolExecutionError(Exception):
         tool_name: str,
         arguments: dict[str, Any],
         message: str,
-        original_exception: Optional[Exception] = None,
+        original_exception: Exception | None = None,
         recoverable: bool = True,
     ):
         self.tool_name = tool_name
@@ -71,7 +71,7 @@ class ToolResourceError(ToolExecutionError):
         tool_name: str,
         arguments: dict[str, Any],
         message: str,
-        original_exception: Optional[Exception] = None,
+        original_exception: Exception | None = None,
     ):
         super().__init__(
             tool_name=tool_name,
@@ -88,18 +88,18 @@ def handle_tool_error(
     exception: Exception,
 ) -> ToolExecutionError:
     """Classify and wrap an exception into appropriate ToolExecutionError.
-    
+
     Args:
         tool_name: Name of the tool that failed
         arguments: Arguments passed to the tool
         exception: Original exception
-        
+
     Returns:
         Classified ToolExecutionError
     """
     if isinstance(exception, ToolExecutionError):
         return exception
-    
+
     if isinstance(exception, (FileNotFoundError, OSError)):
         return ToolResourceError(
             tool_name=tool_name,
@@ -107,21 +107,21 @@ def handle_tool_error(
             message=str(exception),
             original_exception=exception,
         )
-    
+
     if isinstance(exception, PermissionError):
         return ToolPermissionError(
             tool_name=tool_name,
             arguments=arguments,
             message=f"Permission denied: {exception}",
         )
-    
+
     if isinstance(exception, ValueError):
         return ToolValidationError(
             tool_name=tool_name,
             arguments=arguments,
             message=f"Invalid input: {exception}",
         )
-    
+
     # Default: generic execution error
     return ToolExecutionError(
         tool_name=tool_name,

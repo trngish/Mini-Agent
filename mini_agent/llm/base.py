@@ -1,7 +1,6 @@
 """Base class for LLM clients."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import Any
 
 from ..retry import RetryConfig

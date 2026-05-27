@@ -5,20 +5,15 @@ Run with: python -m pytest tests/test_stress.py -v -s
 
 import asyncio
 import gc
-import sys
 import threading
-import traceback
-import weakref
 from time import perf_counter
-from typing import List
-from unittest.mock import Mock
 
 import pytest
 
 from mini_agent.subagent import SubAgent, SubAgentResult
-from mini_agent.tools.batch_tools import MultiBashTool
+from mini_agent.tools.multi_bash import MultiBashTool
 from mini_agent.tools.team_dispatch_tool import TeamDispatchTool
-from mini_agent.utils.context_cache import get_context_cache
+from mini_agent.utils.context_cache import ContextCache
 
 
 class MockLLMClient:
@@ -37,12 +32,14 @@ class MockLLMClient:
 
     async def generate(self, messages, tools=None, on_text=None, on_thinking=None):
         MockLLMClient.call_count += 1
+
         class MockResponse:
             content = f"Mock response #{MockLLMClient.call_count}"
             thinking = None
             tool_calls = []
             finish_reason = "stop"
-            usage = type('obj', (object,), {'total_tokens': 100})()
+            usage = type("obj", (object,), {"total_tokens": 100})()
+
         return MockResponse()
 
 
@@ -61,12 +58,14 @@ def mock_tools():
 @pytest.fixture
 def bash_tool():
     from mini_agent.tools.bash_tool import BashTool
+
     return BashTool(platform_mode="windows")
 
 
 # =============================================================================
 # MAXIMUM SubAgent Tests
 # =============================================================================
+
 
 class TestSubAgentStress:
     """Maximum stress tests for SubAgent."""
@@ -115,6 +114,7 @@ class TestSubAgentStress:
     @pytest.mark.asyncio
     async def test_deep_nesting_20_levels(self, mock_llm_client, mock_tools):
         """Deep nesting with 20 levels - MAXIMUM."""
+
         async def run_with_depth(depth: int, max_depth: int):
             if depth >= max_depth:
                 return SubAgentResult(success=True, content=f"Depth {depth}", error=None, elapsed=0.0)
@@ -141,10 +141,7 @@ class TestSubAgentStress:
         all_tasks = []
         for wave in range(10):
             tasks = [f"Wave{wave} Task{i}" for i in range(1000)]
-            coros = [
-                SubAgent(llm_client=mock_llm_client, tools=mock_tools, max_steps=3).run(task)
-                for task in tasks
-            ]
+            coros = [SubAgent(llm_client=mock_llm_client, tools=mock_tools, max_steps=3).run(task) for task in tasks]
             all_tasks.extend(coros)
 
         start = perf_counter()
@@ -179,13 +176,14 @@ class TestSubAgentStress:
 # MAXIMUM ContextCache
 # =============================================================================
 
+
 class TestContextCacheStress:
     """Maximum stress tests for context cache."""
 
+    @pytest.mark.slow
     def test_cache_100k_entries(self):
         """100000 entries - MAXIMUM."""
-        cache = get_context_cache()
-        cache.invalidate_all()
+        cache = ContextCache(max_file_entries=200000)
 
         start = perf_counter()
         for i in range(100000):
@@ -193,13 +191,12 @@ class TestContextCacheStress:
         elapsed = perf_counter() - start
 
         stats = cache.get_stats()
-        assert stats['file_entries'] == 100000
+        assert stats["file_entries"] == 100000
         print(f"\n[PASS] 100000 entries in {elapsed:.2f}s")
 
     def test_cache_100_threads_concurrent(self):
         """100 threads concurrent writes - MAXIMUM."""
-        cache = get_context_cache()
-        cache.invalidate_all()
+        cache = ContextCache(max_file_entries=20000)
 
         errors = []
 
@@ -221,15 +218,13 @@ class TestContextCacheStress:
 
         stats = cache.get_stats()
         assert len(errors) == 0, f"Errors: {errors}"
-        assert stats['file_entries'] == 10000
+        assert stats["file_entries"] == 10000
         print(f"\n[PASS] 100 threads x 100 = 10000 writes in {elapsed:.2f}s, 0 errors")
 
     def test_cache_mixed_50_threads(self):
         """50 threads mixed read/write/delete - MAXIMUM."""
-        cache = get_context_cache()
-        cache.invalidate_all()
+        cache = ContextCache(max_file_entries=20000)
 
-        # Pre-fill
         for i in range(5000):
             cache.set_file_content(f"prefilled_{i}.py", f"content{i}")
 
@@ -274,13 +269,13 @@ class TestContextCacheStress:
                 errors.append(e)
 
         threads = []
-        for i in range(15):
-            threads.append(threading.Thread(target=writer, args=(i,)))
-        for i in range(20):
+        for _i in range(15):
+            threads.append(threading.Thread(target=writer, args=(_i,)))
+        for _i in range(20):
             threads.append(threading.Thread(target=reader))
-        for i in range(10):
+        for _i in range(10):
             threads.append(threading.Thread(target=updater))
-        for i in range(5):
+        for _i in range(5):
             threads.append(threading.Thread(target=deleter))
 
         start = perf_counter()
@@ -295,8 +290,7 @@ class TestContextCacheStress:
 
     def test_cache_filter_50000_paths(self):
         """Filter 50000 paths - MAXIMUM."""
-        cache = get_context_cache()
-        cache.invalidate_all()
+        cache = ContextCache(max_file_entries=50000)
 
         cached_count = 25000
         for i in range(cached_count):
@@ -316,13 +310,12 @@ class TestContextCacheStress:
         """500k entries memory stress - MAXIMUM."""
         import tracemalloc
 
-        cache = get_context_cache()
-        cache.invalidate_all()
+        cache = ContextCache(max_file_entries=600000)
 
         tracemalloc.start()
 
         for i in range(500000):
-            cache.set_file_content(f"file_{i}.py", f"x" * 100)
+            cache.set_file_content(f"file_{i}.py", "x" * 100)
             if i % 50000 == 0:
                 gc.collect()
 
@@ -330,12 +323,13 @@ class TestContextCacheStress:
         tracemalloc.stop()
 
         stats = cache.get_stats()
-        print(f"\n[PASS] 500k entries: Cache={stats['file_entries']}, Peak mem={peak/1024/1024:.1f}MB")
+        print(f"\n[PASS] 500k entries: Cache={stats['file_entries']}, Peak mem={peak / 1024 / 1024:.1f}MB")
 
 
 # =============================================================================
 # MAXIMUM TeamDispatch
 # =============================================================================
+
 
 class TestTeamDispatchTool:
     """Maximum stress tests for TeamDispatchTool."""
@@ -351,10 +345,7 @@ class TestTeamDispatchTool:
         tasks = [f"Task {i}: Complex analysis {i}" for i in range(100)]
 
         start = perf_counter()
-        results = await asyncio.gather(*[
-            tool.execute(task=task, mode="decompose")
-            for task in tasks
-        ])
+        await asyncio.gather(*[tool.execute(task=task, mode="decompose") for task in tasks])
         elapsed = perf_counter() - start
 
         print(f"\n[PASS] 100 parallel team tasks in {elapsed:.2f}s")
@@ -368,10 +359,7 @@ class TestTeamDispatchTool:
         )
 
         start = perf_counter()
-        coros = [
-            tool.execute(task=f"Burst task {i}", mode="decompose")
-            for i in range(200)
-        ]
+        coros = [tool.execute(task=f"Burst task {i}", mode="decompose") for i in range(200)]
         results = await asyncio.gather(*coros)
         elapsed = perf_counter() - start
 
@@ -383,6 +371,7 @@ class TestTeamDispatchTool:
 # MAXIMUM BatchTool
 # =============================================================================
 
+
 class TestBatchToolStress:
     """Maximum stress tests for batch tools."""
 
@@ -391,10 +380,7 @@ class TestBatchToolStress:
         """2000 commands in one batch - MAXIMUM."""
         tool = mock_tools[0]
 
-        commands = [
-            {"command": f"echo Stress {i}", "label": f"cmd_{i}"}
-            for i in range(2000)
-        ]
+        commands = [{"command": f"echo Stress {i}", "label": f"cmd_{i}"} for i in range(2000)]
 
         start = perf_counter()
         result = await tool.execute(commands=commands)
@@ -409,10 +395,7 @@ class TestBatchToolStress:
 
         start = perf_counter()
         for batch in range(10):
-            commands = [
-                {"command": f"echo Batch{batch} {i}", "label": f"b{batch}_{i}"}
-                for i in range(1000)
-            ]
+            commands = [{"command": f"echo Batch{batch} {i}", "label": f"b{batch}_{i}"} for i in range(1000)]
             await tool.execute(commands=commands)
         elapsed = perf_counter() - start
 
@@ -422,6 +405,7 @@ class TestBatchToolStress:
 # =============================================================================
 # MAXIMUM Tool Execution
 # =============================================================================
+
 
 class TestToolExecution:
     """Maximum stress tests for tool execution."""
@@ -441,10 +425,7 @@ class TestToolExecution:
     async def test_2000_concurrent_tool_calls(self, bash_tool):
         """2000 concurrent tool calls - MAXIMUM."""
         start = perf_counter()
-        coros = [
-            bash_tool.execute(command=f"echo concurrent_{i}")
-            for i in range(2000)
-        ]
+        coros = [bash_tool.execute(command=f"echo concurrent_{i}") for i in range(2000)]
         results = await asyncio.gather(*coros)
         elapsed = perf_counter() - start
 
@@ -460,10 +441,7 @@ class TestToolExecution:
 
         for i in range(100):
             await bash_tool.execute(command=f"echo bash_{i}")
-            await multi_tool.execute(commands=[
-                {"command": f"echo mb_{i}_{j}", "label": f"mb_{j}"}
-                for j in range(20)
-            ])
+            await multi_tool.execute(commands=[{"command": f"echo mb_{i}_{j}", "label": f"mb_{j}"} for j in range(20)])
 
         elapsed = perf_counter() - start
         print(f"\n[PASS] 100 x (1 bash + 1 multi 20) = 2100 tool calls in {elapsed:.2f}s")
@@ -473,14 +451,15 @@ class TestToolExecution:
 # MAXIMUM PerformanceMetrics
 # =============================================================================
 
+
 class TestPerformanceMetrics:
     """Maximum stress tests for performance metrics."""
 
     @pytest.mark.asyncio
     async def test_100k_metrics_records(self, mock_llm_client, mock_tools):
         """100000 metrics records - MAXIMUM."""
-        from mini_agent.core.metrics import PerformanceMetrics
         from mini_agent.agent import Agent
+        from mini_agent.core.metrics import PerformanceMetrics
 
         agent = Agent(
             llm_client=mock_llm_client,
@@ -491,20 +470,20 @@ class TestPerformanceMetrics:
         metrics = PerformanceMetrics(agent)
 
         start = perf_counter()
-        for i in range(100000):
+        for _i in range(100000):
             metrics.record_tool_duration("bash", 0.0001)
-        for i in range(100000):
+        for _i in range(100000):
             metrics.record_step_duration(0.0001)
         elapsed = perf_counter() - start
 
-        stats = metrics.get_metrics()
+        metrics.get_metrics()
         print(f"\n[PASS] 200000 metrics records in {elapsed:.2f}s")
 
     @pytest.mark.asyncio
     async def test_health_check_100k_times(self, mock_llm_client, mock_tools):
         """100000 health checks - MAXIMUM."""
-        from mini_agent.core.health_check import HealthChecker
         from mini_agent.agent import Agent
+        from mini_agent.core.health_check import HealthChecker
 
         agent = Agent(
             llm_client=mock_llm_client,
@@ -526,6 +505,7 @@ class TestPerformanceMetrics:
 # MAXIMUM Agent Integration
 # =============================================================================
 
+
 class TestAgentIntegration:
     """Maximum stress tests for agent integration."""
 
@@ -535,8 +515,8 @@ class TestAgentIntegration:
         from mini_agent.agent import Agent
 
         start = perf_counter()
-        for i in range(1000):
-            agent = Agent(
+        for _i in range(1000):
+            Agent(
                 llm_client=mock_llm_client,
                 tools=mock_tools,
                 system_prompt="You are a test agent.",
@@ -579,7 +559,7 @@ class TestAgentIntegration:
         count = 0
 
         while perf_counter() < end_time:
-            agent = Agent(
+            Agent(
                 llm_client=mock_llm_client,
                 tools=mock_tools,
                 system_prompt="You are a test agent.",
@@ -595,16 +575,14 @@ class TestAgentIntegration:
 # MAXIMUM Bash Normalization
 # =============================================================================
 
+
 class TestBashNormalization:
     """Maximum stress tests for bash command normalization."""
 
     @pytest.mark.asyncio
     async def test_10000_command_normalizations(self, bash_tool):
         """10000 command normalizations - MAXIMUM."""
-        commands = [
-            f"echo test{i} && echo more{i} && echo done{i}"
-            for i in range(10000)
-        ]
+        commands = [f"echo test{i} && echo more{i} && echo done{i}" for i in range(10000)]
 
         start = perf_counter()
         results = []
@@ -620,6 +598,7 @@ class TestBashNormalization:
 # =============================================================================
 # MAXIMUM Error Recovery
 # =============================================================================
+
 
 class TestErrorRecovery:
     """Maximum stress tests for error recovery."""
@@ -648,6 +627,7 @@ class TestErrorRecovery:
 # MAXIMUM Stress: Concurrent Everything
 # =============================================================================
 
+
 class TestConcurrentEverything:
     """MAXIMUM: All systems running concurrently."""
 
@@ -655,18 +635,16 @@ class TestConcurrentEverything:
     async def test_all_systems_concurrent(self, mock_llm_client, mock_tools, bash_tool):
         """Everything running at once - MAXIMUM."""
         from mini_agent.agent import Agent
-        from mini_agent.core.metrics import PerformanceMetrics
         from mini_agent.core.health_check import HealthChecker
+        from mini_agent.core.metrics import PerformanceMetrics
 
-        cache = get_context_cache()
-        cache.invalidate_all()
+        cache = ContextCache(max_file_entries=20000)
 
         start = perf_counter()
 
         # SubAgents
         subagent_tasks = [
-            SubAgent(llm_client=mock_llm_client, tools=mock_tools, max_steps=3).run(f"SA_{i}")
-            for i in range(500)
+            SubAgent(llm_client=mock_llm_client, tools=mock_tools, max_steps=3).run(f"SA_{i}") for i in range(500)
         ]
 
         # Cache writes
@@ -681,14 +659,11 @@ class TestConcurrentEverything:
             system_prompt="You are a test agent.",
             max_steps=2,
         )
-        metrics = PerformanceMetrics(agent)
-        checker = HealthChecker(agent)
+        PerformanceMetrics(agent)
+        HealthChecker(agent)
 
         # Tool calls
-        tool_tasks = [
-            bash_tool.execute(command=f"echo {i}")
-            for i in range(500)
-        ]
+        tool_tasks = [bash_tool.execute(command=f"echo {i}") for i in range(500)]
 
         # Run all concurrently
         cache_thread = threading.Thread(target=cache_writer)
@@ -699,10 +674,10 @@ class TestConcurrentEverything:
         cache_thread.join()
         elapsed = perf_counter() - start
 
-        success_count = sum(1 for r in results if hasattr(r, 'success') and r.success)
+        sum(1 for r in results if hasattr(r, "success") and r.success)
         stats = cache.get_stats()
 
-        print(f"\n[PASS] All systems concurrent:")
+        print("\n[PASS] All systems concurrent:")
         print(f"  - SubAgents: {sum(1 for r in results[:500] if r.success)}/500")
         print(f"  - Tool calls: {sum(1 for r in results[500:] if r.success)}/500")
         print(f"  - Cache entries: {stats['file_entries']}")

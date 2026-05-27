@@ -17,13 +17,6 @@ Note: M27Config has been moved to model_utils.py as is_m27_model().
 from typing import Any
 
 # Re-export from model_utils for backwards compatibility
-from .model_utils import (
-    is_m27_model as is_m27_enabled,
-    get_model_specs,
-    M27_MODEL_IDENTIFIERS,
-    MINIMAX_MODEL_IDENTIFIERS,
-)
-from .model_utils import ModelSpecs
 
 
 class M27PromptOptimizer:
@@ -37,7 +30,8 @@ class M27PromptOptimizer:
     """
 
     # System prompt template for M2.7 that emphasizes its capabilities
-    M27_SYSTEM_PROMPT_TEMPLATE = """You are Mini-Agent powered by MiniMax M2.7, an advanced AI assistant with extended reasoning capabilities.
+    M27_SYSTEM_PROMPT_TEMPLATE = """\
+You are Mini-Agent powered by MiniMax M2.7, an advanced AI assistant with extended reasoning capabilities.
 
 ## M2.7 Capabilities:
 - **Extended Thinking**: You can use internal reasoning (up to 32K tokens) to break down complex problems
@@ -121,11 +115,11 @@ All relative paths will be resolved relative to this directory.
             Thinking content if present, None otherwise
         """
         # For M2.7, thinking is in the thinking field of the response
-        if hasattr(response, 'thinking') and response.thinking:
-            return response.thinking
+        if hasattr(response, "thinking") and response.thinking:
+            return response.thinking  # type: ignore[no-any-return]
 
         # Check content blocks
-        if hasattr(response, 'content') and isinstance(response.content, list):
+        if hasattr(response, "content") and isinstance(response.content, list):
             for block in response.content:
                 if isinstance(block, dict) and block.get("type") == "thinking":
                     return block.get("thinking")
@@ -165,7 +159,10 @@ class M27ContextManager:
         # Trigger if either local estimate or API tokens exceed limit
         return estimated_tokens > self.token_limit or self.api_total_tokens > self.token_limit
 
-    def get_optimized_summarization_prompt(self, messages: list[Any]) -> str:
+    def get_optimized_summarization_prompt(
+        self,
+        _messages: list[Any],  # noqa: ARG002
+    ) -> str:
         """Generate an optimized summarization prompt for M2.7.
 
         Args:
@@ -283,17 +280,17 @@ class M27AgentTeams:
 
     # Agent team roles supported by M2.7
     SUPPORTED_ROLES = {
-        "planner",      # Task planning and decomposition
-        "executor",     # Tool execution and implementation
-        "reviewer",     # Quality assurance and validation
+        "planner",  # Task planning and decomposition
+        "executor",  # Tool execution and implementation
+        "reviewer",  # Quality assurance and validation
         "coordinator",  # Multi-agent coordination
     }
 
     # Agent team protocols
     SUPPORTED_PROTOCOLS = {
         "sequential",  # One agent at a time
-        "parallel",    # Multiple agents simultaneously
-        "hierarchical", # Manager-subordinate structure
+        "parallel",  # Multiple agents simultaneously
+        "hierarchical",  # Manager-subordinate structure
     }
 
     @classmethod

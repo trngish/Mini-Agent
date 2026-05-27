@@ -60,9 +60,7 @@ async def test_edit_tool():
 
     try:
         tool = EditTool()
-        result = await tool.execute(
-            path=temp_path, old_str="World", new_str="Agent"
-        )
+        result = await tool.execute(path=temp_path, old_str="World", new_str="Agent")
 
         assert result.success, f"Edit failed: {result.error}"
         content = Path(temp_path).read_text()

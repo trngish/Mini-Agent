@@ -3,8 +3,7 @@
 Provides error tracking, pattern analysis, and actionable suggestions.
 """
 
-import json
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..agent import Agent
@@ -13,7 +12,7 @@ if TYPE_CHECKING:
 class ErrorPattern:
     """Represents a detected error pattern."""
 
-    def __init__(self, tool_name: str, count: int, recent_errors: list[dict]):
+    def __init__(self, tool_name: str, count: int, recent_errors: list[dict[str, Any]]):
         self.tool_name = tool_name
         self.count = count
         self.recent_errors = recent_errors
@@ -42,7 +41,7 @@ class ErrorRecoveryManager:
     MAX_CONSECUTIVE_FAILURES = 3
 
     # Recovery strategies
-    STRATEGIES = {
+    STRATEGIES: dict[str, dict[str, Any]] = {
         "retry": {"max_attempts": 3, "backoff": "exponential"},
         "fallback": {"use_alternative_tool": True},
         "skip": {"log_and_continue": True},
@@ -51,7 +50,7 @@ class ErrorRecoveryManager:
     def __init__(self, agent: "Agent"):
         self._agent = agent
         self._error_patterns: dict[str, int] = {}
-        self._error_history: list[dict] = []
+        self._error_history: list[dict[str, Any]] = []
         self._consecutive_failures = 0
 
     def record_error(self, error: str, context: str) -> None:
@@ -62,25 +61,24 @@ class ErrorRecoveryManager:
             context: Context where error occurred (e.g., "tool_name(args)")
         """
         # Extract tool name from context
-        tool_name = context.split('(')[0] if '(' in context else "unknown"
+        tool_name = context.split("(")[0] if "(" in context else "unknown"
 
         # Track by tool name
         self._error_patterns[tool_name] = self._error_patterns.get(tool_name, 0) + 1
 
         # Keep error history
-        self._error_history.append({
-            "error": error[:200],
-            "context": context[:100],
-            "tool": tool_name,
-        })
+        self._error_history.append(
+            {
+                "error": error[:200],
+                "context": context[:100],
+                "tool": tool_name,
+            }
+        )
         if len(self._error_history) > self.MAX_ERROR_HISTORY:
-            self._error_history = self._error_history[-self.MAX_ERROR_HISTORY:]
+            self._error_history = self._error_history[-self.MAX_ERROR_HISTORY :]
 
         # Also record via note tool if available
-        self._agent.record_context(
-            content=f"Error with {tool_name}: {error[:150]}",
-            category="error_pattern"
-        )
+        self._agent.record_context(content=f"Error with {tool_name}: {error[:150]}", category="error_pattern")
 
     def record_success(self) -> None:
         """Record a successful operation (reset consecutive failures)."""
@@ -90,7 +88,23 @@ class ErrorRecoveryManager:
         """Record a failed operation."""
         self._consecutive_failures += 1
 
-    def get_patterns(self) -> dict:
+    def get_error_patterns(self) -> dict[str, int]:
+        """Get error patterns dictionary.
+
+        Returns:
+            Copy of error patterns dict mapping tool name to count
+        """
+        return self._error_patterns.copy()
+
+    def get_error_history(self) -> list[dict[str, Any]]:
+        """Get error history list.
+
+        Returns:
+            Copy of recent error history
+        """
+        return self._error_history.copy()
+
+    def get_patterns(self) -> dict[str, Any]:
         """Get error pattern analysis.
 
         Returns:
@@ -111,11 +125,7 @@ class ErrorRecoveryManager:
         Returns:
             List of (tool_name, count) tuples sorted by count
         """
-        return sorted(
-            self._error_patterns.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:limit]
+        return sorted(self._error_patterns.items(), key=lambda x: x[1], reverse=True)[:limit]
 
     def get_suggestions(self) -> list[str]:
         """Get suggestions based on current agent state.
@@ -129,7 +139,7 @@ class ErrorRecoveryManager:
 
         # Check error patterns
         if self._consecutive_failures >= 2:
-            suggestions.append(f"Consider reviewing recent errors with get_error_patterns()")
+            suggestions.append("Consider reviewing recent errors with get_error_patterns()")
 
         # Check token usage
         try:
@@ -151,7 +161,7 @@ class ErrorRecoveryManager:
 
         return suggestions
 
-    def get_recovery_strategy(self, tool_name: str) -> dict:
+    def get_recovery_strategy(self, _tool_name: str) -> dict[str, Any]:  # noqa: ARG002
         """Get recovery strategy for a tool.
 
         Args:
@@ -174,7 +184,7 @@ class ErrorRecoveryManager:
             True if should retry
         """
         strategy = self.get_recovery_strategy(tool_name)
-        max_attempts = strategy.get("max_attempts", 3)
+        max_attempts = int(strategy.get("max_attempts", 3))
         return attempt < max_attempts
 
     def get_backoff_delay(self, attempt: int, base_delay: float = 0.5) -> float:
@@ -187,7 +197,7 @@ class ErrorRecoveryManager:
         Returns:
             Delay in seconds
         """
-        return base_delay * (2 ** attempt)
+        return float(base_delay * (2**attempt))
 
     @property
     def consecutive_failures(self) -> int:

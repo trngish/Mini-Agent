@@ -5,7 +5,6 @@ Provides single source of truth for model type detection and optimization settin
 
 from dataclasses import dataclass
 
-
 # Model identifiers for M2.7
 M27_MODEL_IDENTIFIERS = (
     "MiniMax-M2.7",
@@ -25,9 +24,10 @@ MINIMAX_MODEL_IDENTIFIERS = (
 @dataclass(frozen=True)
 class ModelSpecs:
     """Model specifications container.
-    
+
     Contains token limits and capabilities for a specific model.
     """
+
     max_output_tokens: int
     max_context_tokens: int
     supports_extended_thinking: bool
@@ -79,12 +79,12 @@ DEFAULT_MODEL_SPECS: dict[str, ModelSpecs] = {
 
 def is_m27_model(model_name: str) -> bool:
     """Check if the given model name is an M2.7 variant.
-    
+
     Single source of truth for M2.7 detection.
-    
+
     Args:
         model_name: The model name to check
-        
+
     Returns:
         True if the model is an M2.7 variant
     """
@@ -96,10 +96,10 @@ def is_m27_model(model_name: str) -> bool:
 
 def is_minimax_model(model_name: str) -> bool:
     """Check if the given model name is any MiniMax model.
-    
+
     Args:
         model_name: The model name to check
-        
+
     Returns:
         True if the model is a MiniMax variant
     """
@@ -111,23 +111,23 @@ def is_minimax_model(model_name: str) -> bool:
 
 def get_model_specs(model_name: str) -> ModelSpecs:
     """Get model specifications for the given model.
-    
+
     Args:
         model_name: The model name
-        
+
     Returns:
         ModelSpecs for the model, or default specs if unknown
     """
     if not model_name:
         return DEFAULT_MODEL_SPECS["default"]
-    
+
     model_upper = model_name.upper()
-    
+
     # Check exact matches first
     for key in DEFAULT_MODEL_SPECS:
         if key != "default" and key.upper() in model_upper:
             return DEFAULT_MODEL_SPECS[key]
-    
+
     # Check partial matches
     if "M2.7" in model_upper:
         return DEFAULT_MODEL_SPECS["MiniMax-M2.7"]
@@ -135,17 +135,17 @@ def get_model_specs(model_name: str) -> ModelSpecs:
         return DEFAULT_MODEL_SPECS["MiniMax-M2.5"]
     elif "M2" in model_upper:
         return DEFAULT_MODEL_SPECS["MiniMax-M2"]
-    
+
     return DEFAULT_MODEL_SPECS["default"]
 
 
 def is_extended_thinking_enabled(model_name: str, config_enabled: bool = True) -> bool:
     """Check if extended thinking should be enabled for the model.
-    
+
     Args:
         model_name: The model name
         config_enabled: Configuration setting (if False, always returns False)
-        
+
     Returns:
         True if extended thinking should be enabled
     """
@@ -157,11 +157,11 @@ def is_extended_thinking_enabled(model_name: str, config_enabled: bool = True) -
 
 def get_thinking_budget(model_name: str, requested_budget: int) -> int:
     """Get constrained thinking budget for the model.
-    
+
     Args:
         model_name: The model name
         requested_budget: The budget requested by configuration
-        
+
     Returns:
         Constrained budget within model's max_thinking_budget
     """
@@ -173,10 +173,10 @@ def get_thinking_budget(model_name: str, requested_budget: int) -> int:
 
 def get_max_output_tokens(model_name: str) -> int:
     """Get max output tokens for the model.
-    
+
     Args:
         model_name: The model name
-        
+
     Returns:
         Maximum output tokens
     """

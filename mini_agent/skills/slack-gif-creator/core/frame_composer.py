@@ -6,9 +6,8 @@ Provides functions for drawing shapes, text, emojis, and compositing elements
 together to create animation frames.
 """
 
-from PIL import Image, ImageDraw, ImageFont
 import numpy as np
-from typing import Optional
+from PIL import Image, ImageDraw, ImageFont
 
 
 def create_blank_frame(width: int, height: int, color: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
@@ -23,13 +22,17 @@ def create_blank_frame(width: int, height: int, color: tuple[int, int, int] = (2
     Returns:
         PIL Image
     """
-    return Image.new('RGB', (width, height), color)
+    return Image.new("RGB", (width, height), color)
 
 
-def draw_circle(frame: Image.Image, center: tuple[int, int], radius: int,
-                fill_color: Optional[tuple[int, int, int]] = None,
-                outline_color: Optional[tuple[int, int, int]] = None,
-                outline_width: int = 1) -> Image.Image:
+def draw_circle(
+    frame: Image.Image,
+    center: tuple[int, int],
+    radius: int,
+    fill_color: tuple[int, int, int] | None = None,
+    outline_color: tuple[int, int, int] | None = None,
+    outline_width: int = 1,
+) -> Image.Image:
     """
     Draw a circle on a frame.
 
@@ -51,10 +54,14 @@ def draw_circle(frame: Image.Image, center: tuple[int, int], radius: int,
     return frame
 
 
-def draw_rectangle(frame: Image.Image, top_left: tuple[int, int], bottom_right: tuple[int, int],
-                   fill_color: Optional[tuple[int, int, int]] = None,
-                   outline_color: Optional[tuple[int, int, int]] = None,
-                   outline_width: int = 1) -> Image.Image:
+def draw_rectangle(
+    frame: Image.Image,
+    top_left: tuple[int, int],
+    bottom_right: tuple[int, int],
+    fill_color: tuple[int, int, int] | None = None,
+    outline_color: tuple[int, int, int] | None = None,
+    outline_width: int = 1,
+) -> Image.Image:
     """
     Draw a rectangle on a frame.
 
@@ -74,8 +81,13 @@ def draw_rectangle(frame: Image.Image, top_left: tuple[int, int], bottom_right: 
     return frame
 
 
-def draw_line(frame: Image.Image, start: tuple[int, int], end: tuple[int, int],
-              color: tuple[int, int, int] = (0, 0, 0), width: int = 2) -> Image.Image:
+def draw_line(
+    frame: Image.Image,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    color: tuple[int, int, int] = (0, 0, 0),
+    width: int = 2,
+) -> Image.Image:
     """
     Draw a line on a frame.
 
@@ -94,9 +106,14 @@ def draw_line(frame: Image.Image, start: tuple[int, int], end: tuple[int, int],
     return frame
 
 
-def draw_text(frame: Image.Image, text: str, position: tuple[int, int],
-              font_size: int = 40, color: tuple[int, int, int] = (0, 0, 0),
-              centered: bool = False) -> Image.Image:
+def draw_text(
+    frame: Image.Image,
+    text: str,
+    position: tuple[int, int],
+    font_size: int = 40,
+    color: tuple[int, int, int] = (0, 0, 0),
+    centered: bool = False,
+) -> Image.Image:
     """
     Draw text on a frame.
 
@@ -157,8 +174,9 @@ def draw_emoji(frame: Image.Image, emoji: str, position: tuple[int, int], size: 
     return frame
 
 
-def composite_layers(base: Image.Image, overlay: Image.Image,
-                     position: tuple[int, int] = (0, 0), alpha: float = 1.0) -> Image.Image:
+def composite_layers(
+    base: Image.Image, overlay: Image.Image, position: tuple[int, int] = (0, 0), alpha: float = 1.0
+) -> Image.Image:
     """
     Composite one image on top of another.
 
@@ -172,8 +190,8 @@ def composite_layers(base: Image.Image, overlay: Image.Image,
         Composite image
     """
     # Convert to RGBA for transparency support
-    base_rgba = base.convert('RGBA')
-    overlay_rgba = overlay.convert('RGBA')
+    base_rgba = base.convert("RGBA")
+    overlay_rgba = overlay.convert("RGBA")
 
     # Apply alpha
     if alpha < 1.0:
@@ -184,11 +202,16 @@ def composite_layers(base: Image.Image, overlay: Image.Image,
     base_rgba.paste(overlay_rgba, position, overlay_rgba)
 
     # Convert back to RGB
-    return base_rgba.convert('RGB')
+    return base_rgba.convert("RGB")
 
 
-def draw_stick_figure(frame: Image.Image, position: tuple[int, int], scale: float = 1.0,
-                      color: tuple[int, int, int] = (0, 0, 0), line_width: int = 3) -> Image.Image:
+def draw_stick_figure(
+    frame: Image.Image,
+    position: tuple[int, int],
+    scale: float = 1.0,
+    color: tuple[int, int, int] = (0, 0, 0),
+    line_width: int = 3,
+) -> Image.Image:
     """
     Draw a simple stick figure.
 
@@ -213,8 +236,7 @@ def draw_stick_figure(frame: Image.Image, position: tuple[int, int], scale: floa
     leg_spread = int(15 * scale)
 
     # Head
-    draw.ellipse([x - head_radius, y - head_radius, x + head_radius, y + head_radius],
-                 outline=color, width=line_width)
+    draw.ellipse([x - head_radius, y - head_radius, x + head_radius, y + head_radius], outline=color, width=line_width)
 
     # Body
     body_start = y + head_radius
@@ -232,9 +254,9 @@ def draw_stick_figure(frame: Image.Image, position: tuple[int, int], scale: floa
     return frame
 
 
-def create_gradient_background(width: int, height: int,
-                               top_color: tuple[int, int, int],
-                               bottom_color: tuple[int, int, int]) -> Image.Image:
+def create_gradient_background(
+    width: int, height: int, top_color: tuple[int, int, int], bottom_color: tuple[int, int, int]
+) -> Image.Image:
     """
     Create a vertical gradient background.
 
@@ -247,7 +269,7 @@ def create_gradient_background(width: int, height: int,
     Returns:
         PIL Image with gradient
     """
-    frame = Image.new('RGB', (width, height))
+    frame = Image.new("RGB", (width, height))
     draw = ImageDraw.Draw(frame)
 
     # Calculate color step for each row
@@ -267,9 +289,14 @@ def create_gradient_background(width: int, height: int,
     return frame
 
 
-def draw_emoji_enhanced(frame: Image.Image, emoji: str, position: tuple[int, int],
-                       size: int = 60, shadow: bool = True,
-                       shadow_offset: tuple[int, int] = (2, 2)) -> Image.Image:
+def draw_emoji_enhanced(
+    frame: Image.Image,
+    emoji: str,
+    position: tuple[int, int],
+    size: int = 60,
+    shadow: bool = True,
+    shadow_offset: tuple[int, int] = (2, 2),
+) -> Image.Image:
     """
     Draw emoji with optional shadow for better visual quality.
 
@@ -305,8 +332,13 @@ def draw_emoji_enhanced(frame: Image.Image, emoji: str, position: tuple[int, int
         # Draw semi-transparent shadow (simulated by drawing multiple times)
         for offset in range(1, 3):
             try:
-                draw.text((shadow_pos[0] + offset, shadow_pos[1] + offset),
-                         emoji, font=font, embedded_color=True, fill=(0, 0, 0, 100))
+                draw.text(
+                    (shadow_pos[0] + offset, shadow_pos[1] + offset),
+                    emoji,
+                    font=font,
+                    embedded_color=True,
+                    fill=(0, 0, 0, 100),
+                )
             except:
                 pass  # Skip shadow if it fails
 
@@ -320,10 +352,14 @@ def draw_emoji_enhanced(frame: Image.Image, emoji: str, position: tuple[int, int
     return frame
 
 
-def draw_circle_with_shadow(frame: Image.Image, center: tuple[int, int], radius: int,
-                            fill_color: tuple[int, int, int],
-                            shadow_offset: tuple[int, int] = (3, 3),
-                            shadow_color: tuple[int, int, int] = (0, 0, 0)) -> Image.Image:
+def draw_circle_with_shadow(
+    frame: Image.Image,
+    center: tuple[int, int],
+    radius: int,
+    fill_color: tuple[int, int, int],
+    shadow_offset: tuple[int, int] = (3, 3),
+    shadow_color: tuple[int, int, int] = (0, 0, 0),
+) -> Image.Image:
     """
     Draw a circle with drop shadow.
 
@@ -347,7 +383,7 @@ def draw_circle_with_shadow(frame: Image.Image, center: tuple[int, int], radius:
         shadow_center[0] - radius,
         shadow_center[1] - radius,
         shadow_center[0] + radius,
-        shadow_center[1] + radius
+        shadow_center[1] + radius,
     ]
     draw.ellipse(shadow_bbox, fill=shadow_color)
 
@@ -358,11 +394,15 @@ def draw_circle_with_shadow(frame: Image.Image, center: tuple[int, int], radius:
     return frame
 
 
-def draw_rounded_rectangle(frame: Image.Image, top_left: tuple[int, int],
-                          bottom_right: tuple[int, int], radius: int,
-                          fill_color: Optional[tuple[int, int, int]] = None,
-                          outline_color: Optional[tuple[int, int, int]] = None,
-                          outline_width: int = 1) -> Image.Image:
+def draw_rounded_rectangle(
+    frame: Image.Image,
+    top_left: tuple[int, int],
+    bottom_right: tuple[int, int],
+    radius: int,
+    fill_color: tuple[int, int, int] | None = None,
+    outline_color: tuple[int, int, int] | None = None,
+    outline_width: int = 1,
+) -> Image.Image:
     """
     Draw a rectangle with rounded corners.
 
@@ -383,8 +423,7 @@ def draw_rounded_rectangle(frame: Image.Image, top_left: tuple[int, int],
     x2, y2 = bottom_right
 
     # Draw rounded rectangle using PIL's built-in method
-    draw.rounded_rectangle([x1, y1, x2, y2], radius=radius,
-                          fill=fill_color, outline=outline_color, width=outline_width)
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill_color, outline=outline_color, width=outline_width)
 
     return frame
 
@@ -407,7 +446,7 @@ def add_vignette(frame: Image.Image, strength: float = 0.5) -> Image.Image:
     max_dist = ((width / 2) ** 2 + (height / 2) ** 2) ** 0.5
 
     # Create overlay
-    overlay = Image.new('RGB', (width, height), (0, 0, 0))
+    overlay = Image.new("RGB", (width, height), (0, 0, 0))
     pixels = overlay.load()
 
     for y in range(height):
@@ -415,7 +454,7 @@ def add_vignette(frame: Image.Image, strength: float = 0.5) -> Image.Image:
             # Calculate distance from center
             dx = x - center_x
             dy = y - center_y
-            dist = (dx ** 2 + dy ** 2) ** 0.5
+            dist = (dx**2 + dy**2) ** 0.5
 
             # Calculate vignette value
             vignette = min(1, (dist / max_dist) * strength)
@@ -432,10 +471,14 @@ def add_vignette(frame: Image.Image, strength: float = 0.5) -> Image.Image:
     return Image.fromarray(result)
 
 
-def draw_star(frame: Image.Image, center: tuple[int, int], size: int,
-             fill_color: tuple[int, int, int],
-             outline_color: Optional[tuple[int, int, int]] = None,
-             outline_width: int = 1) -> Image.Image:
+def draw_star(
+    frame: Image.Image,
+    center: tuple[int, int],
+    size: int,
+    fill_color: tuple[int, int, int],
+    outline_color: tuple[int, int, int] | None = None,
+    outline_width: int = 1,
+) -> Image.Image:
     """
     Draw a 5-pointed star.
 
@@ -451,6 +494,7 @@ def draw_star(frame: Image.Image, center: tuple[int, int], size: int,
         Modified frame
     """
     import math
+
     draw = ImageDraw.Draw(frame)
     x, y = center
 

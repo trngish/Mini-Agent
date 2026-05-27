@@ -15,13 +15,18 @@ import time
 import uuid
 from typing import Any
 
+from ..utils.command_validator import (
+    DangerLevel,
+    assess_command_danger,
+    detect_platform_mismatch,
+    translate_command_for_platform,
+)
+from ..utils.platform_utils import PlatformUtils
 from .base import Tool
-from .bash_shared import get_platform_shell_args, get_subprocess_env
-from .bash_result import BashOutputResult
 from .bash_background import BackgroundShell, BackgroundShellManager
 from .bash_foreground import ForegroundExecutor
-from ..utils.platform_utils import PlatformUtils
-from ..utils.command_validator import assess_command_danger, DangerLevel, detect_platform_mismatch
+from .bash_result import BashOutputResult
+from .bash_shared import get_platform_shell_args, get_subprocess_env
 
 
 class BashTool(Tool):
@@ -44,11 +49,11 @@ class BashTool(Tool):
         """
         self.workspace_dir = workspace_dir
         self.default_timeout = default_timeout
-        
+
         # Use unified PlatformUtils for platform detection
         self.is_windows = PlatformUtils.is_windows(platform_mode)
         self.shell_name = "PowerShell" if self.is_windows else "bash"
-        
+
         # Delegate foreground execution to specialized module
         self._foreground_executor = ForegroundExecutor(
             workspace_dir=workspace_dir,
@@ -116,12 +121,18 @@ Examples:
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional: Timeout in seconds (default: 120, max: 600). Only applies to foreground commands.",
+                    "description": (
+                        "Optional: Timeout in seconds (default: 120, max: 600). Only applies to foreground commands."
+                    ),
                     "default": 120,
                 },
                 "run_in_background": {
                     "type": "boolean",
-                    "description": "Optional: Set to true to run the command in the background. Use this for long-running commands like servers. You can monitor output using bash_output tool.",
+                    "description": (
+                        "Optional: Set to true to run the command in the background."
+                        " Use this for long-running commands like servers."
+                        " You can monitor output using bash_output tool."
+                    ),
                     "default": False,
                 },
             },
@@ -160,10 +171,8 @@ Examples:
             platform_warning = detect_platform_mismatch(command, self.is_windows)
 
             # Get shell configuration based on platform mode
-            shell_exe, shell_args, shell_name = get_platform_shell_args(
-                "windows" if self.is_windows else "linux"
-            )
-            
+            shell_exe, shell_args, shell_name = get_platform_shell_args("windows" if self.is_windows else "linux")
+
             # Get platform-appropriate environment
             env = get_subprocess_env()
 
@@ -178,7 +187,9 @@ Examples:
             # Prepend platform warning if mismatch detected
             if platform_warning:
                 warning_section = f"\n[{result.exit_code}]" if result.exit_code else ""
-                result.stdout = f"{platform_warning}{warning_section}\n\n{result.stdout}" if result.stdout else platform_warning
+                result.stdout = (
+                    f"{platform_warning}{warning_section}\n\n{result.stdout}" if result.stdout else platform_warning
+                )
                 result.content = result.stdout
             return result
 
@@ -221,7 +232,7 @@ Examples:
             )
         else:
             process = await asyncio.create_subprocess_shell(
-                shell_cmd,
+                shell_cmd,  # type: ignore[arg-type]
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=self.workspace_dir,
@@ -238,11 +249,12 @@ Examples:
 
         # Register with manager and start monitoring
         BackgroundShellManager.add(shell)
-        BackgroundShellManager.start_monitor(bash_id)
+        BackgroundShellManager.start_monitor(bash_id)  # type: ignore[unused-coroutine]
 
         return BashOutputResult(
             success=True,
             stdout=f"Background command started with ID: {bash_id}",
+            stderr="",
             bash_id=bash_id,
             exit_code=0,
         )
@@ -273,11 +285,8 @@ Examples:
     def _normalize_command(self, command: str) -> str:
         """Normalize command for Windows PowerShell.
 
-        Converts bash-style syntax to PowerShell-compatible syntax:
-        - && becomes ;
-        - || becomes ;
-        - | becomes |
-        - $VAR becomes $env:VAR
+        Converts bash-style syntax to PowerShell-compatible syntax using
+        the comprehensive translation system from command_validator.
 
         Args:
             command: Original bash-style command
@@ -285,11 +294,23 @@ Examples:
         Returns:
             PowerShell-compatible command
         """
-        # Replace && (bash chain) with ; (PowerShell chain)
-        normalized = command.replace("&&", ";")
-        # Replace || with ;
-        normalized = normalized.replace("||", ";")
-        return normalized
+        translated, _ = translate_command_for_platform(command, is_windows=True)
+
+        import re
+
+        translated = re.sub(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", r"$env:\1", translated)
+        translated = re.sub(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}", r"$env:\1", translated)
+
+        translated = translated.replace("~", "$env:USERPROFILE")
+
+        translated = re.sub(r"`([^`]+)`", r"$( \1 )", translated)
+
+        if "&&" in translated:
+            translated = translated.replace("&&", ";")
+        if "||" in translated:
+            translated = translated.replace("||", ";")
+
+        return translated
 
 
 class BashOutputTool(Tool):
@@ -326,11 +347,18 @@ class BashOutputTool(Tool):
             "properties": {
                 "bash_id": {
                     "type": "string",
-                    "description": "The ID of the background shell to retrieve output from. Shell IDs are returned when starting a command with run_in_background=true.",
+                    "description": (
+                        "The ID of the background shell to retrieve output from."
+                        " Shell IDs are returned when starting a command with run_in_background=true."
+                    ),
                 },
                 "filter_str": {
                     "type": "string",
-                    "description": "Optional regular expression to filter the output lines. Only lines matching this regex will be included in the result. Any lines that do not match will no longer be available to read.",
+                    "description": (
+                        "Optional regular expression to filter the output lines."
+                        " Only lines matching this regex will be included in the result."
+                        " Any lines that do not match will no longer be available to read."
+                    ),
                 },
             },
             "required": ["bash_id"],
@@ -412,7 +440,10 @@ class BashKillTool(Tool):
             "properties": {
                 "bash_id": {
                     "type": "string",
-                    "description": "The ID of the background shell to terminate. Shell IDs are returned when starting a command with run_in_background=true.",
+                    "description": (
+                        "The ID of the background shell to terminate."
+                        " Shell IDs are returned when starting a command with run_in_background=true."
+                    ),
                 },
             },
             "required": ["bash_id"],
@@ -430,10 +461,7 @@ class BashKillTool(Tool):
         try:
             # Get remaining output before termination
             bg_shell = BackgroundShellManager.get(bash_id)
-            if bg_shell:
-                remaining_lines = bg_shell.get_new_output()
-            else:
-                remaining_lines = []
+            remaining_lines = bg_shell.get_new_output() if bg_shell else []
 
             # Terminate through manager (handles all cleanup)
             bg_shell = await BackgroundShellManager.terminate(bash_id)

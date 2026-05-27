@@ -1,7 +1,5 @@
 """Tests for config validator utilities."""
 
-import pytest
-
 from mini_agent.utils.config_validator import (
     ConfigValidationError,
     ConfigValidator,
@@ -68,6 +66,7 @@ class TestConfigValidator:
     def test_validate_empty_config(self):
         """ConfigValidator should handle missing fields gracefully."""
         from unittest.mock import MagicMock
+
         config = MagicMock()
         # Make _get_nested_value return None for all paths
         config.tools = None
@@ -79,6 +78,7 @@ class TestConfigValidator:
 
     def test_validate_or_raise_no_errors(self):
         from unittest.mock import MagicMock
+
         config = MagicMock()
         config.tools = None
         config.m27 = None

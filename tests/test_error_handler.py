@@ -2,8 +2,6 @@
 
 import asyncio
 
-import pytest
-
 from mini_agent.utils.error_handler import (
     LLMError,
     LLMErrorClassifier,

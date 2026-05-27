@@ -11,9 +11,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import defusedxml.minidom
 import zipfile
 from pathlib import Path
+
+import defusedxml.minidom
 
 
 def main():
@@ -24,9 +25,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        success = pack_document(
-            args.input_directory, args.output_file, validate=not args.force
-        )
+        success = pack_document(args.input_directory, args.output_file, validate=not args.force)
 
         # Show warning if validation was skipped
         if args.force:
@@ -79,10 +78,9 @@ def pack_document(input_dir, output_file, validate=False):
                     zf.write(f, f.relative_to(temp_content_dir))
 
         # Validate if requested
-        if validate:
-            if not validate_document(output_file):
-                output_file.unlink()  # Delete the corrupt file
-                return False
+        if validate and not validate_document(output_file):
+            output_file.unlink()  # Delete the corrupt file
+            return False
 
     return True
 
@@ -112,7 +110,9 @@ def validate_document(doc_path):
                 ],
                 capture_output=True,
                 timeout=10,
-                text=True, encoding="utf-8", errors="replace",
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if not (Path(temp_dir) / f"{doc_path.stem}.html").exists():
                 error_msg = result.stderr.strip() or "Document validation failed"
@@ -132,7 +132,7 @@ def validate_document(doc_path):
 
 def condense_xml(xml_file):
     """Strip unnecessary whitespace and remove comments."""
-    with open(xml_file, "r", encoding="utf-8") as f:
+    with open(xml_file, encoding="utf-8") as f:
         dom = defusedxml.minidom.parse(f)
 
     # Process each element to remove whitespace and comments
@@ -144,9 +144,7 @@ def condense_xml(xml_file):
         # Remove whitespace-only text nodes and comment nodes
         for child in list(element.childNodes):
             if (
-                child.nodeType == child.TEXT_NODE
-                and child.nodeValue
-                and child.nodeValue.strip() == ""
+                child.nodeType == child.TEXT_NODE and child.nodeValue and child.nodeValue.strip() == ""
             ) or child.nodeType == child.COMMENT_NODE:
                 element.removeChild(child)
 

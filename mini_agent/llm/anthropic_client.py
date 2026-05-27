@@ -11,18 +11,18 @@ from typing import Any
 
 import anthropic
 
-# Constants - avoid magic numbers
-STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "5"))
-DEFAULT_TIMEOUT_SECONDS = 300
-
 from ..retry import RetryConfig, async_retry
 from ..schema import FunctionCall, LLMResponse, Message, TokenUsage, ToolCall
-from .base import LLMClientBase
 from ..utils.model_utils import (
-    is_m27_model,
     get_max_output_tokens,
     get_thinking_budget,
+    is_m27_model,
 )
+from .base import LLMClientBase
+
+# Constants - avoid magic numbers
+STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "8"))
+DEFAULT_TIMEOUT_SECONDS = 300
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +30,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StreamedResponse:
     """Accumulated data from streaming response."""
+
     text: str = ""
     thinking: str = ""
-    tool_calls: list[dict] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     stop_reason: str = "stop"
     input_tokens: int = 0
     output_tokens: int = 0
@@ -70,27 +71,26 @@ class AnthropicClient(LLMClientBase):
         self.client = anthropic.AsyncAnthropic(
             base_url=api_base,
             api_key=api_key,
-            default_headers={"Authorization": f"Bearer {api_key}"},
         )
-        
+
         # M2.7 configuration attributes
         self._enable_extended_thinking = True
         self._thinking_budget_tokens = 8192  # Default, can be updated via configure_m27 or configure_thinking_budget
 
     def configure_thinking_budget(self, budget: int) -> None:
         """Configure thinking budget dynamically.
-        
+
         This is the official API for adjusting thinking budget at runtime
         based on task complexity analysis.
-        
+
         Args:
             budget: Thinking budget in tokens (0 to disable)
         """
         self._thinking_budget_tokens = max(0, min(budget, 32768))
 
-    def configure_m27(self, config: dict) -> None:
+    def configure_m27(self, config: dict[str, Any]) -> None:
         """Configure M2.7 specific settings.
-        
+
         Args:
             config: M2.7 configuration dict from Config.m27
         """
@@ -130,8 +130,8 @@ class AnthropicClient(LLMClientBase):
         }
 
         if system_message:
-            # 按次数计费优化：使用 prompt caching 减少重复处理
-            # cache_control 标记让 API 缓存 system prompt，后续调用复用
+            # Per-call billing optimization: use prompt caching to reduce repeated processing
+            # cache_control marks let the API cache the system prompt for reuse in subsequent calls
             params["system"] = [
                 {
                     "type": "text",
@@ -160,10 +160,10 @@ class AnthropicClient(LLMClientBase):
         thinking_buffer: deque[str] = deque(maxlen=buffer_size)
 
         try:
-            stream = await self.client.messages.create(**params)
+            stream = await self.client.messages.create(**params)  # type: ignore[call-overload]
             # Use configurable timeout from retry_config, default to 300s for backward compatibility
             timeout = self.retry_config.max_delay if self.retry_config else 300
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(timeout):  # type: ignore[attr-defined]
                 async for event in stream:
                     try:
                         if event.type == "content_block_delta":
@@ -171,37 +171,27 @@ class AnthropicClient(LLMClientBase):
                             if delta.type == "text_delta":
                                 result.text += delta.text
                                 text_buffer.append(delta.text)
-                                if on_text:
-                                    if len(text_buffer) >= buffer_size:
-                                        on_text("".join(text_buffer))
-                                        text_buffer.clear()
-                                    # Immediate flush for small outputs - ensure timely display
-                                    elif text_buffer and len(text_buffer) >= 1:
-                                        on_text("".join(text_buffer))
-                                        text_buffer.clear()
+                                if on_text and len(text_buffer) >= buffer_size:
+                                    on_text("".join(text_buffer))
+                                    text_buffer.clear()
                             elif delta.type == "thinking_delta":
                                 result.thinking += delta.thinking
                                 thinking_buffer.append(delta.thinking)
-                                if on_thinking:
-                                    if len(thinking_buffer) >= buffer_size:
-                                        on_thinking("".join(thinking_buffer))
-                                        thinking_buffer.clear()
-                                    # Immediate flush for small outputs - ensure timely display
-                                    elif thinking_buffer and len(thinking_buffer) >= 1:
-                                        on_thinking("".join(thinking_buffer))
-                                        thinking_buffer.clear()
+                                if on_thinking and len(thinking_buffer) >= buffer_size:
+                                    on_thinking("".join(thinking_buffer))
+                                    thinking_buffer.clear()
                             elif delta.type == "input_json_delta":
-                                current_tool_input += getattr(delta, 'partial_json', "")
+                                current_tool_input += getattr(delta, "partial_json", "")
                         elif event.type == "message_delta":
                             if event.usage:
-                                result.input_tokens = (event.usage.input_tokens or 0)
-                                result.output_tokens = (event.usage.output_tokens or 0)
-                                result.cache_read_input_tokens = (event.usage.cache_read_input_tokens or 0)
-                                result.cache_creation_input_tokens = (event.usage.cache_creation_input_tokens or 0)
-                            if hasattr(event, 'delta') and hasattr(event.delta, 'stop_reason'):
+                                result.input_tokens = event.usage.input_tokens or 0
+                                result.output_tokens = event.usage.output_tokens or 0
+                                result.cache_read_input_tokens = event.usage.cache_read_input_tokens or 0
+                                result.cache_creation_input_tokens = event.usage.cache_creation_input_tokens or 0
+                            if hasattr(event, "delta") and hasattr(event.delta, "stop_reason"):
                                 result.stop_reason = event.delta.stop_reason or "stop"
                         elif event.type == "content_block_start":
-                            if hasattr(event, 'content_block'):
+                            if hasattr(event, "content_block"):
                                 cb = event.content_block
                                 if cb.type == "tool_use":
                                     tool_call_index += 1
@@ -214,30 +204,28 @@ class AnthropicClient(LLMClientBase):
                                     tool_input = json.loads(current_tool_input) if current_tool_input else {}
                                 except json.JSONDecodeError:
                                     tool_input = current_tool_input
-                                result.tool_calls.append({
-                                    "id": current_tool_id,
-                                    "name": current_tool_name,
-                                    "input": tool_input
-                                })
+                                result.tool_calls.append(
+                                    {"id": current_tool_id, "name": current_tool_name, "input": tool_input}
+                                )
                                 current_tool_name = None
                                 current_tool_id = None
                                 current_tool_input = ""
                     except (AttributeError, KeyError, TypeError, ValueError) as e:
                         logger.warning("Error processing stream event: %s", e)
                         continue
-            
+
             # Integrity check: ensure we received meaningful content
             # If both text and thinking are empty but we didn't stop properly, log warning
             if not result.text and not result.thinking and not result.tool_calls and result.stop_reason == "stop":
                 logger.warning("Stream completed but received no content - possible truncation")
-                
+
             # Flush remaining buffers
             if text_buffer and on_text:
                 on_text("".join(text_buffer))
             if thinking_buffer and on_thinking:
                 on_thinking("".join(thinking_buffer))
-                
-        except (TimeoutError, asyncio.TimeoutError) as e:
+
+        except (TimeoutError, asyncio.TimeoutError):
             logger.error("Stream timed out after 300s")
             # Mark result as incomplete
             result.stop_reason = "timeout"
@@ -255,11 +243,11 @@ class AnthropicClient(LLMClientBase):
         """
         return get_max_output_tokens(self.model)
 
-    def _get_thinking_config(self) -> dict | None:
+    def _get_thinking_config(self) -> dict[str, Any] | None:
         """Get extended thinking configuration for M2.7.
 
         M2.7 supports extended thinking with budget up to 32K tokens.
-        按次数计费优化：思考越深→命中率越高→总调用次数越少
+        Per-call billing optimization: deeper thinking → higher accuracy → fewer total calls
 
         Reference: https://www.minimaxi.com/models/text/m27
 
@@ -314,9 +302,10 @@ class AnthropicClient(LLMClientBase):
     def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
         """Convert internal messages to Anthropic format.
 
-        按次数计费优化：
-        - 启用 prompt caching 以减少重复 token 处理（token免费但cache能加速响应）
-        - 保留完整的工具结果（token免费，信息越完整命中率越高）
+        Per-call billing optimization:
+        - Enable prompt caching to reduce repeated token processing (tokens are free but caching speeds up response)
+        - Preserve complete tool results (tokens are free, more complete info = higher accuracy)
+        - Mark the last user message to improve multi-turn cache hit rate
 
         Args:
             messages: List of internal Message objects
@@ -327,10 +316,19 @@ class AnthropicClient(LLMClientBase):
         system_message = None
         api_messages = []
 
+        # Find the index of the last user message for cache_control
+        last_user_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == "user":
+                last_user_idx = i
+                break
+
+        msg_idx = 0
         for msg in messages:
             if msg.role == "system":
                 # Add cache control to system message for prompt caching
                 system_message = msg.content
+                msg_idx += 1
                 continue
 
             if msg.role in ["user", "assistant"]:
@@ -341,7 +339,7 @@ class AnthropicClient(LLMClientBase):
                         content_blocks.append({"type": "thinking", "thinking": msg.thinking})
 
                     if msg.content:
-                        content_blocks.append({"type": "text", "text": msg.content})
+                        content_blocks.append({"type": "text", "text": msg.content})  # type: ignore[dict-item]
 
                     if msg.tool_calls:
                         for tool_call in msg.tool_calls:
@@ -351,17 +349,35 @@ class AnthropicClient(LLMClientBase):
                                     "type": "tool_use",
                                     "id": tool_id,
                                     "name": tool_call.function.name,
-                                    "input": tool_call.function.arguments,
+                                    "input": tool_call.function.arguments,  # type: ignore[dict-item]
                                 }
                             )
-                            logger.debug(f"[SubAgent] Added tool_use block with id={tool_id}, name={tool_call.function.name}")
+                            logger.debug(
+                                f"[SubAgent] Added tool_use block with id={tool_id}, name={tool_call.function.name}"
+                            )
 
                     api_messages.append({"role": "assistant", "content": content_blocks})
                 else:
-                    api_messages.append({"role": msg.role, "content": msg.content})
+                    # Add cache_control to the last user message for multi-turn cache reuse
+                    if (
+                        msg.role == "user"
+                        and msg_idx == last_user_idx
+                        and isinstance(msg.content, str)
+                        and len(msg.content) > 1024
+                    ):
+                        api_messages.append(
+                            {
+                                "role": msg.role,
+                                "content": [
+                                    {"type": "text", "text": msg.content, "cache_control": {"type": "ephemeral"}}
+                                ],
+                            }
+                        )
+                    else:
+                        api_messages.append({"role": msg.role, "content": msg.content})
+                msg_idx += 1
 
             elif msg.role == "tool":
-                # 按次数计费优化：保留完整工具结果，不截断
                 tool_content = msg.content
                 api_messages.append(
                     {
@@ -375,8 +391,9 @@ class AnthropicClient(LLMClientBase):
                         ],
                     }
                 )
+                msg_idx += 1
 
-        return system_message, api_messages
+        return system_message, api_messages  # type: ignore[return-value]
 
     def _prepare_request(
         self,
@@ -422,12 +439,18 @@ class AnthropicClient(LLMClientBase):
                 for tc in response.tool_calls
             ]
 
-            total_input = response.input_tokens + response.cache_read_input_tokens + response.cache_creation_input_tokens
-            usage = TokenUsage(
-                prompt_tokens=total_input,
-                completion_tokens=response.output_tokens,
-                total_tokens=total_input + response.output_tokens,
-            ) if (response.input_tokens or response.output_tokens) else None
+            total_input = (
+                response.input_tokens + response.cache_read_input_tokens + response.cache_creation_input_tokens
+            )
+            usage = (
+                TokenUsage(
+                    prompt_tokens=total_input,
+                    completion_tokens=response.output_tokens,
+                    total_tokens=total_input + response.output_tokens,
+                )
+                if (response.input_tokens or response.output_tokens)
+                else None
+            )
 
             return LLMResponse(
                 content=response.text,
@@ -485,6 +508,7 @@ class AnthropicClient(LLMClientBase):
         tools: list[Any] | None = None,
         on_text: Callable[[str], None] | None = None,
         on_thinking: Callable[[str], None] | None = None,
+        **_kwargs: Any,
     ) -> LLMResponse:
         """Generate response from Anthropic LLM.
 

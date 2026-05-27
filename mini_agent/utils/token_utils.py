@@ -5,10 +5,9 @@ repeated initialization overhead.
 """
 
 from functools import lru_cache
-from typing import Optional
+from typing import Any
 
 import tiktoken
-
 
 # Global encoder cache
 _encoders_cache: dict[str, tiktoken.Encoding] = {}
@@ -79,7 +78,7 @@ def decode_tokens(token_ids: list[int], encoding_name: str = "cl100k_base") -> s
     return encoder.decode(token_ids)
 
 
-def get_tokens_info(text: str, encoding_name: str = "cl100k_base") -> dict:
+def get_tokens_info(text: str, encoding_name: str = "cl100k_base") -> dict[str, Any]:
     """Get detailed token information for text.
 
     Args:

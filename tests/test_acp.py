@@ -14,7 +14,7 @@ class DummyConn:
     def __init__(self):
         self.updates = []
 
-    async def sessionUpdate(self, payload):
+    async def sessionUpdate(self, payload):  # noqa: N802
         self.updates.append(payload)
 
 
@@ -73,7 +73,7 @@ def acp_agent(tmp_path):
 @pytest.mark.asyncio
 async def test_acp_turn_executes_tool(acp_agent, tmp_path):
     agent, conn = acp_agent
-    session = await agent.newSession(SimpleNamespace(cwd=str(tmp_path), mcpServers=[]))
+    session = await agent.new_session(SimpleNamespace(cwd=str(tmp_path), mcpServers=[]))
     prompt = SimpleNamespace(sessionId=session.sessionId, prompt=[{"text": "hello"}])
     response = await agent.prompt(prompt)
     assert response.stopReason == "end_turn"

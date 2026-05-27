@@ -1,17 +1,95 @@
 """File operation tools."""
 
+import os
 from pathlib import Path
 from typing import Any
 
-from .base import Tool, ToolResult
-from ..utils.token_utils import get_encoder
-from ..utils.model_utils import get_model_specs, is_minimax_model
+from ..utils.model_utils import is_minimax_model
 from ..utils.platform_utils import normalize_path_separators as normalize_path
+from ..utils.token_utils import get_encoder
+from .base import Tool, ToolResult
 
 # Centralized token limits for file content truncation
-# 按次数计费优化：token免费，提高截断限制以保留更多上下文，减少因信息不足导致的重复调用
-DEFAULT_FILE_TOKEN_LIMIT = 64000   # 原32000→64000
-M27_FILE_TOKEN_LIMIT = 128000     # 原64000→128000
+# Higher limits preserve more context and reduce redundant calls
+DEFAULT_FILE_TOKEN_LIMIT = 64000
+M27_FILE_TOKEN_LIMIT = 128000
+
+_WINDOWS_BLACKLISTED_DIRS: set[str] = {
+    str(Path("C:/Windows").resolve()),
+    str(Path("C:/Program Files").resolve()),
+    str(Path("C:/Program Files (x86)").resolve()),
+    str(Path("C:/ProgramData").resolve()),
+}
+
+_UNIX_BLACKLISTED_DIRS: set[str] = {
+    "/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/boot",
+    "/dev",
+    "/proc",
+    "/sys",
+    "/root",
+    "/var",
+}
+
+_HOME_BLACKLISTED_SUBDIRS: set[str] = {
+    ".ssh",
+    ".gnupg",
+    ".config/ssh",
+}
+
+
+_EXTRA_BLOCKED_DIRS: set[str] = set()
+_EXTRA_BLOCKED_HOME_SUBDIRS: set[str] = set()
+
+
+def configure_path_blacklist(
+    extra_blocked_dirs: list[str] | None = None,
+    extra_blocked_home_subdirs: list[str] | None = None,
+) -> None:
+    """Configure additional path blacklist entries from config."""
+    global _EXTRA_BLOCKED_DIRS, _EXTRA_BLOCKED_HOME_SUBDIRS
+    if extra_blocked_dirs:
+        _EXTRA_BLOCKED_DIRS = {str(Path(d).resolve()) for d in extra_blocked_dirs}
+    if extra_blocked_home_subdirs:
+        _EXTRA_BLOCKED_HOME_SUBDIRS = set(extra_blocked_home_subdirs)
+
+
+def _is_path_blacklisted(resolved_path: Path) -> tuple[bool, str]:
+    resolved_str = str(resolved_path)
+    home_dir = Path.home().resolve()
+    if os.name == "nt":
+        resolved_lower = resolved_str.lower()
+        for bl_dir in _WINDOWS_BLACKLISTED_DIRS:
+            if resolved_lower.startswith(bl_dir.lower()):
+                return True, f"Access denied: {resolved_str} is under blacklisted system directory {bl_dir}"
+        for bl_dir in _EXTRA_BLOCKED_DIRS:
+            if resolved_lower.startswith(bl_dir.lower()):
+                return True, f"Access denied: {resolved_str} is under blacklisted directory {bl_dir}"
+    else:
+        for bl_dir in _UNIX_BLACKLISTED_DIRS:
+            if resolved_str == bl_dir or resolved_str.startswith(bl_dir + "/"):
+                return True, f"Access denied: {resolved_str} is under blacklisted system directory {bl_dir}"
+        for bl_dir in _EXTRA_BLOCKED_DIRS:
+            if resolved_str == bl_dir or resolved_str.startswith(bl_dir + "/"):
+                return True, f"Access denied: {resolved_str} is under blacklisted directory {bl_dir}"
+    home_str = str(home_dir)
+    if os.name == "nt":
+        if resolved_lower.startswith(home_str.lower()):
+            rel = resolved_str[len(home_str) :].lstrip(os.sep).lstrip("/")
+            for sub in _HOME_BLACKLISTED_SUBDIRS | _EXTRA_BLOCKED_HOME_SUBDIRS:
+                sub_norm = sub.replace("/", os.sep)
+                if rel.lower().startswith(sub_norm.lower()):
+                    return True, f"Access denied: {resolved_str} is under blacklisted home subdirectory ~{os.sep}{sub}"
+    else:
+        if resolved_str == home_str or resolved_str.startswith(home_str + "/"):
+            rel = resolved_str[len(home_str) :].lstrip("/")
+            for sub in _HOME_BLACKLISTED_SUBDIRS | _EXTRA_BLOCKED_HOME_SUBDIRS:
+                if rel == sub or rel.startswith(sub + "/"):
+                    return True, f"Access denied: {resolved_str} is under blacklisted home subdirectory ~/{sub}"
+    return False, ""
 
 
 def _resolve_and_validate_path(path: str, workspace_dir: Path) -> Path:
@@ -41,13 +119,14 @@ def _resolve_and_validate_path(path: str, workspace_dir: Path) -> Path:
         try:
             resolved.relative_to(workspace_resolved)
         except ValueError:
-            raise ValueError(
-                f"Path escapes workspace: {resolved} is outside {workspace_resolved}"
-            )
+            raise ValueError(f"Path escapes workspace: {resolved} is outside {workspace_resolved}") from None
         return resolved
     else:
-        # Absolute path: allow but normalize to eliminate traversal
-        return file_path.resolve()
+        resolved = file_path.resolve()
+        is_blocked, reason = _is_path_blacklisted(resolved)
+        if is_blocked:
+            raise ValueError(reason)
+        return resolved
 
 
 def truncate_text_by_tokens(
@@ -64,14 +143,14 @@ def truncate_text_by_tokens(
         text: Text to be truncated
         max_tokens: Maximum token limit
         model_name: Optional model name for model-specific limits
-        
+
     Returns:
         str: Truncated text if it exceeds the limit, otherwise the original text.
     """
     # Get model-specific limit if model_name provided
     if model_name and is_minimax_model(model_name):
         max_tokens = M27_FILE_TOKEN_LIMIT
-    
+
     encoder = get_encoder("cl100k_base")
     token_count = len(encoder.encode(text))
 
@@ -107,10 +186,10 @@ def truncate_text_by_tokens(
 
 def get_file_token_limit(model_name: str | None = None) -> int:
     """Get the appropriate token limit for file content.
-    
+
     Args:
         model_name: Optional model name for model-specific limits
-        
+
     Returns:
         Token limit for file content
     """

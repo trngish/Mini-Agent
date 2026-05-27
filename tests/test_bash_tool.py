@@ -9,8 +9,7 @@ from mini_agent.tools.bash_tool import BackgroundShellManager, BashKillTool, Bas
 
 # Skip Unix-specific tests on Windows
 WINDOWS_SKIP = pytest.mark.skipif(
-    platform.system().lower() == "windows",
-    reason="Unix-specific commands not supported on Windows"
+    platform.system().lower() == "windows", reason="Unix-specific commands not supported on Windows"
 )
 
 
@@ -34,7 +33,7 @@ async def test_foreground_command_with_stderr():
     print("\n=== Testing Stdout/Stderr Separation ===")
 
     bash_tool = BashTool()
-    
+
     # Use cross-platform compatible command
     is_windows = platform.system().lower() == "windows"
     if is_windows:
@@ -43,7 +42,7 @@ async def test_foreground_command_with_stderr():
     else:
         # Bash: Use && and >&2
         command = "echo 'stdout message' && echo 'stderr message' >&2"
-    
+
     result = await bash_tool.execute(command=command)
 
     # On Windows with PowerShell, the exit code might be 0 even with Write-Error
@@ -173,7 +172,6 @@ async def test_bash_output_with_filter():
     output_result = await bash_output_tool.execute(bash_id=bash_id, filter_str="Line [24]")
 
     assert output_result.success
-    lines = output_result.content
     print(f"Filtered output:\n{output_result.content}")
 
     # Clean up

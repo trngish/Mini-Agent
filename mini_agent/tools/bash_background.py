@@ -1,7 +1,11 @@
 """Background shell process management."""
 
+from __future__ import annotations
+
 import asyncio
+import contextlib
 import re
+from typing import Any
 
 
 class BackgroundShell:
@@ -11,7 +15,7 @@ class BackgroundShell:
     IO operations are managed externally by BackgroundShellManager.
     """
 
-    def __init__(self, bash_id: str, command: str, process: "asyncio.subprocess.Process", start_time: float):
+    def __init__(self, bash_id: str, command: str, process: asyncio.subprocess.Process, start_time: float):
         self.bash_id = bash_id
         self.command = command
         self.process = process
@@ -68,7 +72,7 @@ class BackgroundShellManager:
     """
 
     _shells: dict[str, BackgroundShell] = {}
-    _monitor_tasks: dict[str, asyncio.Task] = {}
+    _monitor_tasks: dict[str, asyncio.Task[Any]] = {}
 
     @classmethod
     def _prefix_key(cls, agent_id: str, bash_id: str) -> str:
@@ -78,7 +82,7 @@ class BackgroundShellManager:
     @classmethod
     def add(cls, shell: BackgroundShell, agent_id: str = "default") -> None:
         """Add a background shell to management.
-        
+
         Args:
             shell: The BackgroundShell to add
             agent_id: Unique identifier for the agent (to isolate storage)
@@ -89,7 +93,7 @@ class BackgroundShellManager:
     @classmethod
     def get(cls, bash_id: str, agent_id: str = "default") -> BackgroundShell | None:
         """Get a background shell by ID.
-        
+
         Args:
             bash_id: The shell ID
             agent_id: Agent identifier used when adding the shell
@@ -100,12 +104,12 @@ class BackgroundShellManager:
     @classmethod
     def get_available_ids(cls, agent_id: str = "default") -> list[str]:
         """Get all available bash IDs for an agent.
-        
+
         Args:
             agent_id: Agent identifier to filter shells
         """
         prefix = f"{agent_id}:"
-        return [k.replace(prefix, "") for k in cls._shells.keys() if k.startswith(prefix)]
+        return [k.replace(prefix, "") for k in cls._shells if k.startswith(prefix)]
 
     @classmethod
     def _remove(cls, bash_id: str, agent_id: str = "default") -> None:
@@ -121,7 +125,7 @@ class BackgroundShellManager:
         if not shell:
             return
 
-        async def monitor():
+        async def monitor() -> None:
             try:
                 process = shell.process
                 # Continuously read output until process ends
@@ -202,41 +206,40 @@ class BackgroundShellManager:
     @classmethod
     async def cleanup_all(cls, agent_id: str = "default") -> list[str]:
         """Clean up all background shells for an agent.
-        
+
         Args:
             agent_id: Agent identifier to clean up shells for
-            
+
         Returns:
             List of terminated shell IDs
         """
         terminated_ids = cls.get_available_ids(agent_id)
-        
+
         # Terminate all shells for this agent
         for bash_id in terminated_ids:
-            try:
+            with contextlib.suppress(Exception):
                 await cls.terminate(bash_id, agent_id)
-            except Exception:
-                # Ignore errors during cleanup
-                pass
-        
+
         return terminated_ids
 
     @classmethod
-    def get_stats(cls, agent_id: str = "default") -> dict:
+    def get_stats(cls, agent_id: str = "default") -> dict[str, Any]:
         """Get statistics about managed shells for an agent.
-        
+
         Args:
             agent_id: Agent identifier to get stats for
-            
+
         Returns:
             Dictionary with shell counts and status
         """
         prefix = f"{agent_id}:"
-        agent_shells = {k: v for k, v in cls._shells.items() if k.startswith(prefix) and not k.startswith(f"{agent_id}:monitor:")}
+        agent_shells = {
+            k: v for k, v in cls._shells.items() if k.startswith(prefix) and not k.startswith(f"{agent_id}:monitor:")
+        }
         running = sum(1 for s in agent_shells.values() if s.status == "running")
         completed = sum(1 for s in agent_shells.values() if s.status == "completed")
         failed = sum(1 for s in agent_shells.values() if s.status == "failed")
-        
+
         return {
             "total": len(agent_shells),
             "running": running,

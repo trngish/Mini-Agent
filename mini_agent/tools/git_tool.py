@@ -3,13 +3,12 @@
 This tool provides convenient wrappers for common Git operations
 to help the agent work with version control more easily.
 
-⚠️ 硬性规则：所有 Git 操作必须用户明确同意才能执行
+⚠️ HARD RULE: All Git operations require explicit user consent
 This is a non-negotiable requirement for all AI agent operations.
 """
 
-import asyncio
-import shlex
 import platform as _platform
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +87,9 @@ Examples:
             "properties": {
                 "operation": {
                     "type": "string",
-                    "description": "Git operation to perform (status, add, commit, log, diff, branch, checkout, pull, push)",
+                    "description": (
+                        "Git operation to perform (status, add, commit, log, diff, branch, checkout, pull, push)"
+                    ),
                     "enum": ["status", "add", "commit", "log", "diff", "branch", "checkout", "pull", "push"],
                 },
                 "path": {
@@ -134,14 +135,13 @@ Examples:
             ToolResult with operation output
         """
         # Resolve path relative to workspace
-        if not Path(path).is_absolute():
-            target_path = self.workspace_dir / path
-        else:
-            target_path = Path(path)
+        target_path = self.workspace_dir / path if not Path(path).is_absolute() else Path(path)
 
         is_windows = _platform.system() == "Windows"
         separator = "; " if is_windows else " && "
-        qd = lambda s: _shell_quote(str(s), is_windows)  # noqa: E731
+
+        def qd(s: Any) -> str:
+            return _shell_quote(str(s), is_windows)
 
         # Build git command based on operation
         if operation == "status":
@@ -151,8 +151,8 @@ Examples:
                 if not output:
                     return ToolResult(success=True, content="Working tree clean")
                 lines = output.split("\n")
-                staged = [l for l in lines if l.startswith("M") or l.startswith("A")]
-                unstaged = [l for l in lines if l.startswith(" M") or l.startswith("??")]
+                staged = [line for line in lines if line.startswith("M") or line.startswith("A")]
+                unstaged = [line for line in lines if line.startswith(" M") or line.startswith("??")]
                 content = "Git Status:\n"
                 if staged:
                     content += "\nStaged:\n  " + "\n  ".join(staged)
@@ -195,10 +195,7 @@ Examples:
                 if not output:
                     return ToolResult(success=True, content="No uncommitted changes")
                 diff_content = diff_result.content if diff_result.success else ""
-                return ToolResult(
-                    success=True,
-                    content=f"Uncommitted Changes:\n\n{output}\n\n{diff_content}"
-                )
+                return ToolResult(success=True, content=f"Uncommitted Changes:\n\n{output}\n\n{diff_content}")
             return result
 
         elif operation == "branch":
@@ -228,7 +225,10 @@ Examples:
             return ToolResult(
                 success=False,
                 content="",
-                error=f"Unknown operation: {operation}. Supported: status, add, commit, log, diff, branch, checkout, pull, push"
+                error=(
+                    f"Unknown operation: {operation}."
+                    " Supported: status, add, commit, log, diff, branch, checkout, pull, push"
+                ),
             )
 
 
@@ -269,27 +269,30 @@ Examples:
 
     async def execute(self, path: str = ".") -> ToolResult:
         """Get git status."""
-        if not Path(path).is_absolute():
-            target_path = self.workspace_dir / path
-        else:
-            target_path = Path(path)
+        target_path = self.workspace_dir / path if not Path(path).is_absolute() else Path(path)
 
         is_windows = _platform.system() == "Windows"
         separator = "; " if is_windows else " && "
-        qd = lambda s: _shell_quote(str(s), is_windows)  # noqa: E731
+
+        def qd(s: Any) -> str:
+            return _shell_quote(str(s), is_windows)
 
         # Get branch first
-        branch_result = await self._bash.execute(f"cd {qd(target_path)}{separator}git branch --show-current", timeout=10)
+        branch_result = await self._bash.execute(
+            f"cd {qd(target_path)}{separator}git branch --show-current", timeout=10
+        )
         branch = branch_result.content.strip() if branch_result.success else "unknown"
 
         # Get status
         status_result = await self._bash.execute(f"cd {qd(target_path)}{separator}git status --short", timeout=10)
-        
+
         if status_result.success:
             lines = status_result.content.strip().split("\n") if status_result.content.strip() else []
-            staged = [l for l in lines if l.startswith("M") or l.startswith("A") or l.startswith("D")]
-            unstaged = [l for l in lines if l.startswith(" M") or l.startswith("??") or l.startswith(" D")]
-            
+            staged = [line for line in lines if line.startswith("M") or line.startswith("A") or line.startswith("D")]
+            unstaged = [
+                line for line in lines if line.startswith(" M") or line.startswith("??") or line.startswith(" D")
+            ]
+
             content = f"Branch: {branch}\n"
             if staged:
                 content += f"\nStaged ({len(staged)}):\n  " + "\n  ".join(staged[:20])
@@ -297,7 +300,7 @@ Examples:
                 content += f"\nUnstaged ({len(unstaged)}):\n  " + "\n  ".join(unstaged[:20])
             if not staged and not unstaged:
                 content += "\nWorking tree clean"
-            
+
             return ToolResult(success=True, content=content)
-        
+
         return status_result

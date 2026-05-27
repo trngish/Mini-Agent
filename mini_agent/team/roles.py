@@ -1,12 +1,12 @@
 """Role definitions for Agent Team."""
 
 from enum import Enum
-from typing import Optional
+from typing import Any
 
 
 class AgentRole(str, Enum):
     """Roles that agents can play in a team.
-    
+
     Each role has distinct responsibilities and boundaries:
     - COORDINATOR: Task decomposition, delegation, result synthesis
     - PLANNER: Strategic planning, architecture design, approach selection
@@ -17,11 +17,11 @@ class AgentRole(str, Enum):
     """
 
     COORDINATOR = "coordinator"  # Orchestrates overall workflow
-    PLANNER = "planner"          # Strategic planning
-    EXECUTOR = "executor"        # Tool execution and implementation
-    REVIEWER = "reviewer"        # Quality assurance and review
-    CRITIC = "critic"            # Adversarial thinking, find weaknesses
-    RESEARCHER = "researcher"    # Information gathering
+    PLANNER = "planner"  # Strategic planning
+    EXECUTOR = "executor"  # Tool execution and implementation
+    REVIEWER = "reviewer"  # Quality assurance and review
+    CRITIC = "critic"  # Adversarial thinking, find weaknesses
+    RESEARCHER = "researcher"  # Information gathering
 
     @property
     def systemprompt_suffix(self) -> str:
@@ -124,10 +124,10 @@ You MUST:
     @classmethod
     def for_task_type(cls, task_type: str) -> list["AgentRole"]:
         """Get recommended roles for a task type.
-        
+
         Args:
             task_type: Type of task (e.g., 'implement', 'debug', 'refactor')
-            
+
         Returns:
             List of recommended roles for this task type
         """
@@ -138,14 +138,20 @@ You MUST:
             "design": [AgentRole.PLANNER, AgentRole.CRITIC, AgentRole.REVIEWER],
             "review": [AgentRole.REVIEWER, AgentRole.CRITIC],
             "explore": [AgentRole.RESEARCHER, AgentRole.COORDINATOR],
-            "complex": [AgentRole.COORDINATOR, AgentRole.PLANNER, AgentRole.EXECUTOR, AgentRole.REVIEWER, AgentRole.CRITIC],
+            "complex": [
+                AgentRole.COORDINATOR,
+                AgentRole.PLANNER,
+                AgentRole.EXECUTOR,
+                AgentRole.REVIEWER,
+                AgentRole.CRITIC,
+            ],
         }
         return recommendations.get(task_type.lower(), [AgentRole.EXECUTOR])
 
 
 class RoleConfig:
     """Configuration for a team role.
-    
+
     Attributes:
         role: The role this config is for
         system_prompt_addition: Additional instructions for this role
@@ -159,8 +165,8 @@ class RoleConfig:
         role: AgentRole,
         system_prompt_addition: str = "",
         max_steps: int = 50,
-        m27_config: Optional[dict] = None,
-        tool_names: Optional[list[str]] = None,
+        m27_config: dict[str, Any] | None = None,
+        tool_names: list[str] | None = None,
     ):
         self.role = role
         self.system_prompt_addition = system_prompt_addition

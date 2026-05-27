@@ -86,13 +86,13 @@ class MCPTool(Tool):
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
-    async def execute(self, **kwargs) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute MCP tool via the session with timeout protection."""
         timeout = self._execute_timeout or _default_timeout_config.execute_timeout
 
         try:
             # Wrap call_tool with timeout
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(timeout):  # type: ignore[attr-defined]
                 result = await self._session.call_tool(self._name, arguments=kwargs)
 
             # MCP tool results are a list of content items
@@ -107,7 +107,9 @@ class MCPTool(Tool):
 
             is_error = result.isError if hasattr(result, "isError") else False
 
-            return ToolResult(success=not is_error, content=content_str, error=None if not is_error else "Tool returned error")
+            return ToolResult(
+                success=not is_error, content=content_str, error=None if not is_error else "Tool returned error"
+            )
 
         except TimeoutError:
             return ToolResult(
@@ -117,8 +119,6 @@ class MCPTool(Tool):
             )
         except Exception as e:
             return ToolResult(success=False, content="", error=f"MCP tool execution failed: {str(e)}")
-
-
 
 
 class MCPServerConnection:
@@ -178,7 +178,7 @@ class MCPServerConnection:
             self.exit_stack = AsyncExitStack()
 
             # Wrap connection with timeout
-            async with asyncio.timeout(connect_timeout):
+            async with asyncio.timeout(connect_timeout):  # type: ignore[attr-defined]
                 if self.connection_type == "stdio":
                     read_stream, write_stream = await self._connect_stdio()
                 elif self.connection_type == "sse":
@@ -210,9 +210,14 @@ class MCPServerConnection:
                 self.tools.append(mcp_tool)
 
             conn_info = self.url if self.url else self.command
-            print(f"✓ Connected to MCP server '{self.name}' ({self.connection_type}: {conn_info}) - loaded {len(self.tools)} tools")
-            for tool in self.tools:
-                desc = tool.description[:60] if len(tool.description) > 60 else tool.description
+            print(
+                f"✓ Connected to MCP server '{self.name}' ({self.connection_type}: {conn_info})"
+                f" - loaded {len(self.tools)} tools"
+            )
+            for tool in self.tools:  # type: ignore[assignment]
+                desc = (
+                    tool.description[:60] if tool.description and len(tool.description) > 60 else tool.description
+                ) or ""
                 print(f"  - {tool.name}: {desc}...")
             return True
 
@@ -233,34 +238,34 @@ class MCPServerConnection:
             traceback.print_exc()
             return False
 
-    async def _connect_stdio(self):
+    async def _connect_stdio(self) -> tuple[Any, Any]:
         """Connect via STDIO transport."""
-        server_params = StdioServerParameters(command=self.command, args=self.args, env=self.env if self.env else None)
-        return await self.exit_stack.enter_async_context(stdio_client(server_params))
+        server_params = StdioServerParameters(command=self.command, args=self.args, env=self.env if self.env else None)  # type: ignore[arg-type]
+        return await self.exit_stack.enter_async_context(stdio_client(server_params))  # type: ignore[union-attr]
 
-    async def _connect_sse(self):
+    async def _connect_sse(self) -> tuple[Any, Any]:
         """Connect via SSE transport with timeout parameters."""
         connect_timeout = self._get_connect_timeout()
         sse_read_timeout = self._get_sse_read_timeout()
 
-        return await self.exit_stack.enter_async_context(
+        return await self.exit_stack.enter_async_context(  # type: ignore[union-attr]
             sse_client(
-                url=self.url,
+                url=self.url,  # type: ignore[arg-type]
                 headers=self.headers if self.headers else None,
                 timeout=connect_timeout,
                 sse_read_timeout=sse_read_timeout,
             )
         )
 
-    async def _connect_streamable_http(self):
+    async def _connect_streamable_http(self) -> tuple[Any, Any]:
         """Connect via Streamable HTTP transport with timeout parameters."""
         connect_timeout = self._get_connect_timeout()
         sse_read_timeout = self._get_sse_read_timeout()
 
         # streamablehttp_client returns (read, write, get_session_id)
-        read_stream, write_stream, _ = await self.exit_stack.enter_async_context(
+        read_stream, write_stream, _ = await self.exit_stack.enter_async_context(  # type: ignore[union-attr]
             streamablehttp_client(
-                url=self.url,
+                url=self.url,  # type: ignore[arg-type]
                 headers=self.headers if self.headers else None,
                 timeout=connect_timeout,
                 sse_read_timeout=sse_read_timeout,
@@ -268,7 +273,7 @@ class MCPServerConnection:
         )
         return read_stream, write_stream
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         """Properly disconnect from the MCP server."""
         if self.exit_stack:
             try:
@@ -287,11 +292,11 @@ class MCPServerConnection:
 _mcp_connections: list[MCPServerConnection] = []
 
 
-def _determine_connection_type(server_config: dict) -> ConnectionType:
+def _determine_connection_type(server_config: dict[str, Any]) -> ConnectionType:
     """Determine connection type from server config."""
     explicit_type = server_config.get("type", "").lower()
     if explicit_type in ("stdio", "sse", "http", "streamable_http"):
-        return explicit_type
+        return explicit_type  # type: ignore[no-any-return]
     # Auto-detect: if url exists, default to streamable_http; otherwise stdio
     if server_config.get("url"):
         return "streamable_http"
@@ -327,8 +332,6 @@ def _resolve_mcp_config_path(config_path: str) -> Path | None:
             return example_file
 
     return None
-
-
 
 
 class LazyMCPToolLoader:
@@ -386,9 +389,9 @@ class LazyMCPToolLoader:
                     return []
 
             # Load tools from connection
-            self._tools = self._connection.tools
+            self._tools = self._connection.tools  # type: ignore[assignment]
             self._loaded = True
-            return self._tools
+            return self._tools  # type: ignore[return-value]
         except Exception as e:
             print(f"Failed to load MCP tools from '{self._connection.name}': {e}")
             return []
@@ -484,7 +487,7 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
 
         print(f"\nTotal MCP tools loaded: {len(all_tools)}")
 
-        return all_tools
+        return all_tools  # type: ignore[return-value]
 
     except Exception as e:
         print(f"Error loading MCP config: {e}")
@@ -494,7 +497,7 @@ async def load_mcp_tools_async(config_path: str = "mcp.json") -> list[Tool]:
         return []
 
 
-async def cleanup_mcp_connections():
+async def cleanup_mcp_connections() -> None:
     """Clean up all MCP connections."""
     global _mcp_connections
     for connection in _mcp_connections:

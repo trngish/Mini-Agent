@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Horizontal grayscale gradient (light → dark) like OpenCode -->
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2E8F0" />
+      <stop offset="10%" stop-color="#D1D5DB" />
+      <stop offset="30%" stop-color="#9CA3AF" />
+      <stop offset="55%" stop-color="#6B7280" />
+      <stop offset="80%" stop-color="#4B5563" />
+      <stop offset="100%" stop-color="#374151" />
+    </linearGradient>
+
+    <!-- Ambient glow behind the mark -->
+    <radialGradient id="glow" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#4B5563" stop-opacity="0.15" />
+      <stop offset="45%" stop-color="#1F2937" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#0B0F19" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" fill="#0B0F19" rx="24" />
+
+  <!-- Glow -->
+  <circle cx="256" cy="240" r="210" fill="url(#glow)" />
+
+  <!--
+    Pixel Art "MINIMAX" — 5×7 grid per char, 9px per pixel, 9px gap between chars
+    Char width: 5×9=45 | Gap: 9 | Total per slot: 54
+    Text total: 7×54−9=369px | Start: x=72 | Center: (72+441)/2=256.5
+  -->
+  <g transform="translate(72, 224)">
+    <!-- ===== M (slot 0: offset 0) ===== -->
+    <g>
+      <rect x="0"  y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="9"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="54" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+
+    <!-- ===== I (slot 1: offset 54) ===== -->
+    <g transform="translate(54, 0)">
+      <rect x="18" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+
+    <!-- ===== N (slot 2: offset 108) ===== -->
+    <g transform="translate(108, 0)">
+      <rect x="0"  y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="9"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="54" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+
+    <!-- ===== I (slot 3: offset 162) ===== -->
+    <g transform="translate(162, 0)">
+      <rect x="18" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+
+    <!-- ===== M (slot 4: offset 216) ===== -->
+    <g transform="translate(216, 0)">
+      <rect x="0"  y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="9"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="54" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+
+    <!-- ===== A (slot 5: offset 270) ===== -->
+    <g transform="translate(270, 0)">
+      <rect x="9"  y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="9"  y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="54" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+
+    <!-- ===== X (slot 6: offset 324) ===== -->
+    <g transform="translate(324, 0)">
+      <rect x="0"  y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="0"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="9"  y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="9"  width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="27" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="18" y="36" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="9"  y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="27" y="45" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="0"  y="54" width="9" height="9" fill="url(#textGrad)"/>
+      <rect x="36" y="54" width="9" height="9" fill="url(#textGrad)"/>
+    </g>
+  </g>
+
+  <!-- Pixel diamond accent (bottom-right of text block) -->
+  <g transform="translate(406, 384)">
+    <rect x="18" y="0"  width="9" height="9" fill="url(#textGrad)" opacity="0.45"/>
+    <rect x="9"  y="9"  width="9" height="9" fill="url(#textGrad)" opacity="0.55"/>
+    <rect x="27" y="9"  width="9" height="9" fill="url(#textGrad)" opacity="0.55"/>
+    <rect x="0"  y="18" width="9" height="9" fill="url(#textGrad)" opacity="0.65"/>
+    <rect x="18" y="18" width="9" height="9" fill="url(#textGrad)" opacity="0.85"/>
+    <rect x="36" y="18" width="9" height="9" fill="url(#textGrad)" opacity="0.65"/>
+    <rect x="9"  y="27" width="9" height="9" fill="url(#textGrad)" opacity="0.55"/>
+    <rect x="27" y="27" width="9" height="9" fill="url(#textGrad)" opacity="0.55"/>
+    <rect x="18" y="36" width="9" height="9" fill="url(#textGrad)" opacity="0.45"/>
+  </g>
+
+  <!-- Subtle pixel dots row (bottom center) -->
+  <g transform="translate(113, 414)" opacity="0.3">
+    <rect x="0"   y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="16"  y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="32"  y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="48"  y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="64"  y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="80"  y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="96"  y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="112" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="128" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="144" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="160" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="176" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="192" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="208" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="224" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="240" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="256" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="272" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+    <rect x="288" y="0" width="6" height="6" rx="1" fill="url(#textGrad)"/>
+  </g>
+</svg>

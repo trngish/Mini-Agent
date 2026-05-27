@@ -61,6 +61,16 @@ CLAUDE.md
 
 .agent_memory.json
 
+# Environment (copy .env.example to .env for local use)
+.env
+.env.local
+.env.production
+
 # Local development dirs
 .codebuddy/
 .workbuddy/
+
+# CI / tooling
+.ruff_cache/
+.mypy_cache/
+.pre-commit-config.yaml.bak

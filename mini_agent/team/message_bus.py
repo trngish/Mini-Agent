@@ -4,15 +4,16 @@ This module provides a message-passing system for agents to communicate
 within a team, enabling role-boundary isolation and structured dialogue.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
-from collections import defaultdict
+from typing import Any
 
 
 class MessagePriority(str, Enum):
     """Message priority levels."""
+
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -21,12 +22,13 @@ class MessagePriority(str, Enum):
 
 class MessageType(str, Enum):
     """Types of messages in team communication."""
-    TASK = "task"           # New task assignment
-    RESULT = "result"        # Task completion result
-    FEEDBACK = "feedback"   # Feedback on work
-    QUESTION = "question"   # Question to another agent
-    ANSWER = "answer"       # Answer to a question
-    APPROVAL = "approval"   # Approval or rejection
+
+    TASK = "task"  # New task assignment
+    RESULT = "result"  # Task completion result
+    FEEDBACK = "feedback"  # Feedback on work
+    QUESTION = "question"  # Question to another agent
+    ANSWER = "answer"  # Answer to a question
+    APPROVAL = "approval"  # Approval or rejection
     ESCALATION = "escalation"  # Escalate to higher authority
     BROADCAST = "broadcast"  # Broadcast to all agents
 
@@ -34,7 +36,7 @@ class MessageType(str, Enum):
 @dataclass
 class TeamMessage:
     """A message passed between agents in a team.
-    
+
     Attributes:
         id: Unique message identifier
         type: Message type
@@ -72,23 +74,23 @@ class TeamMessage:
 
 class MessageBus:
     """Message bus for inter-agent communication.
-    
+
     Provides:
     - Point-to-point messaging between agents
     - Broadcast messaging
     - Message queuing with priority handling
     - Subscription-based message delivery
-    
+
     Example:
         bus = MessageBus()
         bus.send(TeamMessage(...))
-        
+
         # Agent checks its messages
         messages = bus.receive("my_agent_name")
         bus.receive("my_agent_name", wait=True)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Queue for each recipient: recipient -> list of messages
         self._queues: dict[str, list[TeamMessage]] = defaultdict(list)
         # All messages for broadcast: list
@@ -98,10 +100,10 @@ class MessageBus:
 
     def send(self, message: TeamMessage) -> str:
         """Send a message through the bus.
-        
+
         Args:
             message: The message to send
-            
+
         Returns:
             The message ID
         """
@@ -121,18 +123,18 @@ class MessageBus:
     def receive(
         self,
         recipient: str,
-        blocking: bool = False,
-        timeout: float = 30.0,
+        blocking: bool = False,  # noqa: ARG002
+        timeout: float = 30.0,  # noqa: ARG002
         max_count: int = 10,
     ) -> list[TeamMessage]:
         """Receive messages for a recipient.
-        
+
         Args:
             recipient: Name of the receiving agent
             blocking: If True, wait for messages (not implemented yet)
             timeout: Maximum time to wait for messages
             max_count: Maximum messages to return
-            
+
         Returns:
             List of messages for this recipient
         """
@@ -161,11 +163,11 @@ class MessageBus:
 
     def peek(self, recipient: str, max_count: int = 10) -> list[TeamMessage]:
         """Peek at messages without removing them.
-        
+
         Args:
             recipient: Name of the receiving agent
             max_count: Maximum messages to return
-            
+
         Returns:
             List of messages (still in queue)
         """
@@ -175,10 +177,10 @@ class MessageBus:
 
     def has_messages(self, recipient: str) -> bool:
         """Check if recipient has pending messages.
-        
+
         Args:
             recipient: Name of the receiving agent
-            
+
         Returns:
             True if there are messages waiting
         """
@@ -186,10 +188,10 @@ class MessageBus:
 
     def clear(self, recipient: str = "*") -> int:
         """Clear messages for a recipient.
-        
+
         Args:
             recipient: Name of recipient to clear, "*" for all
-            
+
         Returns:
             Number of messages cleared
         """
@@ -205,7 +207,7 @@ class MessageBus:
 
     def get_all_recipients(self) -> list[str]:
         """Get list of all recipients with pending messages."""
-        return [r for r in self._queues.keys() if self._queues[r]]
+        return [r for r in self._queues if self._queues[r]]
 
     def send_task(
         self,
@@ -213,17 +215,17 @@ class MessageBus:
         executor: str,
         task: str,
         priority: MessagePriority = MessagePriority.NORMAL,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Convenience method to send a task message.
-        
+
         Args:
             sender: Name of sending agent
             executor: Name of executor agent
             task: Task description
             priority: Message priority
             metadata: Additional metadata
-            
+
         Returns:
             Message ID
         """
@@ -244,17 +246,17 @@ class MessageBus:
         recipient: str,
         result: str,
         success: bool = True,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Convenience method to send a result message.
-        
+
         Args:
             sender: Name of sending agent
             recipient: Name of recipient agent
             result: Result content
             success: Whether the task was successful
             metadata: Additional metadata
-            
+
         Returns:
             Message ID
         """
@@ -275,16 +277,16 @@ class MessageBus:
         sender: str,
         content: str,
         priority: MessagePriority = MessagePriority.NORMAL,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Convenience method to broadcast a message.
-        
+
         Args:
             sender: Name of sending agent
             content: Message content
             priority: Message priority
             metadata: Additional metadata
-            
+
         Returns:
             Message ID
         """

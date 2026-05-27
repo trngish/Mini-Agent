@@ -5,13 +5,11 @@ for complex task decomposition and adversarial review/critique.
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
-from .base import Tool, ToolResult
 from ..llm import LLMClient
-from ..tools.base import Tool
-from ..team.agent_team import AgentTeam, AgentRole
-
+from ..team.agent_team import AgentTeam
+from .base import Tool, ToolResult
 
 DEFAULT_TIMEOUT = 300  # 5 minutes default timeout
 
@@ -35,7 +33,7 @@ class TeamDispatchTool(Tool):
         llm_client: LLMClient,
         tools: list[Tool],
         system_prompt: str = "You are a helpful AI assistant on a software engineering team.",
-        m27_config: Optional[dict] = None,
+        m27_config: dict[str, Any] | None = None,
     ):
         self._llm_client = llm_client
         self._tools = tools
@@ -79,7 +77,9 @@ Examples:
                 "mode": {
                     "type": "string",
                     "enum": ["decompose", "review"],
-                    "description": "Execution mode: 'decompose' for parallel execution, 'review' for adversarial critique",
+                    "description": (
+                        "Execution mode: 'decompose' for parallel execution, 'review' for adversarial critique"
+                    ),
                     "default": "decompose",
                 },
                 "max_rounds": {
@@ -128,7 +128,7 @@ Examples:
             # Use a reasonable overall timeout
             overall_timeout = min(timeout_per_agent * 3, DEFAULT_TIMEOUT)
 
-            async with asyncio.timeout(overall_timeout):
+            async with asyncio.timeout(overall_timeout):  # type: ignore[attr-defined]
                 if mode == "decompose":
                     return await self._execute_decompose(team, task, timeout_per_agent)
                 elif mode == "review":
@@ -182,7 +182,7 @@ Examples:
         team: AgentTeam,
         task: str,
         timeout: int,
-        max_rounds: int,
+        max_rounds: int,  # noqa: ARG002
     ) -> ToolResult:
         """Execute in review mode: reviewer + multiple critics."""
         team.add_reviewer("reviewer", max_steps=30)
@@ -192,7 +192,7 @@ Examples:
         result = await team.execute(task, timeout=timeout)
 
         critique_summary = []
-        for i, (name, content) in enumerate(result.agent_results.items(), 1):
+        for _i, (name, content) in enumerate(result.agent_results.items(), 1):
             critique_summary.append(f"### {name}\n\n{content[:500]}")
 
         combined = "\n\n".join(critique_summary)

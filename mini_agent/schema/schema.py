@@ -13,9 +13,10 @@ class LLMProvider(str, Enum):
 
 class AgentMode(str, Enum):
     """Agent execution mode."""
-    PLAN = "plan"      # Read-only, model proposes before making changes
-    AGENT = "agent"    # Interactive with approval gates
-    YOLO = "yolo"      # Auto-approve all tools
+
+    PLAN = "plan"  # Read-only, model proposes before making changes
+    AGENT = "agent"  # Interactive with approval gates
+    YOLO = "yolo"  # Auto-approve all tools
 
 
 # Tools considered as write operations (blocked in PLAN mode)

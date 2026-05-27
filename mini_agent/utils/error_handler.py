@@ -4,10 +4,12 @@ Provides detailed error classification and user-friendly error messages
 for various API error types.
 """
 
+from __future__ import annotations
+
 import re
 from enum import Enum
 from functools import lru_cache
-from typing import Optional
+from typing import Any
 
 from .display import Colors
 
@@ -50,9 +52,9 @@ class LLMError(Exception):
         self,
         message: str,
         error_type: LLMErrorType = LLMErrorType.UNKNOWN_ERROR,
-        status_code: Optional[int] = None,
-        details: Optional[str] = None,
-        retry_after: Optional[int] = None,
+        status_code: int | None = None,
+        details: str | None = None,
+        retry_after: int | None = None,
     ):
         self.message = message
         self.error_type = error_type
@@ -88,64 +90,45 @@ class LLMError(Exception):
         """Get user guidance for this error type."""
         guidance = {
             LLMErrorType.AUTHENTICATION_ERROR: (
-                "Please check your API key is valid and has not expired. "
-                "Verify your API key in the configuration file."
+                "Please check your API key is valid and has not expired. Verify your API key in the configuration file."
             ),
             LLMErrorType.PERMISSION_DENIED: (
                 "Your API key does not have permission to perform this operation. "
                 "Please check your account permissions."
             ),
             LLMErrorType.RATE_LIMIT_ERROR: (
-                f"Rate limit exceeded. " + (
-                    f"Please wait {self.retry_after} seconds before retrying." 
-                    if self.retry_after else "Please wait a moment before retrying."
+                "Rate limit exceeded. "
+                + (
+                    f"Please wait {self.retry_after} seconds before retrying."
+                    if self.retry_after
+                    else "Please wait a moment before retrying."
                 )
             ),
             LLMErrorType.QUOTA_EXCEEDED: (
-                "Your API quota has been exceeded. "
-                "Please check your usage limits or upgrade your plan."
+                "Your API quota has been exceeded. Please check your usage limits or upgrade your plan."
             ),
             LLMErrorType.SERVER_ERROR: (
-                "The server encountered an internal error. "
-                "This is usually temporary. Please retry in a few moments."
+                "The server encountered an internal error. This is usually temporary. Please retry in a few moments."
             ),
             LLMErrorType.SERVICE_UNAVAILABLE: (
-                "The service is temporarily unavailable. "
-                "Please retry in a few moments."
+                "The service is temporarily unavailable. Please retry in a few moments."
             ),
-            LLMErrorType.GATEWAY_TIMEOUT: (
-                "The request timed out. "
-                "Please retry with a shorter prompt or fewer tools."
-            ),
-            LLMErrorType.BAD_REQUEST: (
-                "Invalid request format. Please check your input."
-            ),
-            LLMErrorType.INVALID_REQUEST: (
-                "The request was invalid. Please check the input format."
-            ),
+            LLMErrorType.GATEWAY_TIMEOUT: ("The request timed out. Please retry with a shorter prompt or fewer tools."),
+            LLMErrorType.BAD_REQUEST: ("Invalid request format. Please check your input."),
+            LLMErrorType.INVALID_REQUEST: ("The request was invalid. Please check the input format."),
             LLMErrorType.CONTEXT_LENGTH_EXCEEDED: (
                 "The conversation is too long and exceeded the context limit. "
                 "Consider starting a new conversation or reducing the task size."
             ),
             LLMErrorType.UNPROCESSABLE_ENTITY: (
-                "The request could not be processed. "
-                "Please check your input format and parameters."
+                "The request could not be processed. Please check your input format and parameters."
             ),
-            LLMErrorType.NETWORK_ERROR: (
-                "Network connection failed. "
-                "Please check your internet connection."
-            ),
-            LLMErrorType.TIMEOUT_ERROR: (
-                "The request timed out. "
-                "Please try again or reduce the request size."
-            ),
+            LLMErrorType.NETWORK_ERROR: ("Network connection failed. Please check your internet connection."),
+            LLMErrorType.TIMEOUT_ERROR: ("The request timed out. Please try again or reduce the request size."),
             LLMErrorType.CONNECTION_ERROR: (
-                "Could not connect to the server. "
-                "Please check your network and try again."
+                "Could not connect to the server. Please check your network and try again."
             ),
-            LLMErrorType.UNKNOWN_ERROR: (
-                "An unexpected error occurred. Please try again later."
-            ),
+            LLMErrorType.UNKNOWN_ERROR: ("An unexpected error occurred. Please try again later."),
         }
         return guidance.get(self.error_type, "An unknown error occurred.")
 
@@ -193,8 +176,8 @@ class LLMErrorClassifier:
     def classify(
         cls,
         error: Exception,
-        status_code: Optional[int] = None,
-        response_body: Optional[str] = None,
+        status_code: int | None = None,
+        response_body: str | None = None,
     ) -> LLMError:
         """Classify an exception and return an LLMError.
 
@@ -288,18 +271,18 @@ class LLMErrorClassifier:
 
     @classmethod
     @lru_cache(maxsize=128)
-    def _matches_patterns_cached(cls, text: str, patterns_hash: int) -> bool:
+    def _matches_patterns_cached(cls, _text: str, _patterns_hash: int) -> bool:  # noqa: ARG002, ARG003
         """Cached pattern matching helper (uses hash to store patterns)."""
         return False  # Placeholder - actual logic uses class-level patterns
 
     @classmethod
-    def _matches_patterns(cls, text: str, patterns: list[re.Pattern]) -> bool:
+    def _matches_patterns(cls, text: str, patterns: list[re.Pattern[str]]) -> bool:
         """Check if text matches any of the patterns."""
         return any(p.search(text) for p in patterns)
 
     @classmethod
     @lru_cache(maxsize=32)
-    def _extract_retry_after(cls, response_body: str) -> Optional[int]:
+    def _extract_retry_after(cls, response_body: str) -> int | None:
         """Extract retry-after value from response body with caching."""
         if not response_body:
             return None
@@ -318,50 +301,46 @@ class LLMErrorClassifier:
 
 
 def calculate_exponential_backoff(
-    attempt: int,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    exponential_base: float = 2.0,
-    jitter: float = 0.5
+    attempt: int, base_delay: float = 1.0, max_delay: float = 60.0, exponential_base: float = 2.0, jitter: float = 0.5
 ) -> float:
     """Calculate delay with exponential backoff and jitter.
-    
+
     This is more effective for rate limit recovery than fixed delays.
-    
+
     Args:
         attempt: Current attempt number (0-indexed)
         base_delay: Base delay in seconds
         max_delay: Maximum delay cap
         exponential_base: Multiplier for each attempt
         jitter: Random factor (0-1) to add randomness
-        
+
     Returns:
         Delay in seconds to wait before next retry
     """
     import random
-    
+
     # Calculate exponential delay
-    delay = base_delay * (exponential_base ** attempt)
-    
+    delay = base_delay * (exponential_base**attempt)
+
     # Cap at max delay
     delay = min(delay, max_delay)
-    
+
     # Add jitter to prevent thundering herd
     jitter_range = delay * jitter
     delay += random.uniform(-jitter_range, jitter_range)
-    
+
     return max(0.1, delay)  # At least 100ms
 
 
 class RetryStrategy:
     """Configurable retry strategy for LLM API calls.
-    
+
     Supports:
     - Exponential backoff with jitter
     - Per-error-type configuration
     - Maximum retry limits
     """
-    
+
     # Default retry configuration per error type
     DEFAULT_CONFIG = {
         "rate_limit": {"max_retries": 5, "base_delay": 2.0, "max_delay": 120.0},
@@ -369,51 +348,50 @@ class RetryStrategy:
         "timeout": {"max_retries": 3, "base_delay": 1.0, "max_delay": 60.0},
         "network": {"max_retries": 5, "base_delay": 1.0, "max_delay": 60.0},
     }
-    
-    def __init__(self, config: dict | None = None):
+
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = config or self.DEFAULT_CONFIG
-    
+
     def get_delay(self, error_type: str, attempt: int) -> float | None:
         """Get retry delay for error type and attempt.
-        
+
         Args:
             error_type: Type of error (from LLMErrorType)
             attempt: Current attempt number
-            
+
         Returns:
             Delay in seconds, or None if should not retry
         """
         # Normalize error type to config key
-        config_key = error_type.value.replace("_error", "") if hasattr(error_type, 'value') else error_type
-        
+        config_key = error_type.value.replace("_error", "") if hasattr(error_type, "value") else error_type
+
         if config_key not in self.config:
             config_key = "network"  # Default fallback
-        
+
         cfg = self.config[config_key]
         if attempt >= cfg["max_retries"]:
             return None
-        
+
         return calculate_exponential_backoff(
             attempt=attempt,
             base_delay=cfg["base_delay"],
             max_delay=cfg["max_delay"],
         )
-    
+
     def should_retry(self, error_type: str, attempt: int) -> bool:
         """Check if should retry this error type.
-        
+
         Args:
             error_type: Type of error
             attempt: Current attempt number
-            
+
         Returns:
             True if should retry, False otherwise
         """
         return self.get_delay(error_type, attempt) is not None
 
 
-
-def format_llm_error(error: Exception, status_code: Optional[int] = None) -> str:
+def format_llm_error(error: Exception, status_code: int | None = None) -> str:
     """Format an LLM error into a user-friendly message.
 
     Args:

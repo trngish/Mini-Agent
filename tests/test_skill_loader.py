@@ -5,9 +5,7 @@ Test Skill Loader
 import tempfile
 from pathlib import Path
 
-import pytest
-
-from mini_agent.tools.skill_loader import Skill, SkillLoader
+from mini_agent.tools.skill_loader import SkillLoader
 
 
 def create_test_skill(skill_dir: Path, name: str, description: str, content: str):
@@ -101,9 +99,7 @@ def test_discover_skills():
         for i in range(3):
             skill_dir = Path(tmpdir) / f"skill-{i}"
             skill_dir.mkdir()
-            create_test_skill(
-                skill_dir, f"skill-{i}", f"Test skill {i}", f"Content {i}"
-            )
+            create_test_skill(skill_dir, f"skill-{i}", f"Test skill {i}", f"Content {i}")
 
         loader = SkillLoader(tmpdir)
         skills = loader.discover_skills()
@@ -130,13 +126,13 @@ def test_get_skill():
         assert loader.get_skill("nonexistent") is None
 
 
-
 def test_get_skills_metadata_prompt():
     """Test generating metadata-only prompt (Progressive Disclosure Level 1)"""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create test skills with different names to test categorization
         # Use longer content to simulate real skills
-        long_content = """
+        long_content = (
+            """
 # Detailed Skill Content
 
 This is a comprehensive skill guide with lots of detailed instructions.
@@ -149,7 +145,9 @@ More detailed content and examples.
 
 ## Section 3
 Even more content to make this realistic.
-""" * 3  # Make it substantial
+"""
+            * 3
+        )  # Make it substantial
 
         skills_data = [
             ("pdf", "PDF manipulation toolkit", long_content),

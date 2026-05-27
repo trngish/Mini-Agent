@@ -10,7 +10,6 @@ import asyncio
 from typing import Any
 
 from ..tools.base import Tool, ToolResult
-from ..schema import ToolCall
 
 # Default timeouts by tool category (seconds)
 DEFAULT_TOOL_TIMEOUTS = {
@@ -83,8 +82,11 @@ def compress_tool_result(result: ToolResult, max_chars: int = 5000) -> ToolResul
     )
 
 
-def is_transient_error(error: str) -> bool:
+def is_transient_error(error: str) -> bool:  # pragma: no cover
     """Check if an error is transient (worth retrying).
+
+    NOTE: This function is no longer used by the retry system.
+    Retry logic is now centralized in RetryHandler.
 
     Args:
         error: Error message
@@ -104,11 +106,7 @@ def is_transient_error(error: str) -> bool:
     return any(pattern in error_lower for pattern in transient_patterns)
 
 
-async def execute_with_timeout(
-    tool: Tool,
-    timeout: float,
-    **kwargs
-) -> ToolResult:
+async def execute_with_timeout(tool: Tool, timeout: float, **kwargs: Any) -> ToolResult:
     """Execute a tool with timeout protection.
 
     Args:
@@ -120,7 +118,7 @@ async def execute_with_timeout(
         Tool result or timeout error
     """
     try:
-        async with asyncio.timeout(timeout):
+        async with asyncio.timeout(timeout):  # type: ignore[attr-defined]
             return await tool.execute(**kwargs)
     except TimeoutError:
         return ToolResult(
@@ -142,8 +140,14 @@ def should_compress_result(tool_name: str, result_size: int) -> bool:
     """
     # Tools that produce large outputs that LLM doesn't need in full
     large_output_tools = {
-        "grep", "multi_grep", "find", "tree", "workspace_context",
-        "deep_context", "read_file", "multi_read",
+        "grep",
+        "multi_grep",
+        "find",
+        "tree",
+        "workspace_context",
+        "deep_context",
+        "read_file",
+        "multi_read",
     }
 
     if tool_name not in large_output_tools:

@@ -3,8 +3,7 @@
 Provides detailed timing metrics for steps, tools, and API calls.
 """
 
-from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..agent import Agent
@@ -36,7 +35,7 @@ class PerformanceMetrics:
         """
         self._step_durations.append(duration)
         if len(self._step_durations) > self.MAX_STEP_HISTORY:
-            self._step_durations = self._step_durations[-self.MAX_STEP_HISTORY:]
+            self._step_durations = self._step_durations[-self.MAX_STEP_HISTORY :]
 
     def record_tool_duration(self, tool_name: str, duration: float) -> None:
         """Record a tool's execution duration.
@@ -49,7 +48,7 @@ class PerformanceMetrics:
             self._tool_execution_times[tool_name] = []
         self._tool_execution_times[tool_name].append(duration)
         if len(self._tool_execution_times[tool_name]) > self.MAX_TOOL_HISTORY:
-            self._tool_execution_times[tool_name] = self._tool_execution_times[tool_name][-self.MAX_TOOL_HISTORY:]
+            self._tool_execution_times[tool_name] = self._tool_execution_times[tool_name][-self.MAX_TOOL_HISTORY :]
 
     def record_api_latency(self, latency: float) -> None:
         """Record API call latency.
@@ -59,7 +58,7 @@ class PerformanceMetrics:
         """
         self._api_latencies.append(latency)
 
-    def get_metrics(self) -> dict:
+    def get_metrics(self) -> dict[str, Any]:
         """Get performance metrics for the current session.
 
         Returns:
