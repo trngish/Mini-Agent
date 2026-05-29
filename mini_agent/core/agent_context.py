@@ -23,11 +23,14 @@ class AgentContext:
     This class provides:
     - Unified state management (messages, token counts, mode, etc.)
     - Dependency injection for components that need context access
-    - Thread-safe state updates via properties
+    - Thread-safe state updates via properties (using pydantic Message model)
     - Clear interface contracts for all state access
 
     All components receive a reference to AgentContext instead of Agent,
     breaking circular dependencies.
+
+    Note: The Message model uses Pydantic BaseModel for serialization
+    and validation, providing model_dump() and model_validate() methods.
     """
 
     # Core state
