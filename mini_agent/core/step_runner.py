@@ -20,11 +20,15 @@ if TYPE_CHECKING:
 class StepRunner:
     """Manages a single step in the agent execution loop.
 
+    NOTE: This class holds a reference to Agent for convenience, but should
+    interact primarily through well-defined interfaces to maintain
+    testability and reduce coupling.
+
     Responsibilities:
     - Process LLM response (add assistant message, log)
     - Health check (throttled)
     - Thinking content pruning
-    - Tool execution delegation
+    - Tool execution delegation (via Agent)
     - Auto-save management
     - Step timing and metrics
     """

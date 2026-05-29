@@ -549,3 +549,53 @@ class TestPrintStepTiming:
         mock_perf.side_effect = [110.0, 115.0]
         runner.print_step_timing(step=0, step_start_time=100.0)
         assert mock_perf.call_count == 2
+
+
+class TestStepRunnerInterface:
+    """Test StepRunner interface for proper decoupling."""
+
+    def test_step_runner_uses_delegate_interface(self):
+        """Verify StepRunner can work with delegate interface."""
+        from mini_agent.core.step_runner import StepRunner
+        from unittest.mock import MagicMock
+
+        # Create mock delegate
+        mock_agent = MagicMock()
+        mock_agent._context = create_mock_context()
+        mock_agent._context.api_call_count = 0
+        mock_agent._context.api_total_tokens = 0
+        mock_agent.logger = MagicMock()
+        mock_agent._thinking_manager = None
+        mock_agent._session_manager = MagicMock()
+        mock_agent._last_health_check_step = -1
+        mock_agent._health_check_interval = 5
+        mock_agent._check_health = MagicMock(return_value=[])
+        mock_agent._token_tracker = MagicMock()
+
+        # StepRunner should work with the mock
+        runner = StepRunner(mock_agent, 0.0)
+        assert runner._agent is mock_agent
+
+    def test_step_runner_accepts_any_object_with_required_interface(self):
+        """Verify StepRunner works with any object following the delegate interface."""
+        from mini_agent.core.step_runner import StepRunner
+        from unittest.mock import MagicMock
+
+        # Create an object that has the minimal required interface
+        minimal_delegate = MagicMock()
+        minimal_delegate._context = create_mock_context()
+        minimal_delegate.logger = MagicMock()
+        minimal_delegate._thinking_manager = None
+        minimal_delegate._session_manager = MagicMock()
+        minimal_delegate._last_health_check_step = 0
+        minimal_delegate._health_check_interval = 5
+        minimal_delegate._check_health = MagicMock(return_value=[])
+        minimal_delegate._token_tracker = MagicMock()
+
+        # Should be able to create StepRunner without error
+        runner = StepRunner(minimal_delegate, 0.0)
+
+        # Verify basic operations work
+        mock_response = _make_response(content="test")
+        msg = runner.process_response(mock_response, 1)
+        assert msg.content == "test"
