@@ -377,8 +377,23 @@ class Config(BaseModel):
     def _apply_env_overrides(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Apply environment variable overrides to configuration data.
 
-        Environment variables have the highest priority and will override
-        any values in the YAML configuration file.
+        SECURITY NOTE: Environment variables have the HIGHEST priority and
+        will override any values in the YAML configuration file.
+
+        Supported env vars:
+        - MINIMAX_API_KEY: API key (required, min 8 chars)
+        - MINI_AGENT_API_KEY: Legacy alias for API key
+        - MINI_AGENT_API_BASE: API base URL
+        - MINI_AGENT_MODEL: Model name
+        - MINI_AGENT_PROVIDER: Provider type
+        - MINI_AGENT_MAX_STEPS: Max execution steps
+        - MINI_AGENT_WORKSPACE_DIR: Workspace directory
+        - MINI_AGENT_PLATFORM_MODE: Platform mode (windows/linux/auto)
+
+        For production deployments, it is recommended to:
+        1. Set API_KEY via environment variable only
+        2. Use read-only config files in production
+        3. Validate all overrides through ConfigValidator
 
         Args:
             data: Configuration dictionary from YAML
