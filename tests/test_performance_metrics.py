@@ -186,3 +186,66 @@ class TestPerformanceMetrics:
         """Test MAX_STEP_HISTORY and MAX_TOOL_HISTORY constants."""
         assert PerformanceMetrics.MAX_STEP_HISTORY == 50
         assert PerformanceMetrics.MAX_TOOL_HISTORY == 20
+
+
+class TestToolHitRate:
+    """Test tool hit rate (success rate) tracking."""
+
+    def test_record_tool_result(self, metrics):
+        """Test recording tool success/failure."""
+        metrics.record_tool_result("read_file", success=True)
+        metrics.record_tool_result("read_file", success=True)
+        metrics.record_tool_result("read_file", success=False)
+
+        assert metrics._tool_success_count["read_file"] == 2
+        assert metrics._tool_failure_count["read_file"] == 1
+
+    def test_get_tool_hit_rate(self, metrics):
+        """Test tool hit rate calculation."""
+        metrics.record_tool_result("bash", success=True)
+        metrics.record_tool_result("bash", success=True)
+        metrics.record_tool_result("bash", success=False)
+        metrics.record_tool_result("bash", success=False)
+
+        assert metrics.get_tool_hit_rate("bash") == 0.5
+
+    def test_get_tool_hit_rate_no_data(self, metrics):
+        """Test hit rate for tool with no data."""
+        assert metrics.get_tool_hit_rate("nonexistent_tool") == 0.0
+
+    def test_get_tool_hit_rate_perfect_success(self, metrics):
+        """Test hit rate for tool with all successes."""
+        metrics.record_tool_result("read_file", success=True)
+        metrics.record_tool_result("read_file", success=True)
+        metrics.record_tool_result("read_file", success=True)
+
+        assert metrics.get_tool_hit_rate("read_file") == 1.0
+
+    def test_get_tool_hit_rate_all_failures(self, metrics):
+        """Test hit rate for tool with all failures."""
+        metrics.record_tool_result("bash", success=False)
+        metrics.record_tool_result("bash", success=False)
+
+        assert metrics.get_tool_hit_rate("bash") == 0.0
+
+    def test_get_metrics_includes_hit_rate(self, metrics):
+        """Test that get_metrics includes hit rate in tool stats."""
+        metrics.record_tool_duration("grep", 0.1)
+        metrics.record_tool_result("grep", success=True)
+        metrics.record_tool_result("grep", success=False)
+
+        result = metrics.get_metrics()
+        assert "hit_rate" in result["tool_metrics"]["grep"]
+        assert result["tool_metrics"]["grep"]["hit_rate"] == 0.5
+        assert result["tool_metrics"]["grep"]["successes"] == 1
+        assert result["tool_metrics"]["grep"]["failures"] == 1
+
+    def test_get_metrics_hit_rate_no_results(self, metrics):
+        """Test that tools with no results have 0.0 hit rate."""
+        metrics.record_tool_duration("read_file", 0.1)
+        # Note: no record_tool_result calls for this tool
+
+        result = metrics.get_metrics()
+        assert result["tool_metrics"]["read_file"]["hit_rate"] == 0.0
+        assert result["tool_metrics"]["read_file"]["successes"] == 0
+        assert result["tool_metrics"]["read_file"]["failures"] == 0

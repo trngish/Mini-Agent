@@ -68,24 +68,66 @@ class TokenTracker:
         return self._cached_token_count
 
     def _estimate_tokens_fallback(self, messages: list[Message]) -> int:
-        """Fallback estimation when tiktoken is unavailable."""
-        total_chars = 0
+        """Fallback estimation when tiktoken is unavailable.
+
+        Uses different ratios for different content types:
+        - English: ~4 chars per token (1/4)
+        - Chinese: ~2 chars per token (1/2)
+        - Mixed: weighted average
+        """
+        total_tokens = 0
+
         for msg in messages:
             content = msg.content
             if isinstance(content, str):
-                total_chars += len(content)
+                total_tokens += self._estimate_string_tokens(content)
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict):
-                        total_chars += len(str(block))
+                        total_tokens += self._estimate_string_tokens(str(block))
 
             if msg.thinking:
-                total_chars += len(msg.thinking)
+                total_tokens += self._estimate_string_tokens(msg.thinking)
 
             if msg.tool_calls:
-                total_chars += len(str(msg.tool_calls))
+                total_tokens += self._estimate_string_tokens(str(msg.tool_calls))
 
-        return int(total_chars / 2.5)
+            total_tokens += 4  # Message overhead
+
+        return total_tokens
+
+    def _estimate_string_tokens(self, text: str) -> int:
+        """Estimate tokens for a string, handling mixed languages.
+
+        Args:
+            text: String to estimate
+
+        Returns:
+            Estimated token count
+        """
+        if not text:
+            return 0
+
+        # Detect Chinese characters (CJK Unified Ideographs)
+        chinese_chars = sum(1 for c in text if "一" <= c <= "鿿" or "㐀" <= c <= "䶿")
+        total_chars = len(text)
+
+        if total_chars == 0:
+            return 0
+
+        chinese_ratio = chinese_chars / total_chars
+
+        if chinese_ratio > 0.5:
+            # Mostly Chinese: ~2 chars per token
+            return int(total_chars / 2)
+        elif chinese_ratio > 0.1:
+            # Mixed content: weighted average
+            # English part: ~4 chars/token, Chinese part: ~2 chars/token
+            english_chars = total_chars - chinese_chars
+            return int(english_chars / 4) + int(chinese_chars / 2)
+        else:
+            # Mostly English: ~4 chars per token
+            return int(total_chars / 4)
 
     def invalidate_cache(self) -> None:
         """Reset the token cache after message list changes."""

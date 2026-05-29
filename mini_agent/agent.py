@@ -159,6 +159,11 @@ class Agent:
 
         # Error recovery and metrics are accessed via delegation methods
 
+        # Stream buffering for performance optimization
+        self._stream_buffer_thinking: list[str] = []
+        self._stream_buffer_text: list[str] = []
+        self._buffer_flush_threshold = STREAM_BUFFER_SIZE * 2
+
         # Execution engine
         self._execution_engine = ExecutionEngine(
             tools=self.tools,
@@ -193,6 +198,11 @@ class Agent:
         # Performance: throttle health checks
         self._last_health_check_step = -1
         self._health_check_interval = 5
+
+        # Store last run result for session persistence
+        self._last_result: str | None = None
+        # Store analysis results for session persistence
+        self._last_analysis: str | None = None
 
     def _record_context_internal(self, content: str, category: str = "auto") -> None:
         """Internal method for AgentContext to record context."""
@@ -317,6 +327,9 @@ class Agent:
         self.logger.start_new_run()
         print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
 
+        # Initialize metrics session tracking
+        self._metrics.set_session_id(str(id(self)))
+
         step = 0
         run_start_time = perf_counter()
         step_runner = StepRunner(self, run_start_time)
@@ -326,6 +339,7 @@ class Agent:
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
+                self._last_result = cancel_msg
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
@@ -354,20 +368,42 @@ class Agent:
                 thinking_started = False
                 text_pending: list[str] = []
 
+                def _flush_thinking_buffer() -> None:
+                    """Flush buffered thinking output."""
+                    if self._stream_buffer_thinking:
+                        output = "".join(self._stream_buffer_thinking)
+                        print(f"{Colors.DIM}{output}{Colors.RESET}", end="", flush=True)
+                        self._stream_buffer_thinking = []
+
+                def _flush_text_buffer() -> None:
+                    """Flush buffered text output."""
+                    if self._stream_buffer_text:
+                        output = "".join(self._stream_buffer_text)
+                        print(output, end="", flush=True)
+                        self._stream_buffer_text = []
+
                 def on_thinking(text: str) -> None:
                     nonlocal thinking_started, text_pending  # noqa: B023
                     if not thinking_started:
                         print(f"\n  {Colors.BOLD}{Colors.MAGENTA}🧠 Think{Colors.RESET}")
                         thinking_started = True
-                    print(f"{Colors.DIM}{text}{Colors.RESET}", end="", flush=True)
+                    self._stream_buffer_thinking.append(text)
+                    # Flush buffer when reaching threshold
+                    if len(self._stream_buffer_thinking) >= self._buffer_flush_threshold:
+                        _flush_thinking_buffer()
+                    # Flush pending text when thinking starts
                     while text_pending:  # noqa: B023
                         pending = text_pending.pop(0)  # noqa: B023
-                        print(pending, end="", flush=True)  # noqa: B023
+                        self._stream_buffer_text.append(pending)
+                    if len(self._stream_buffer_text) >= self._buffer_flush_threshold:
+                        _flush_text_buffer()
 
                 def on_text(text: str) -> None:  # noqa: B023
                     nonlocal thinking_started, text_pending  # noqa: B023
                     if thinking_started:  # noqa: B023
-                        print(text, end="", flush=True)
+                        self._stream_buffer_text.append(text)
+                        if len(self._stream_buffer_text) >= self._buffer_flush_threshold:
+                            _flush_text_buffer()
                     else:
                         text_pending.append(text)  # noqa: B023
 
@@ -382,16 +418,16 @@ class Agent:
                 if thinking_started:
                     print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
                     # Flush any text that arrived before thinking
-                    while text_pending:
-                        pending = text_pending.pop(0)
-                        print(pending, end="", flush=True)
+                    _flush_text_buffer()
+                    _flush_thinking_buffer()
                     print()
                 elif text_pending:
                     # No thinking at all - just print assistant header and text
                     print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
                     while text_pending:
                         pending = text_pending.pop(0)
-                        print(pending, end="", flush=True)
+                        self._stream_buffer_text.append(pending)
+                    _flush_text_buffer()
                     print()
 
             except Exception as e:
@@ -406,7 +442,8 @@ class Agent:
 
                 error_msg = format_llm_error(e)
                 print(f"\n{error_msg}")
-                return f"LLM call failed: {llm_error.user_guidance}"
+                self._last_result = f"LLM call failed: {llm_error.user_guidance}"
+                return self._last_result
 
             step_runner.process_response(response, step)
 
@@ -419,8 +456,14 @@ class Agent:
 
             if step_runner.is_complete(response):
                 step_runner.print_completion_summary(step, step_start_time)
-                step_runner.auto_save(step, prefix="completed_step")
-                return response.content
+                self._last_result = response.content
+                self._session_manager.save(
+                    self.messages,
+                    f"completed_step_{step}",
+                    result=self._last_result,
+                    analysis=self._last_analysis,
+                )
+                return self._last_result
 
             assert response.tool_calls is not None
             parallel_enabled = self.is_m27 and self.m27_config.get("enable_parallel_tool_calls", True)
@@ -448,7 +491,8 @@ class Agent:
             for _tool_call, tool_msg in results:
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
-                    return "Task cancelled by user."
+                    self._last_result = "Task cancelled by user."
+                    return self._last_result
                 self._context.add_message(tool_msg)
 
             step_elapsed = perf_counter() - step_start_time
@@ -469,6 +513,7 @@ class Agent:
                 print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
             except Exception as e:
                 print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
+        self._last_result = error_msg
         return error_msg
 
     async def execute_single_tool(self, tool_call: ToolCall) -> tuple[ToolCall, Message]:
@@ -503,16 +548,57 @@ class Agent:
         print(f"{Colors.GREEN}✅ Mode switched: {old_mode.value} → {mode.value}{Colors.RESET}")
 
     def save_session(self, label: str = "") -> str:
-        """Save current session. Returns session ID."""
-        return self._session_manager.save_session(self.messages, label=label)
+        """Save current session including last result and analysis. Returns session ID."""
+        return self._session_manager.save(self.messages, label=label, result=self._last_result)
 
     def load_session(self, session_id: str) -> bool:
-        """Load a saved session. Returns True on success."""
-        messages = self._session_manager.load_session(session_id)
+        """Load a saved session including result and analysis. Returns True on success."""
+        messages, result = self._session_manager.load(session_id)
         if messages is None:
             return False
         self.replace_messages(messages)
+        self._last_result = result  # Restore last result
+        # Restore last analysis from metadata if available
+        self._last_analysis = self._session_manager.load_analysis(session_id)
+        # Sync AgentContext state after session restore
+        self._sync_context_state()
         return True
+
+    def get_last_result(self) -> str | None:
+        """Get the result from the last run."""
+        return self._last_result
+
+    def set_analysis_result(self, analysis: str) -> None:
+        """Set analysis result for session persistence.
+
+        This allows the agent to remember analysis results across sessions.
+        Call this after completing an analysis task.
+        """
+        self._last_analysis = analysis
+
+    def get_analysis_result(self) -> str | None:
+        """Get the last analysis result."""
+        return self._last_analysis
+
+    def _sync_context_state(self) -> None:
+        """Sync AgentContext state after session restore.
+
+        Rebuilds token count and other derived state from messages
+        to ensure consistency after session restore.
+        """
+        # Estimate total tokens from restored messages
+        estimated_tokens = self._context.estimate_tokens()
+        self._context.api_total_tokens = estimated_tokens
+
+        # Reset API call count to match restored messages
+        api_calls = sum(1 for m in self._context.get_messages() if m.role == "assistant")
+        self._context.api_call_count = api_calls
+
+        # Invalidate token tracker cache to force recalculation
+        self._token_tracker.invalidate_cache()
+
+        # Log restored session info
+        self.logger.debug(f"Session restored: {len(self._context.get_messages())} messages, ~{estimated_tokens} tokens")
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions."""

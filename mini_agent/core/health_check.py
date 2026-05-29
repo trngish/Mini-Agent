@@ -41,6 +41,8 @@ class HealthChecker:
     CONSECUTIVE_FAILURE_WARNING = 2
     CONSECUTIVE_FAILURE_CRITICAL = 3
     MIN_MESSAGE_COUNT = 2
+    THINKING_RATIO_WARNING = 0.4  # Thinking > 40% of tokens is suspicious
+    THINKING_RATIO_CRITICAL = 0.6  # Thinking > 60% is critical
 
     def __init__(self, context: "AgentContext"):
         self._context = context
@@ -79,7 +81,45 @@ class HealthChecker:
         if len(messages) < self.MIN_MESSAGE_COUNT:
             issues.append("Message history seems incomplete")
 
+        # Check thinking content ratio
+        thinking_issues = self._check_thinking_ratio(messages)
+        issues.extend(thinking_issues)
+
         return HealthCheckResult(issues)
+
+    def _check_thinking_ratio(self, messages: list[Any]) -> list[str]:
+        """Check if thinking content占比过高.
+
+        Returns:
+            List of issues found
+        """
+        issues = []
+        try:
+            total_tokens = self._context.estimate_tokens()
+            if total_tokens == 0:
+                return issues
+
+            # Calculate thinking tokens
+            thinking_tokens = 0
+            for msg in messages:
+                if hasattr(msg, "thinking") and msg.thinking:
+                    # Rough estimate: ~4 chars per token
+                    thinking_tokens += len(msg.thinking) // 4
+
+            thinking_ratio = thinking_tokens / total_tokens if total_tokens > 0 else 0
+
+            if thinking_ratio > self.THINKING_RATIO_CRITICAL:
+                issues.append(
+                    f"Thinking ratio critical: {thinking_ratio:.0%} ({thinking_tokens:,} / {total_tokens:,} tokens)"
+                )
+            elif thinking_ratio > self.THINKING_RATIO_WARNING:
+                issues.append(
+                    f"Thinking ratio high: {thinking_ratio:.0%} ({thinking_tokens:,} / {total_tokens:,} tokens)"
+                )
+        except Exception:
+            pass
+
+        return issues
 
     def get_status(self) -> dict[str, Any]:
         """Get agent status for diagnostics.

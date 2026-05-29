@@ -62,13 +62,22 @@ class SessionManager:
     def _deserialize_messages(self, data: list[dict[str, Any]]) -> list[Message]:
         return [Message(**msg) for msg in data]
 
-    def _save_to_file(self, messages: list[Message], session_id: str, label: str) -> None:
+    def _save_to_file(
+        self,
+        messages: list[Message],
+        session_id: str,
+        label: str,
+        result: str | None = None,
+        analysis: str | None = None,
+    ) -> None:
         """Internal method to save messages to a session file.
 
         Args:
             messages: List of messages to save
             session_id: Session ID
             label: Session label
+            result: Optional result content from the last run
+            analysis: Optional analysis result from the last run
         """
         timestamp = datetime.now().isoformat()
         data = {
@@ -76,6 +85,8 @@ class SessionManager:
             "label": label,
             "created": timestamp,
             "messages": self._serialize_messages(messages),
+            "result": result,
+            "analysis": analysis,
         }
         path = self.session_dir / f"{session_id}.json"
         atomic_write_json(data, path)
@@ -107,23 +118,57 @@ class SessionManager:
 
         self._save_index(self._index)
 
-    def save(self, messages: list[Message], label: str = "") -> str:
+    def save(
+        self,
+        messages: list[Message],
+        label: str = "",
+        result: str | None = None,
+        analysis: str | None = None,
+    ) -> str:
         """Save messages to a session file. Returns session ID."""
         session_id = str(uuid.uuid4())[:8]
         timestamp = datetime.now().isoformat()
 
-        self._save_to_file(messages, session_id, label)
+        self._save_to_file(messages, session_id, label, result, analysis)
         self._update_index(session_id, label, len(messages), timestamp)
 
         return session_id
 
-    def load(self, session_id: str) -> list[Message] | None:
-        """Load messages from a session file."""
+    def load(self, session_id: str) -> tuple[list[Message] | None, str | None]:
+        """Load messages and result from a session file.
+
+        Returns:
+            Tuple of (messages list, result string). Either may be None if not found.
+        """
+        path = self.session_dir / f"{session_id}.json"
+        data = atomic_read_json(path)
+        if data is None:
+            return None, None
+        messages = self._deserialize_messages(data.get("messages", []))
+        result = data.get("result")
+        return messages, result
+
+    def load_messages(self, session_id: str) -> list[Message] | None:
+        """Load messages only from a session file (backwards compatibility)."""
+        messages, _ = self.load(session_id)
+        return messages
+
+    def load_analysis(self, session_id: str) -> str | None:
+        """Load analysis result from a session file."""
         path = self.session_dir / f"{session_id}.json"
         data = atomic_read_json(path)
         if data is None:
             return None
-        return self._deserialize_messages(data.get("messages", []))
+        return data.get("analysis")
+
+    def save_analysis(self, session_id: str, analysis: str) -> None:
+        """Save analysis result to an existing session file."""
+        path = self.session_dir / f"{session_id}.json"
+        data = atomic_read_json(path)
+        if data is None:
+            return
+        data["analysis"] = analysis
+        atomic_write_json(data, path)
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions using cached index."""
@@ -144,6 +189,7 @@ class SessionManager:
                         "label": entry.get("label", ""),
                         "created": entry.get("created", ""),
                         "messages": entry.get("message_count", 0),
+                        "has_result": False,  # Will be updated below
                     }
                 )
             else:
@@ -152,6 +198,13 @@ class SessionManager:
         if stale_ids:
             self._index = [s for s in self._index if s["id"] not in stale_ids]
             self._save_index(self._index)
+
+        # Update has_result for each session
+        for session in sessions:
+            path = self.session_dir / f"{session['id']}.json"
+            data = atomic_read_json(path)
+            if data is not None and data.get("result"):
+                session["has_result"] = True
 
         return sessions
 
@@ -172,6 +225,15 @@ class SessionManager:
                     }
                 )
         return sessions
+
+    def get_latest_session_id(self) -> str | None:
+        """Get the most recent session ID.
+
+        Returns:
+            Session ID of most recent session, or None if no sessions exist
+        """
+        sessions = self.list_sessions()
+        return sessions[0]["id"] if sessions else None
 
     def delete(self, session_id: str) -> bool:
         """Delete a session file."""

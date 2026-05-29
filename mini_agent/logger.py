@@ -35,6 +35,7 @@ class AgentLogger:
     LOG_DIR: Path = Path.home() / ".mini-agent" / "log"
     # Async write settings
     ASYNC_WRITE_ENABLED: bool = True
+    MAX_WRITE_QUEUE_SIZE: int = 1000  # Max queue size to prevent memory issues
 
     def __init__(self) -> None:
         """Initialize logger with rotation settings."""
@@ -48,10 +49,11 @@ class AgentLogger:
         self.log_index = 0
         self._current_size = 0
         self._rotation_check_done = False
-        # Initialize async write queue for better performance
+        # Initialize async write queue with max size for better performance
         self._write_queue: asyncio.Queue[str] | None = None
         self._writer_task: asyncio.Task[None] | None = None
         self._shutdown_event = False
+        self._max_queue_size = self.MAX_WRITE_QUEUE_SIZE
 
     def _should_rotate(self) -> bool:
         """Check if log rotation is needed."""
@@ -191,6 +193,7 @@ class AgentLogger:
         # Convert messages to JSON serializable format
         for msg in messages:
             msg_dict: dict[str, Any] = {
+                "id": msg.id,
                 "role": msg.role,
                 "content": msg.content,
             }
@@ -202,6 +205,8 @@ class AgentLogger:
                 msg_dict["tool_call_id"] = msg.tool_call_id
             if msg.name:
                 msg_dict["name"] = msg.name
+            if msg.metadata:
+                msg_dict["metadata"] = msg.metadata
 
             request_data["messages"].append(msg_dict)
 
@@ -308,8 +313,12 @@ class AgentLogger:
         entry += content + "\n"
 
         if self.ASYNC_WRITE_ENABLED and self._write_queue is not None:
-            # Queue for async write
-            self._write_queue.put_nowait(entry)
+            # Use put() with timeout to ensure no log loss, fall back to sync write
+            try:
+                self._write_queue.put_nowait(entry)
+            except asyncio.QueueFull:
+                # Queue full - write synchronously instead of losing the entry
+                self._write_log_sync(entry)
         else:
             # Synchronous write
             self._write_log_sync(entry)

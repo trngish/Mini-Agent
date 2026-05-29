@@ -35,14 +35,14 @@ class ThinkingManager:
     3. Replace pruned thinking with compact summary
     """
 
-    # Default: keep max 100K tokens of thinking across all messages
-    DEFAULT_MAX_THINKING_TOKENS = 100_000
+    # Default: keep max 150K tokens of thinking across all messages
+    DEFAULT_MAX_THINKING_TOKENS = 150_000
     # After this, start pruning
-    PRUNE_THRESHOLD_TOKENS = 80_000
+    PRUNE_THRESHOLD_TOKENS = 100_000
     # When pruning, keep top N most recent thinking blocks
-    KEEP_RECENT_BLOCKS = 3
-    # Prune to this percentage of original
-    PRUNE_TO_PERCENT = 0.3
+    KEEP_RECENT_BLOCKS = 5
+    # Prune to this percentage of original (increased from 0.3 to preserve more analysis)
+    PRUNE_TO_PERCENT = 0.5
 
     def __init__(self, max_thinking_tokens: int = DEFAULT_MAX_THINKING_TOKENS):
         """Initialize thinking manager.

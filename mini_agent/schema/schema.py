@@ -41,12 +41,14 @@ class ToolCall(BaseModel):
 class Message(BaseModel):
     """Chat message."""
 
+    id: str | None = None  # 消息唯一标识，便于跨对话引用
     role: str  # "system", "user", "assistant", "tool"
     content: str | list[dict[str, Any]]  # Can be string or list of content blocks
     thinking: str | None = None  # Extended thinking content for assistant messages
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
     name: str | None = None  # For tool role
+    metadata: dict[str, Any] | None = None  # 额外信息，如标记为"建议#1"
 
 
 class TokenUsage(BaseModel):

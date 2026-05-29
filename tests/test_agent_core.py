@@ -285,25 +285,29 @@ class TestSessionManagement:
 
     def test_save_session_delegates_to_session_manager(self, agent):
         agent._session_manager = MagicMock()
-        agent._session_manager.save_session.return_value = "abc123"
+        agent._session_manager.save.return_value = "abc123"
         result = agent.save_session(label="mocked")
         assert result == "abc123"
-        agent._session_manager.save_session.assert_called_once()
+        agent._session_manager.save.assert_called_once()
 
     def test_load_session_delegates_to_session_manager(self, agent):
         agent._session_manager = MagicMock()
-        agent._session_manager.load_session.return_value = [
-            Message(role="system", content="sys"),
-            Message(role="user", content="hi"),
-        ]
+        agent._session_manager.load.return_value = (
+            [
+                Message(role="system", content="sys"),
+                Message(role="user", content="hi"),
+            ],
+            "task result",
+        )
         result = agent.load_session("abc123")
         assert result is True
         assert len(agent.messages) == 2
-        agent._session_manager.load_session.assert_called_once_with("abc123")
+        assert agent.get_last_result() == "task result"
+        agent._session_manager.load.assert_called_once_with("abc123")
 
     def test_load_session_returns_none_from_manager(self, agent):
         agent._session_manager = MagicMock()
-        agent._session_manager.load_session.return_value = None
+        agent._session_manager.load.return_value = (None, None)
         result = agent.load_session("missing")
         assert result is False
 

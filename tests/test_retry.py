@@ -10,6 +10,7 @@ from mini_agent.retry import (
     _get_retryable_exceptions,
     async_retry,
 )
+from mini_agent.core.retry_handler import RetryHandler, TRANSIENT_PATTERNS
 
 
 class TestRetryConfig:
@@ -306,3 +307,94 @@ class TestRetryDecoratorEdgeCases:
         result = await multi_exception_func()
         assert result == "success"
         assert call_count[0] == 3
+
+
+class TestRetryHandler:
+    """Test RetryHandler for tool execution."""
+
+    def test_extended_transient_patterns(self):
+        """Test that extended transient patterns are detected."""
+        handler = RetryHandler(None)
+
+        # Network timeout patterns
+        assert handler.is_transient_error("timeout occurred")
+        assert handler.is_transient_error("timed out waiting for response")
+        assert handler.is_transient_error("timed_out connection")
+
+        # Connection error patterns
+        assert handler.is_transient_error("connection reset by peer")
+        assert handler.is_transient_error("econnrefused")
+        assert handler.is_transient_error("econnaborted")
+
+        # Service status patterns
+        assert handler.is_transient_error("service overloaded")
+        assert handler.is_transient_error("backpressure detected")
+        assert handler.is_transient_error("server busy")
+        assert handler.is_transient_error("degraded performance")
+
+        # Rate limit patterns
+        assert handler.is_transient_error("rate limit exceeded")
+        assert handler.is_transient_error("too many requests")
+        assert handler.is_transient_error("throttled")
+
+        # Retry after patterns
+        assert handler.is_transient_error("retry after 30 seconds")
+        assert handler.is_transient_error("retry_after: 60")
+        assert handler.is_transient_error("please retry in 5 seconds")
+
+        # HTTP status codes
+        assert handler.is_transient_error("429 rate limit")
+        assert handler.is_transient_error("503 service unavailable")
+        assert handler.is_transient_error("502 bad gateway")
+        assert handler.is_transient_error("504 gateway timeout")
+
+    def test_non_transient_errors(self):
+        """Test that non-transient errors are not detected."""
+        handler = RetryHandler(None)
+
+        # Non-transient errors should not trigger retry
+        assert not handler.is_transient_error("file not found")
+        assert not handler.is_transient_error("permission denied")
+        assert not handler.is_transient_error("invalid syntax")
+        assert not handler.is_transient_error("authentication failed")
+
+    def test_get_delay_exponential_backoff(self):
+        """Test exponential backoff delay calculation."""
+        handler = RetryHandler(None, base_delay=0.5)
+
+        assert handler.get_delay(0) == 0.5
+        assert handler.get_delay(1) == 1.0
+        assert handler.get_delay(2) == 2.0
+        assert handler.get_delay(3) == 4.0
+
+    def test_get_max_retries(self):
+        """Test max retries configuration."""
+        handler = RetryHandler(None, max_retries=5)
+        assert handler.get_max_retries() == 5
+
+    def test_should_retry(self):
+        """Test retry decision logic."""
+        handler = RetryHandler(None, max_retries=3)
+
+        # Should retry transient errors
+        assert handler.should_retry("timeout error", attempt=0)
+        assert handler.should_retry("connection reset", attempt=1)
+
+        # Should not retry after max attempts
+        assert not handler.should_retry("timeout error", attempt=3)
+        assert not handler.should_retry("timeout error", attempt=4)
+
+        # Should not retry non-transient errors
+        assert not handler.should_retry("file not found", attempt=0)
+
+    def test_transient_patterns_comprehensive(self):
+        """Test all patterns in TRANSIENT_PATTERNS are detected."""
+        handler = RetryHandler(None)
+
+        # Verify all patterns are detectable
+        for pattern in TRANSIENT_PATTERNS:
+            # Skip patterns that are too generic or might have false positives
+            if pattern in ["retry", "timeout", "connection"]:
+                continue
+            # Test that the pattern itself triggers detection
+            assert handler.is_transient_error(pattern), f"Pattern '{pattern}' should be detected"

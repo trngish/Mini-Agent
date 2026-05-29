@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--platform", type=str, choices=["windows", "linux", "auto"], help="Override platform mode")
     parser.add_argument("--no-skills", action="store_true", help="Disable skills")
     parser.add_argument("--no-mcp", action="store_true", help="Disable MCP")
+    parser.add_argument("--continue", dest="continue_session", action="store_true", help="Continue from last session")
 
     subparsers = parser.add_subparsers(dest="command")
     log_parser = subparsers.add_parser("log", help="View log files")
@@ -56,6 +57,7 @@ async def run_agent(
     workspace_dir: Path,
     task: str | None = None,
     cli_overrides: CLIOverrideConfig | None = None,
+    continue_session: bool = False,
 ) -> None:
     """Main agent initialization and execution."""
     from .agent import Agent
@@ -105,6 +107,17 @@ async def run_agent(
         m27_config=m27_config,
         mode=AgentMode.YOLO,
     )
+
+    # Continue from last session if requested
+    if continue_session:
+        latest_id = agent._session_manager.get_latest_session_id()
+        if latest_id:
+            if agent.load_session(latest_id):
+                print(f"{Colors.GREEN}✅ Resuming session: {latest_id}{Colors.RESET}")
+            else:
+                print(f"{Colors.YELLOW}⚠️  Failed to load session: {latest_id}{Colors.RESET}")
+        else:
+            print(f"{Colors.YELLOW}⚠️  No previous session found{Colors.RESET}")
 
     from .tools.team_dispatch_tool import TeamDispatchTool
 
@@ -165,4 +178,4 @@ def main() -> None:
     )
 
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_agent(workspace_dir, task=args.task, cli_overrides=cli_overrides))
+        asyncio.run(run_agent(workspace_dir, task=args.task, cli_overrides=cli_overrides, continue_session=args.continue_session))

@@ -15,15 +15,46 @@ if TYPE_CHECKING:
 
 # Transient error patterns that warrant retry
 TRANSIENT_PATTERNS = [
+    # 网络超时
     "timeout",
+    "timed out",
+    "timed_out",
+    # 网络连接
     "connection",
+    "econreset",
+    "etimedout",
+    "enotfound",
+    "econnrefused",
+    "econnaborted",
+    # 服务状态
     "temporary",
     "unavailable",
+    "overloaded",
+    "backpressure",
+    "service overloaded",
+    "busy",
+    "degraded",
+    # 速率限制
     "rate limit",
+    "rate_limit",
     "too many requests",
-    "ECONNRESET",
-    "ETIMEDOUT",
-    "ENOTFOUND",
+    "throttl",
+    "quota exceeded",
+    # 可重试标识
+    "retry",
+    "retry after",
+    "retry_after",
+    "please retry",
+    "try again",
+    # HTTP 状态码
+    "429",
+    "503",
+    "502",
+    "504",
+    # 云服务错误
+    "server error",
+    "internal error",
+    "maintenance",
 ]
 
 

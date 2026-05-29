@@ -6,6 +6,7 @@ separating the main execution loop from agent orchestration logic.
 
 import asyncio
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
@@ -147,6 +148,42 @@ class ExecutionEngine:
                 results.extend(batch_results)
         return results
 
+    def _extract_error_retry_after(self, error: str) -> int | None:
+        """Extract retry_after delay from error message.
+
+        Args:
+            error: Error message to parse
+
+        Returns:
+            Delay in seconds if found, None otherwise
+        """
+        patterns = [
+            r"retry[_\s]?after[:\s]*(\d+)",
+            r"retry[_\s]?after[:\s]*(\d+)\s*seconds?",
+            r"wait\s*(\d+)\s*seconds?",
+            r"rate.*limit.*retry.*(\d+)",
+            r"retry\s*in\s*(\d+)\s*seconds?",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, error.lower())
+            if match:
+                return int(match.group(1))
+        return None
+
+    def _is_non_retryable_error(self, error: str | None) -> bool:
+        """Check if error should not be retried.
+
+        Args:
+            error: Error message to check
+
+        Returns:
+            True if error should not be retried
+        """
+        if not error:
+            return True
+        non_retryable = ["rejected", "blocked", "permission denied", "unauthorized", "invalid"]
+        return any(x in error.lower() for x in non_retryable)
+
     async def _execute_single_tool(
         self,
         tool_call: ToolCall,
@@ -220,17 +257,18 @@ class ExecutionEngine:
             tool_start = perf_counter()
 
             max_retries = self._retry_handler.get_max_retries()
+            last_retry_after: int | None = None
             for attempt in range(max_retries):
                 try:
                     tool = self.tools[function_name]
                     result = await tool.execute(**arguments)
-                    if result.success or (
-                        result.error is not None
-                        and ("rejected" in result.error.lower() or "blocked" in result.error.lower())
-                    ):
+                    if result.success or self._is_non_retryable_error(result.error):
                         break
                     if result.error is not None and not self._retry_handler.is_transient_error(result.error):
                         break
+                    # Try to extract retry_after from error message
+                    if result.error and last_retry_after is None:
+                        last_retry_after = self._extract_error_retry_after(result.error)
                 except Exception as e:
                     tool_error = handle_tool_error(function_name, arguments, e)
                     result = ToolResult(
@@ -238,18 +276,25 @@ class ExecutionEngine:
                         content="",
                         error=tool_error.message,
                     )
-                    if "rejected" in str(e).lower() or "blocked" in str(e).lower():
+                    if self._is_non_retryable_error(str(e)):
                         break
                     if not self._retry_handler.is_transient_error(str(e)):
                         break
+                    # Try to extract retry_after from exception
+                    if last_retry_after is None:
+                        last_retry_after = self._extract_error_retry_after(str(e))
 
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(self._retry_handler.get_delay(attempt))
+                    # Prefer retry_after value if available, otherwise use exponential backoff
+                    delay = last_retry_after if last_retry_after else self._retry_handler.get_delay(attempt)
+                    await asyncio.sleep(delay)
+                    last_retry_after = None  # Reset after use
             else:
                 pass
 
             tool_duration = perf_counter() - tool_start
             self._metrics.record_tool_duration(function_name, tool_duration)
+            self._metrics.record_tool_result(function_name, result.success)
 
         self._on_tool_result(function_name, result, arguments)
 

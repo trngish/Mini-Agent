@@ -147,27 +147,68 @@ class ErrorRecoveryManager:
         """
         suggestions = []
 
-        # Check error patterns
+        # Check error patterns and provide specific suggestions
+        top_tools = self.get_top_failing_tools(limit=3)
+        for tool, count in top_tools:
+            if count >= 3:
+                # Provide tool-specific suggestions
+                if tool in ("read_file", "multi_read"):
+                    suggestions.append(
+                        f"'{tool}' failing frequently - check file paths and permissions"
+                    )
+                elif tool in ("edit_file", "multi_edit"):
+                    suggestions.append(
+                        f"'{tool}' failing frequently - verify content format and encoding"
+                    )
+                elif tool in ("bash", "multi_bash"):
+                    suggestions.append(
+                        f"'{tool}' failing frequently - review command syntax and shell availability"
+                    )
+                elif tool == "grep":
+                    suggestions.append(
+                        f"'{tool}' failing frequently - check regex syntax and search paths"
+                    )
+                else:
+                    suggestions.append(
+                        f"'{tool}' has failed {count} times - may need parameter adjustment"
+                    )
+
+        # Check for consecutive failures patterns
         if self._consecutive_failures >= 2:
-            suggestions.append("Consider reviewing recent errors with get_error_patterns()")
+            suggestions.append("Multiple consecutive failures detected - consider /debug for details")
+            if self._consecutive_failures >= 3:
+                suggestions.append("Critical: consecutive failures may indicate systemic issue")
 
         # Check token usage
         try:
             tokens = self._context.estimate_tokens()
-            if tokens > self._context.token_limit * 0.8:
-                suggestions.append("Token usage is high - consider summarizing messages earlier")
+            limit = self._context.token_limit
+            if tokens > limit * 0.9:
+                suggestions.append("Token usage critical - consider summarizing or saving session")
+            elif tokens > limit * 0.8:
+                suggestions.append("Token usage high - plan for summarization soon")
         except Exception:
             pass
 
-        # Check for repeated tool failures
-        for tool, count in self._error_patterns.items():
-            if count >= 3:
-                suggestions.append(f"Tool '{tool}' has failed {count} times - may need investigation")
-
         # Check session age
         steps = len([m for m in self._context.get_messages() if m.role == "user"])
-        if steps > 30 and not suggestions:
-            suggestions.append("Long session detected - consider saving session and starting fresh")
+        if steps > 30:
+            suggestions.append("Long session detected - consider /save and starting fresh")
+        elif steps > 20 and not suggestions:
+            suggestions.append("Extended session - save with /save periodically")
+
+        # Check for specific error patterns in history
+        error_history = self.get_error_history()
+        if len(error_history) >= 5:
+            # Analyze recent errors for patterns
+            recent_contexts = [e.get("context", "") for e in error_history[-5:]]
+            # Check for common patterns
+            if any("permission" in ctx.lower() for ctx in recent_contexts):
+                suggestions.append("Permission errors detected - check file/directory access rights")
+            if any("not found" in ctx.lower() or "no such" in ctx.lower() for ctx in recent_contexts):
+                suggestions.append("Path errors detected - verify file and directory paths")
+            if any("timeout" in ctx.lower() for ctx in recent_contexts):
+                suggestions.append("Timeout errors detected - consider increasing timeout settings")
 
         return suggestions
 
