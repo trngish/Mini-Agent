@@ -5,7 +5,58 @@ Test Skill Loader
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from mini_agent.tools.skill_loader import SkillLoader
+
+
+# =============================================================================
+# Skill Loader Unit Tests
+# =============================================================================
+
+
+class TestSkillLoaderUnit:
+    """Unit tests for Skill loader."""
+
+    def test_skill_loader_initialization(self):
+        """Test Skill loader can be initialized."""
+        loader = SkillLoader()
+        assert loader is not None
+
+    def test_skills_dir_resolution(self):
+        """Test skills directory resolution from config."""
+        from mini_agent.config import ToolsConfig
+
+        tools_config = ToolsConfig()
+        paths = tools_config.get_skills_search_paths()
+        assert isinstance(paths, list)
+        # Should have at least project skills dir
+        assert len(paths) >= 1
+
+    def test_skill_loader_with_empty_workspace(self, tmp_path):
+        """Test skill loader handles missing workspace gracefully."""
+        loader = SkillLoader()
+        # Should not raise, just return empty list
+        skills = loader.discover_skills()
+        assert isinstance(skills, list)
+
+    def test_skill_loader_with_custom_path(self, tmp_path):
+        """Test skill loader works with custom directory."""
+        loader = SkillLoader(str(tmp_path))
+        assert loader.skills_dir == tmp_path
+
+    def test_skill_loader_list_skills_empty(self):
+        """Test list_skills returns empty list when no skills loaded."""
+        loader = SkillLoader()
+        skills = loader.list_skills()
+        assert isinstance(skills, list)
+        assert len(skills) == 0
+
+    def test_skill_loader_get_skill_nonexistent(self):
+        """Test get_skill returns None for nonexistent skill."""
+        loader = SkillLoader()
+        skill = loader.get_skill("nonexistent-skill")
+        assert skill is None
 
 
 def create_test_skill(skill_dir: Path, name: str, description: str, content: str):

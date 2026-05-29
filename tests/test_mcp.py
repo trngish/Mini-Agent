@@ -33,6 +33,63 @@ def mcp_config():
 
 
 # =============================================================================
+# MCP Loader Unit Tests
+# =============================================================================
+
+
+class TestMCPLoaderUnit:
+    """Unit tests for MCP loader."""
+
+    def test_mcp_loader_initialization(self):
+        """Test MCP loader can be imported and has expected exports."""
+        from mini_agent.tools.mcp_loader import (
+            MCPServerConnection,
+            MCPTimeoutConfig,
+            _determine_connection_type,
+            cleanup_mcp_connections,
+            get_mcp_timeout_config,
+            load_mcp_tools_async,
+            set_mcp_timeout_config,
+        )
+
+        # All expected exports should be available
+        assert MCPServerConnection is not None
+        assert MCPTimeoutConfig is not None
+        assert callable(_determine_connection_type)
+        assert callable(cleanup_mcp_connections)
+        assert callable(get_mcp_timeout_config)
+        assert callable(load_mcp_tools_async)
+        assert callable(set_mcp_timeout_config)
+
+    def test_mcp_config_parsing(self):
+        """Test MCP config defaults from config module."""
+        from mini_agent.config import MCPConfig
+
+        config = MCPConfig()
+        assert config.connect_timeout == 10.0
+        assert config.execute_timeout == 60.0
+        assert config.sse_read_timeout == 120.0
+
+    def test_get_mcp_config_paths(self):
+        """Test getting MCP config paths from ToolsConfig."""
+        from mini_agent.config import ToolsConfig
+
+        tools_config = ToolsConfig()
+        paths = tools_config.get_mcp_config_paths()
+        assert isinstance(paths, list)
+
+    def test_tools_config_mcp_section(self):
+        """Test ToolsConfig has MCP section with defaults."""
+        from mini_agent.config import ToolsConfig
+
+        tools_config = ToolsConfig()
+        assert tools_config.enable_mcp is True
+        assert tools_config.mcp_config_path == "mcp.json"
+        assert tools_config.mcp is not None
+        assert tools_config.mcp.connect_timeout == 10.0
+
+
+# =============================================================================
 # Connection Type Detection Tests
 # =============================================================================
 
