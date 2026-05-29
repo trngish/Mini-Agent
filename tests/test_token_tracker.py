@@ -57,7 +57,7 @@ class TestTokenTracker:
             Message(
                 role="assistant",
                 content="Using tool...",
-                tool_calls=[{"name": "bash", "arguments": '{"command": "ls"}'}],
+                tool_calls=[{"id": "call_123", "type": "function", "function": {"name": "bash", "arguments": {"command": "ls"}}}],
             )
         ]
         count = tracker.estimate_tokens(messages)
