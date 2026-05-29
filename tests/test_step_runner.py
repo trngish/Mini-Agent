@@ -551,6 +551,32 @@ class TestPrintStepTiming:
         assert mock_perf.call_count == 2
 
 
+class TestStepRunnerAsync:
+    """Async tests for StepRunner."""
+
+    def test_step_runner_handles_none_thinking_manager(self):
+        """Test StepRunner works without thinking manager."""
+        from mini_agent.core.step_runner import StepRunner
+        from unittest.mock import MagicMock
+
+        mock_agent = MagicMock()
+        mock_agent._context = create_mock_context()
+        mock_agent._context.api_call_count = 0
+        mock_agent._context.api_total_tokens = 0
+        mock_agent.logger = MagicMock()
+        mock_agent._thinking_manager = None  # No thinking manager
+        mock_agent._session_manager = MagicMock()
+        mock_agent._last_health_check_step = -1
+        mock_agent._health_check_interval = 5
+        mock_agent._check_health = MagicMock(return_value=[])
+        mock_agent._token_tracker = MagicMock()
+
+        runner = StepRunner(mock_agent, 0.0)
+        # prune_thinking should handle None gracefully
+        tokens_freed = runner.prune_thinking()
+        assert tokens_freed == 0
+
+
 class TestStepRunnerInterface:
     """Test StepRunner interface for proper decoupling."""
 

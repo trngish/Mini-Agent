@@ -1272,6 +1272,58 @@ class TestOnToolResult:
         )
 
 
+class TestExecutionEngineAsyncEdgeCases:
+    """Async edge case tests for execution engine."""
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_with_exception(self):
+        """Test tool execution handles exceptions gracefully."""
+        from mini_agent.core.execution_engine import ExecutionEngine
+        from mini_agent.tools.base import Tool, ToolResult
+
+        class FailingTool(Tool):
+            @property
+            def name(self):
+                return "failing_tool"
+
+            @property
+            def description(self):
+                return "A tool that fails"
+
+            @property
+            def parameters(self):
+                return {"type": "object", "properties": {}}
+
+            async def execute(self):
+                raise RuntimeError("Intentional failure")
+
+        tools = {"failing_tool": FailingTool()}
+        mock_logger = MagicMock()
+        mock_retry = MagicMock()
+        mock_retry.get_max_retries.return_value = 1
+        mock_retry.is_transient_error.return_value = False
+        mock_metrics = MagicMock()
+        mock_error_recovery = MagicMock()
+
+        engine = ExecutionEngine(
+            tools=tools,
+            logger=mock_logger,
+            retry_handler=mock_retry,
+            metrics=mock_metrics,
+            error_recovery=mock_error_recovery,
+            write_tools=frozenset(),
+        )
+
+        tool_call = ToolCall(
+            id="test-1",
+            type="function",
+            function=FunctionCall(name="failing_tool", arguments={})
+        )
+
+        result = await engine._execute_single_tool(tool_call, AgentMode.YOLO, lambda x: True)
+        assert result[1].content.startswith("Error:")
+
+
 class TestSubAgentSecurityPolicy:
     def test_yolo_policy_default(self):
         from mini_agent.schema import AgentMode
