@@ -13,6 +13,7 @@ from ..schema import Message
 from ..utils import Colors
 
 if TYPE_CHECKING:
+    from .agent_context import AgentContext
     from ..agent import Agent
 
 
@@ -30,6 +31,7 @@ class StepRunner:
 
     def __init__(self, agent: Agent, run_start_time: float):
         self._agent = agent
+        self._context = agent._context
         self._run_start_time = run_start_time
 
     def process_response(self, response: Any, _step: int) -> Message:
@@ -42,15 +44,15 @@ class StepRunner:
         Returns:
             The created assistant Message
         """
-        self._agent.api_call_count += 1
+        self._context.api_call_count += 1
         if response.usage:
-            self._agent.api_total_tokens = response.usage.total_tokens
+            self._context.api_total_tokens = response.usage.total_tokens
 
         tool_count = len(response.tool_calls) if response.tool_calls else 0
         print(
-            f"\n  {Colors.DIM}📊 API Call #{self._agent.api_call_count} | Tools: {tool_count} | "
-            f"Thinking budget: {self._agent.thinking_budget} | "
-            f"Total tokens: {self._agent.api_total_tokens:,}{Colors.RESET}"
+            f"\n  {Colors.DIM}📊 API Call #{self._context.api_call_count} | Tools: {tool_count} | "
+            f"Thinking budget: {self._context.thinking_budget} | "
+            f"Total tokens: {self._context.api_total_tokens:,}{Colors.RESET}"
         )
 
         self._agent.logger.log_response(
@@ -66,7 +68,7 @@ class StepRunner:
             thinking=response.thinking,
             tool_calls=response.tool_calls,
         )
-        self._agent.messages.append(assistant_msg)
+        self._context.add_message(assistant_msg)
         return assistant_msg
 
     def check_health(self, step: int) -> list[str]:
@@ -79,7 +81,7 @@ class StepRunner:
             List of health issues found (empty if check was skipped)
         """
         if (
-            self._agent._error_recovery.consecutive_failures > 0
+            self._context.consecutive_failures > 0
             or step - self._agent._last_health_check_step >= self._agent._health_check_interval
         ):
             issues = self._agent._check_health()
@@ -93,8 +95,9 @@ class StepRunner:
         Returns:
             Number of tokens freed
         """
-        if self._agent._thinking_manager and len(self._agent.messages) > 5:
-            tokens_freed = self._agent._thinking_manager.prune_thinking(self._agent.messages)
+        messages = self._context.get_messages()
+        if self._agent._thinking_manager and len(messages) > 5:
+            tokens_freed = self._agent._thinking_manager.prune_thinking(messages)
             if tokens_freed > 1000:
                 print(
                     f"{Colors.DIM}🧠 Pruned {tokens_freed:,} thinking tokens to prevent context overflow{Colors.RESET}"
@@ -115,7 +118,7 @@ class StepRunner:
             f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s"
             f" (total: {total_elapsed:.2f}s){Colors.RESET}"
         )
-        print(f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self._agent.api_call_count} (per-call billing){Colors.RESET}")
+        print(f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self._context.api_call_count} (per-call billing){Colors.RESET}")
 
     def auto_save(self, step: int, prefix: str = "auto_step") -> None:
         """Auto-save session if enabled and interval reached.
@@ -124,15 +127,15 @@ class StepRunner:
             step: Current step number
             prefix: Save prefix for identification
         """
-        if not self._agent.auto_save:
+        if not self._context.auto_save:
             return
-        if prefix == "auto_step" and step - self._agent._last_auto_save_step < 3:
+        if prefix == "auto_step" and step - self._context.last_auto_save_step < 3:
             return
         try:
-            sid = self._agent._session_manager.save(self._agent.messages, f"{prefix}_{step}")
+            sid = self._agent._session_manager.save(self._context.get_messages(), f"{prefix}_{step}")
             print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
             if prefix == "auto_step":
-                self._agent._last_auto_save_step = step
+                self._context.last_auto_save_step = step
         except Exception as e:
             print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
 

@@ -6,7 +6,7 @@ Provides error tracking, pattern analysis, and actionable suggestions.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agent import Agent
+    from .agent_context import AgentContext
 
 
 class ErrorPattern:
@@ -47,11 +47,21 @@ class ErrorRecoveryManager:
         "skip": {"log_and_continue": True},
     }
 
-    def __init__(self, agent: "Agent"):
-        self._agent = agent
+    def __init__(self, context: "AgentContext"):
+        self._context = context
         self._error_patterns: dict[str, int] = {}
         self._error_history: list[dict[str, Any]] = []
-        self._consecutive_failures = 0
+
+    @property
+    def _consecutive_failures(self) -> int:
+        """Get consecutive failures from AgentContext (single source of truth)."""
+        return self._context.consecutive_failures if self._context else 0
+
+    @_consecutive_failures.setter
+    def _consecutive_failures(self, value: int) -> None:
+        """Set consecutive failures via AgentContext."""
+        if self._context:
+            self._context.consecutive_failures = value
 
     def record_error(self, error: str, context: str) -> None:
         """Record an error for pattern learning.
@@ -77,8 +87,8 @@ class ErrorRecoveryManager:
         if len(self._error_history) > self.MAX_ERROR_HISTORY:
             self._error_history = self._error_history[-self.MAX_ERROR_HISTORY :]
 
-        # Also record via note tool if available
-        self._agent.record_context(content=f"Error with {tool_name}: {error[:150]}", category="error_pattern")
+        # Note: Context recording via record_context_fn removed to break circular dependency
+        # Errors are still tracked in _error_history for pattern analysis
 
     def record_success(self) -> None:
         """Record a successful operation (reset consecutive failures)."""
@@ -143,8 +153,8 @@ class ErrorRecoveryManager:
 
         # Check token usage
         try:
-            tokens = self._agent._estimate_tokens()
-            if tokens > self._agent.token_limit * 0.8:
+            tokens = self._context.estimate_tokens()
+            if tokens > self._context.token_limit * 0.8:
                 suggestions.append("Token usage is high - consider summarizing messages earlier")
         except Exception:
             pass
@@ -155,7 +165,7 @@ class ErrorRecoveryManager:
                 suggestions.append(f"Tool '{tool}' has failed {count} times - may need investigation")
 
         # Check session age
-        steps = len([m for m in self._agent.messages if m.role == "user"])
+        steps = len([m for m in self._context.get_messages() if m.role == "user"])
         if steps > 30 and not suggestions:
             suggestions.append("Long session detected - consider saving session and starting fresh")
 

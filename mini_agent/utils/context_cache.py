@@ -58,31 +58,68 @@ class ContextCache:
     def _estimate_entry_size(self, entry: dict[str, Any]) -> int:
         """Estimate the memory size of a cache entry in bytes."""
         total = 0
-        for _key, value in entry.items():
+        for key, value in entry.items():
+            # Skip internal fields
+            if key.startswith("_"):
+                continue
             if isinstance(value, str):
                 total += len(value.encode("utf-8")) if value else 0
             elif isinstance(value, list):
                 for item in value:
                     if isinstance(item, str):
                         total += len(item.encode("utf-8")) if item else 0
+                    elif isinstance(item, dict):
+                        total += self._estimate_entry_size(item)
+            elif isinstance(value, dict):
+                total += self._estimate_entry_size(value)
         return total
 
     def _evict_if_needed(self, cache_dict: dict[str, Any], max_entries: int) -> None:
         """Evict least recently used entries if cache exceeds limits.
 
+        Evicts by both entry count AND memory usage.
+
         Args:
             cache_dict: The cache dict to evict from
             max_entries: Maximum number of entries allowed
         """
-        if len(cache_dict) <= max_entries:
-            return
+        # Evict by entry count first
+        if len(cache_dict) > max_entries:
+            sorted_entries = sorted(cache_dict.items(), key=lambda x: x[1].get("_last_access", 0))
+            entries_to_remove = len(cache_dict) - max_entries
+            for key, _ in sorted_entries[:entries_to_remove]:
+                removed = cache_dict.pop(key, None)
+                if removed:
+                    self._estimated_memory_bytes -= self._estimate_entry_size(removed)
 
-        # Sort by last access time, evict oldest (LRU)
-        sorted_entries = sorted(cache_dict.items(), key=lambda x: x[1].get("_last_access", 0))
-        # Remove oldest entries to get back under the limit
-        entries_to_remove = len(cache_dict) - max_entries
-        for key, _ in sorted_entries[:entries_to_remove]:
-            cache_dict.pop(key, None)
+        # Evict by memory limit
+        self._evict_by_memory()
+
+    def _evict_by_memory(self) -> None:
+        """Evict entries if memory limit exceeded (global across all caches).
+
+        Uses LRU eviction across all cache types to stay under max_memory_mb.
+        """
+        max_bytes = self._max_memory_mb * 1024 * 1024
+        while self._estimated_memory_bytes > max_bytes:
+            # Find the oldest entry across all caches
+            oldest_key: str | None = None
+            oldest_time = float("inf")
+            oldest_dict: dict[str, Any] | None = None
+
+            for cache_dict in [self._file_cache, self._tree_cache, self._grep_cache]:
+                for key, entry in cache_dict.items():
+                    last_access = entry.get("_last_access", 0)
+                    if last_access < oldest_time:
+                        oldest_time = last_access
+                        oldest_key = key
+                        oldest_dict = cache_dict
+
+            if oldest_key is not None and oldest_dict is not None:
+                removed = oldest_dict.pop(oldest_key)
+                self._estimated_memory_bytes -= self._estimate_entry_size(removed)
+            else:
+                break
 
     def get_file_content(self, path: str | Path) -> str | None:
         """Get cached file content if valid.
@@ -160,7 +197,14 @@ class ContextCache:
                 "_access_count": 0,
                 "ttl": ttl,
             }
+            # Remove old entry if present to update memory tracking
+            old_entry = self._tree_cache.pop(key, None)
+            if old_entry:
+                self._estimated_memory_bytes -= self._estimate_entry_size(old_entry)
+
             self._tree_cache[key] = entry
+            self._estimated_memory_bytes += self._estimate_entry_size(entry)
+
             self._evict_if_needed(self._tree_cache, self._max_tree_entries)
 
     def get_grep_result(self, pattern: str, path: str, file_pattern: str, case_sensitive: bool) -> list[str] | None:
@@ -196,7 +240,14 @@ class ContextCache:
                 "_access_count": 0,
                 "ttl": ttl,
             }
+            # Remove old entry if present to update memory tracking
+            old_entry = self._grep_cache.pop(key, None)
+            if old_entry:
+                self._estimated_memory_bytes -= self._estimate_entry_size(old_entry)
+
             self._grep_cache[key] = entry
+            self._estimated_memory_bytes += self._estimate_entry_size(entry)
+
             self._evict_if_needed(self._grep_cache, self._max_grep_entries)
 
     def _grep_key(self, pattern: str, path: str, file_pattern: str, case_sensitive: bool) -> str:
@@ -381,3 +432,14 @@ def get_context_cache() -> ContextCache:
     if _global_cache is None:
         _global_cache = ContextCache()
     return _global_cache
+
+
+def reset_global_cache() -> None:
+    """Reset the global cache instance.
+
+    Used for process restart or testing to ensure fresh state.
+    """
+    global _global_cache
+    if _global_cache is not None:
+        _global_cache.invalidate_all()
+    _global_cache = None

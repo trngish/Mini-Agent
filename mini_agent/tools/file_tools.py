@@ -101,6 +101,11 @@ def _resolve_and_validate_path(path: str, workspace_dir: Path) -> Path:
     outside the workspace, e.g. system configs), but still normalizes the path
     to eliminate traversal components.
 
+    Security checks:
+    - Validates workspace containment for relative paths
+    - Checks against blacklists for absolute paths
+    - Rejects symlinks to prevent symlink-based attacks
+
     Args:
         path: Raw file path (absolute or relative)
         workspace_dir: The workspace root directory
@@ -110,6 +115,7 @@ def _resolve_and_validate_path(path: str, workspace_dir: Path) -> Path:
 
     Raises:
         ValueError: If a relative path resolves outside the workspace
+                   or if path is a symlink
     """
     file_path = Path(path)
     if not file_path.is_absolute():
@@ -120,9 +126,19 @@ def _resolve_and_validate_path(path: str, workspace_dir: Path) -> Path:
             resolved.relative_to(workspace_resolved)
         except ValueError:
             raise ValueError(f"Path escapes workspace: {resolved} is outside {workspace_resolved}") from None
+
+        # Symlink check for relative paths
+        if resolved.is_symlink():
+            raise ValueError(f"Symlink not allowed: {resolved}")
+
         return resolved
     else:
         resolved = file_path.resolve()
+
+        # Symlink check for absolute paths (before blacklist check)
+        if resolved.is_symlink():
+            raise ValueError(f"Symlink not allowed: {resolved}")
+
         is_blocked, reason = _is_path_blacklisted(resolved)
         if is_blocked:
             raise ValueError(reason)

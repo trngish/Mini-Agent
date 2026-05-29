@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,13 +9,14 @@ from typing import Any
 
 from .schema import Message
 from .utils import Colors
+from .utils.atomic_io import atomic_write_json, atomic_read_json
 
 
 class SessionManager:
     """Manages session persistence (save/resume/list) with index caching.
 
     Maintains an index file for faster session listing without reading
-    all session files.
+    all session files. Uses atomic I/O for crash-safe operations.
     """
 
     INDEX_FILENAME = ".session_index.json"
@@ -36,36 +36,14 @@ class SessionManager:
 
     def _load_index(self) -> list[dict[str, Any]]:
         """Load session index from disk."""
-        index_path = self._get_index_path()
-        if index_path.exists():
-            try:
-                data = json.loads(index_path.read_text(encoding="utf-8"))
-                if isinstance(data, list):
-                    return data
-            except (json.JSONDecodeError, ValueError, KeyError, TypeError):
-                pass
+        data = atomic_read_json(self._get_index_path())
+        if isinstance(data, list):
+            return data
         return []
 
     def _save_index(self, index: list[dict[str, Any]]) -> None:
-        """Save session index to disk atomically.
-
-        Uses write-to-temp-then-rename pattern to ensure atomic updates
-        and prevent index corruption on crashes during write.
-        """
-        index_path = self._get_index_path()
-        temp_path = index_path.with_suffix(".tmp")
-
-        try:
-            # Write to temp file first
-            temp_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
-            # Atomic rename (on POSIX systems)
-            temp_path.rename(index_path)
-        except OSError:
-            # Fallback for Windows or if rename fails - write directly
-            index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
-            # Clean up temp file if it exists
-            if temp_path.exists():
-                temp_path.unlink(missing_ok=True)
+        """Save session index to disk atomically."""
+        atomic_write_json(index, self._get_index_path())
 
     def _ensure_index_loaded(self) -> None:
         """Ensure index is loaded."""
@@ -84,9 +62,14 @@ class SessionManager:
     def _deserialize_messages(self, data: list[dict[str, Any]]) -> list[Message]:
         return [Message(**msg) for msg in data]
 
-    def save(self, messages: list[Message], label: str = "") -> str:
-        """Save messages to a session file. Returns session ID."""
-        session_id = str(uuid.uuid4())[:8]
+    def _save_to_file(self, messages: list[Message], session_id: str, label: str) -> None:
+        """Internal method to save messages to a session file.
+
+        Args:
+            messages: List of messages to save
+            session_id: Session ID
+            label: Session label
+        """
         timestamp = datetime.now().isoformat()
         data = {
             "id": session_id,
@@ -95,29 +78,26 @@ class SessionManager:
             "messages": self._serialize_messages(messages),
         }
         path = self.session_dir / f"{session_id}.json"
+        atomic_write_json(data, path)
 
-        # Atomic write: write to temp file first, then rename
-        temp_path = path.with_suffix(".tmp")
-        try:
-            temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-            temp_path.rename(path)
-        except OSError:
-            # Fallback for Windows or if rename fails
-            path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-            if temp_path.exists():
-                temp_path.unlink(missing_ok=True)
+    def _update_index(self, session_id: str, label: str, message_count: int, timestamp: str) -> None:
+        """Internal method to update session index.
 
-        # Update index
+        Args:
+            session_id: Session ID
+            label: Session label
+            message_count: Number of messages
+            timestamp: Creation timestamp
+        """
         self._ensure_index_loaded()
         if self._index is None:
             self._index = []
 
-        # Add to index
         index_entry = {
             "id": session_id,
             "label": label,
             "created": timestamp,
-            "message_count": len(messages),
+            "message_count": message_count,
         }
         self._index.insert(0, index_entry)
 
@@ -126,22 +106,30 @@ class SessionManager:
             self._index = self._index[: self.MAX_SESSIONS_IN_INDEX]
 
         self._save_index(self._index)
+
+    def save(self, messages: list[Message], label: str = "") -> str:
+        """Save messages to a session file. Returns session ID."""
+        session_id = str(uuid.uuid4())[:8]
+        timestamp = datetime.now().isoformat()
+
+        self._save_to_file(messages, session_id, label)
+        self._update_index(session_id, label, len(messages), timestamp)
+
         return session_id
 
     def load(self, session_id: str) -> list[Message] | None:
         """Load messages from a session file."""
         path = self.session_dir / f"{session_id}.json"
-        if not path.exists():
+        data = atomic_read_json(path)
+        if data is None:
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return self._deserialize_messages(data["messages"])
+        return self._deserialize_messages(data.get("messages", []))
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions using cached index."""
         self._ensure_index_loaded()
 
         if self._index is None or not self._index:
-            # Fall back to scanning directory
             return self._list_sessions_scan()
 
         # Filter to existing sessions and clean stale index entries
@@ -173,8 +161,8 @@ class SessionManager:
         for path in sorted(self.session_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             if path.stem == self.INDEX_FILENAME:
                 continue
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
+            data = atomic_read_json(path)
+            if data is not None:
                 sessions.append(
                     {
                         "id": data.get("id", path.stem),
@@ -183,8 +171,6 @@ class SessionManager:
                         "messages": len(data.get("messages", [])),
                     }
                 )
-            except (json.JSONDecodeError, KeyError):
-                continue
         return sessions
 
     def delete(self, session_id: str) -> bool:
@@ -213,36 +199,11 @@ class SessionManager:
         """Save messages to a session with user feedback. Returns session ID."""
         if session_id is not None:
             timestamp = datetime.now().isoformat()
-            data = {
-                "id": session_id,
-                "label": label,
-                "created": timestamp,
-                "messages": self._serialize_messages(messages),
-            }
-            path = self.session_dir / f"{session_id}.json"
-            temp_path = path.with_suffix(".tmp")
-            try:
-                temp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                temp_path.rename(path)
-            except OSError:
-                path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-                if temp_path.exists():
-                    temp_path.unlink(missing_ok=True)
-            self._ensure_index_loaded()
-            if self._index is None:
-                self._index = []
-            index_entry = {
-                "id": session_id,
-                "label": label,
-                "created": timestamp,
-                "message_count": len(messages),
-            }
-            self._index.insert(0, index_entry)
-            if len(self._index) > self.MAX_SESSIONS_IN_INDEX:
-                self._index = self._index[: self.MAX_SESSIONS_IN_INDEX]
-            self._save_index(self._index)
+            self._save_to_file(messages, session_id, label)
+            self._update_index(session_id, label, len(messages), timestamp)
             print(f"{Colors.GREEN}✅ Session saved: {session_id}{Colors.RESET}")
             return session_id
+
         sid = self.save(messages, label)
         print(f"{Colors.GREEN}✅ Session saved: {sid}{Colors.RESET}")
         return sid

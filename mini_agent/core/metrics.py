@@ -6,7 +6,7 @@ Provides detailed timing metrics for steps, tools, and API calls.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agent import Agent
+    from .agent_context import AgentContext
 
 
 class PerformanceMetrics:
@@ -21,8 +21,8 @@ class PerformanceMetrics:
     MAX_STEP_HISTORY = 50
     MAX_TOOL_HISTORY = 20
 
-    def __init__(self, agent: "Agent"):
-        self._agent = agent
+    def __init__(self, context: "AgentContext"):
+        self._context = context
         self._step_durations: list[float] = []
         self._tool_execution_times: dict[str, list[float]] = {}
         self._api_latencies: list[float] = []
@@ -99,7 +99,7 @@ class PerformanceMetrics:
             "step_metrics": step_stats,
             "tool_metrics": tool_stats,
             "api_metrics": api_stats,
-            "api_call_count": self._agent.api_call_count,
+            "api_call_count": self._context.api_call_count,
         }
 
     @property

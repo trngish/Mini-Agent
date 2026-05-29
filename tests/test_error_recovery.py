@@ -1,40 +1,50 @@
 """Tests for ErrorRecoveryManager."""
 
 import pytest
+from pathlib import Path
 
 from mini_agent.core.error_recovery import ErrorPattern, ErrorRecoveryManager
+from mini_agent.core.agent_context import AgentContext
+from mini_agent.schema import AgentMode, Message
 
 
-class MockAgent:
-    """Mock agent for testing."""
+class MockTokenTracker:
+    """Mock token tracker for testing."""
 
-    def __init__(self):
-        self.messages = []
-        self.token_limit = 100000
-        self.thinking_budget = 16384
-        self.mode = type("Mode", (), {"value": "YOLO"})()
-        self._error_patterns = {}
-        self._error_history = []
-        self._consecutive_failures = 0
-        self.api_call_count = 0
-        self.auto_save = True
-        self._last_auto_save_step = 0
+    def __init__(self, estimated_tokens=50000):
+        self._estimated_tokens = estimated_tokens
 
-    def _estimate_tokens(self):
-        return 50000
+    def estimate_tokens(self, messages):
+        return self._estimated_tokens
 
-    def record_context(self, content, category="auto"):
-        pass
+
+def create_mock_context(token_limit=100000, messages=None, estimated_tokens=50000):
+    """Create a mock AgentContext for testing."""
+    if messages is None:
+        messages = [Message(role="user", content="test")]
+    return AgentContext(
+        messages=messages,
+        mode=AgentMode.YOLO,
+        max_steps=50,
+        workspace_dir=Path("."),
+        token_limit=token_limit,
+        api_call_count=0,
+        api_total_tokens=0,
+        is_m27=False,
+        thinking_budget=16384,
+        auto_save=True,
+        token_tracker=MockTokenTracker(estimated_tokens),
+    )
 
 
 @pytest.fixture
-def mock_agent():
-    return MockAgent()
+def mock_context():
+    return create_mock_context()
 
 
 @pytest.fixture
-def error_recovery(mock_agent):
-    return ErrorRecoveryManager(mock_agent)
+def error_recovery(mock_context):
+    return ErrorRecoveryManager(mock_context)
 
 
 class TestErrorRecoveryManager:
@@ -135,7 +145,7 @@ class TestErrorRecoveryManager:
         top = error_recovery.get_top_failing_tools(limit=2)
         assert len(top) == 2
 
-    def test_get_suggestions_when_failures_high(self, error_recovery, mock_agent):
+    def test_get_suggestions_when_failures_high(self, error_recovery):
         """Test suggestions generated when consecutive failures are high."""
         error_recovery.record_failure()
         error_recovery.record_failure()
@@ -143,16 +153,14 @@ class TestErrorRecoveryManager:
         suggestions = error_recovery.get_suggestions()
         assert any("review" in s.lower() for s in suggestions)
 
-    def test_get_suggestions_token_high(self, error_recovery, mock_agent):
+    def test_get_suggestions_token_high(self, error_recovery):
         """Test suggestion when token usage is high."""
-        # mock_agent._estimate_tokens returns 50000, token_limit is 100000
-        # 50000 > 100000 * 0.8 = 80000 is False, so no suggestion
-        suggestions = error_recovery.get_suggestions()
-        assert not any("token" in s.lower() for s in suggestions)
+        # Create context with lower token limit to trigger warning
+        # estimated_tokens=50000, token_limit=50000 -> 50000 > 50000*0.8 = 40000 is True
+        context = create_mock_context(token_limit=50000, estimated_tokens=50000)
+        recovery = ErrorRecoveryManager(context)
 
-        # Now set token_limit lower to trigger warning
-        mock_agent.token_limit = 50000
-        suggestions = error_recovery.get_suggestions()
+        suggestions = recovery.get_suggestions()
         assert any("token" in s.lower() for s in suggestions)
 
     def test_get_suggestions_tool_failures(self, error_recovery):
@@ -163,13 +171,14 @@ class TestErrorRecoveryManager:
         suggestions = error_recovery.get_suggestions()
         assert any("failing_tool" in s for s in suggestions)
 
-    def test_get_suggestions_long_session(self, error_recovery, mock_agent):
+    def test_get_suggestions_long_session(self, error_recovery):
         """Test suggestion for long sessions."""
-        # Add 31 user messages
-        for _ in range(31):
-            mock_agent.messages.append(type("Message", (), {"role": "user"})())
+        # Create context with 31 user messages
+        messages = [Message(role="user", content=f"test {i}") for i in range(31)]
+        context = create_mock_context(messages=messages)
+        recovery = ErrorRecoveryManager(context)
 
-        suggestions = error_recovery.get_suggestions()
+        suggestions = recovery.get_suggestions()
         assert any("Long session" in s for s in suggestions)
 
     def test_get_recovery_strategy(self, error_recovery):

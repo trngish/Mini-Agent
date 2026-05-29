@@ -12,6 +12,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from .core.agent_context import AgentContext
 from .core.approval import ApprovalManager
 from .core.error_recovery import ErrorRecoveryManager
 from .core.execution_engine import ExecutionEngine
@@ -46,8 +47,6 @@ DEFAULT_ENCODING_NAME = "cl100k_base"
 class Agent:
     """Single agent with basic tools and MCP support."""
 
-    # Will be removed in future versions - use _token_tracker instead
-
     def __init__(
         self,
         llm_client: LLMClient,
@@ -59,6 +58,7 @@ class Agent:
         m27_config: dict[str, Any] | None = None,
         mode: AgentMode = AgentMode.YOLO,
     ):
+        # Store mode first as it's used in context creation
         self.mode = mode
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -67,7 +67,6 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         self.cancel_event: asyncio.Event | None = None
         self._session_manager = SessionManager(workspace_dir=self.workspace_dir)
-        # Make write tools configurable at instance level
         self.write_tools = WRITE_TOOLS
 
         # M2.7 specific configuration
@@ -80,29 +79,20 @@ class Agent:
             model_name, self.m27_config.get("token_limit") if self.is_m27 else token_limit
         )
 
-        # M2.7 supports up to 32K output tokens, store for reference
+        # M2.7 supports up to 32K output tokens
         self.max_output_tokens = self.m27_config.get("max_output_tokens", 16384) if self.is_m27 else 8192
 
-        # Optimization: adaptive thinking budget
-        # Max budget from config, actual budget is dynamically adjusted per task
+        # Max budget from config
         self._max_thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384) if self.is_m27 else 0
-        self.thinking_budget = self._max_thinking_budget  # Start with max, will be adjusted per task
-
-        # Use core module for thinking budget management
-        self._thinking_budget_manager = ThinkingBudgetManager(self)
-        self._thinking_budget_manager.configure(self._max_thinking_budget, self.is_m27)
-
-        # Optimization: track consecutive tool failures via ErrorRecoveryManager
+        self.thinking_budget = self._max_thinking_budget
 
         # Optimization: batch size for parallel tool execution
-        # More tools per call = fewer API calls
-        # M2.7 supports 20+ parallel tool calls with 97% following rate
         self._max_tools_per_call = self.m27_config.get("max_concurrent_tools", 20) if self.is_m27 else 3
 
         # Ensure workspace exists
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        # Inject workspace information into system prompt if not already present
+        # Inject workspace information into system prompt
         if "Current Workspace" not in system_prompt:
             workspace_info = (
                 f"\n\n## Current Workspace\n"
@@ -130,20 +120,57 @@ class Agent:
         }
         self.system_prompt += mode_instructions.get(self.mode, "")
 
-        # Initialize message history
-        self.messages: list[Message] = [Message(role="system", content=system_prompt)]
-
         # Initialize logger
         self.logger = AgentLogger()
 
-        # API call tracking
-        self.api_call_count: int = 0
-        # Token usage from last API response (updated after each LLM call)
-        self.api_total_tokens: int = 0
         # Token tracker with incremental estimation
         self._token_tracker = TokenTracker()
 
-        # Optimization: Context cache for reducing redundant file reads/searches
+        # Auto-save session after each step
+        self.auto_save = os.environ.get("MINI_AGENT_AUTO_SAVE", "true").lower() == "true"
+
+        # Create AgentContext FIRST - this is the single source of truth for state
+        # All core modules receive a reference to context instead of Agent (breaks circular deps)
+        self._context = AgentContext(
+            messages=[Message(role="system", content=self.system_prompt)],
+            mode=self.mode,
+            max_steps=self.max_steps,
+            workspace_dir=self.workspace_dir,
+            token_limit=self.token_limit,
+            api_call_count=0,
+            api_total_tokens=0,
+            is_m27=self.is_m27,
+            thinking_budget=self._max_thinking_budget,
+            llm=self.llm,
+            auto_save=self.auto_save,
+            token_tracker=self._token_tracker,
+        )
+
+        # Now initialize core modules with AgentContext (no circular dependency)
+        self._thinking_budget_manager = ThinkingBudgetManager(self._context)
+        self._thinking_budget_manager.configure(self._max_thinking_budget, self.is_m27)
+
+        self._error_recovery = ErrorRecoveryManager(self._context)
+        self._metrics = PerformanceMetrics(self._context)
+        self._retry_handler = create_retry_handler(self)
+        self._approval_manager = ApprovalManager(mode=mode, write_tools=self.write_tools)
+        self._health_checker = HealthChecker(self._context)
+        self._rate_limiter = RateLimiter()
+
+        # Error recovery and metrics are accessed via delegation methods
+
+        # Execution engine
+        self._execution_engine = ExecutionEngine(
+            tools=self.tools,
+            logger=self.logger,
+            retry_handler=self._retry_handler,
+            metrics=self._metrics,
+            error_recovery=self._error_recovery,
+            write_tools=self.write_tools,
+            rate_limiter=self._rate_limiter,
+        )
+
+        # Context cache for reducing redundant file reads/searches
         self._context_cache = get_context_cache()
 
         # Warmup cache with frequently accessed files
@@ -155,58 +182,62 @@ class Agent:
             except Exception as e:
                 logger.debug("Cache warmup failed: %s", e)
 
-        # Optimization: Adaptive summary manager with quality awareness
+        # MessageManager for summarization
         self._message_manager = MessageManager(self.token_limit)
 
-        # Optimization: Thinking manager to prevent context overflow from truncated thinking
-        # Only enable for M2.7 which uses extended thinking heavily
+        # Thinking manager to prevent context overflow from truncated thinking
         self._thinking_manager: ThinkingManager | None = None
         if self.is_m27:
             self._thinking_manager = ThinkingManager(max_thinking_tokens=80_000)
 
-        # Auto-save session after each step to prevent losing progress on crashes
-        self.auto_save = os.environ.get("MINI_AGENT_AUTO_SAVE", "true").lower() == "true"
-        self._last_auto_save_step = 0
-
-        # Use core modules for error recovery and metrics
-        self._error_recovery = ErrorRecoveryManager(self)
-        self._metrics = PerformanceMetrics(self)
-        self._retry_handler = create_retry_handler(self)
-        self._approval_manager = ApprovalManager(mode=mode, write_tools=self.write_tools)
-        self._health_checker = HealthChecker(self)
-        self._rate_limiter = RateLimiter()
-
-        # Proxy to core modules for backward compatibility
-        self._error_patterns = self._error_recovery.get_error_patterns()
-        self._error_history = self._error_recovery.get_error_history()
-
-        self._execution_engine = ExecutionEngine(
-            tools=self.tools,
-            logger=self.logger,
-            retry_handler=self._retry_handler,
-            metrics=self._metrics,
-            error_recovery=self._error_recovery,
-            write_tools=self.write_tools,
-            rate_limiter=self._rate_limiter,
-        )
-
-        # Performance: pre-compute step header template
-        self._step_header_template = (
-            f"\n  {Colors.DIM}╭{{}}\n"
-            f"  {Colors.DIM}│{{}} {{}}  Step {{}}/{{}}{{}}{Colors.DIM}│{{}}\n"
-            f"  {Colors.DIM}╰{{}}{Colors.RESET}"
-        )
-        # Performance: throttle health checks and token estimates
+        # Performance: throttle health checks
         self._last_health_check_step = -1
         self._health_check_interval = 5
-        self._last_token_estimate_step = -1
-        self._cached_estimate_for_step = 0
+
+    def _record_context_internal(self, content: str, category: str = "auto") -> None:
+        """Internal method for AgentContext to record context."""
+        self.record_context(content, category)
 
     def add_user_message(self, content: str) -> None:
         """Add a user message to history."""
-        self.messages.append(Message(role="user", content=content))
+        self._context.add_message(Message(role="user", content=content))
         # Adaptively adjust thinking budget based on task complexity
         self._thinking_budget_manager.adjust(content)
+
+    @property
+    def messages(self) -> list[Message]:
+        """Get message history via AgentContext."""
+        return self._context.get_messages()
+
+    def append_message(self, message: Message) -> None:
+        """Append a message to history via AgentContext."""
+        self._context.add_message(message)
+
+    def replace_messages(self, messages: list[Message]) -> None:
+        """Replace entire message history via AgentContext."""
+        self._context.set_messages(messages)
+
+    # Backward compatibility properties for api_call_count
+    @property
+    def api_call_count(self) -> int:
+        """Get API call count via AgentContext."""
+        return self._context.api_call_count
+
+    @api_call_count.setter
+    def api_call_count(self, value: int) -> None:
+        """Set API call count via AgentContext."""
+        self._context.api_call_count = value
+
+    # Backward compatibility properties for api_total_tokens
+    @property
+    def api_total_tokens(self) -> int:
+        """Get API total tokens via AgentContext."""
+        return self._context.api_total_tokens
+
+    @api_total_tokens.setter
+    def api_total_tokens(self, value: int) -> None:
+        """Set API total tokens via AgentContext."""
+        self._context.api_total_tokens = value
 
     def record_context(self, content: str, category: str = "auto") -> None:
         """Automatically record important context without needing explicit tool call.
@@ -257,20 +288,14 @@ class Agent:
         # Remove the last assistant message and all tool results after it
         removed_count = len(self.messages) - last_assistant_idx
         if removed_count > 0:
-            self.messages = self.messages[:last_assistant_idx]
+            self.replace_messages(self.messages[:last_assistant_idx])
             print(f"{Colors.DIM}   Cleaned up {removed_count} incomplete message(s){Colors.RESET}")
-
-    def _estimate_tokens(self) -> int:
-        """Accurately calculate token count for message history.
-        Delegates to TokenTracker for incremental estimation.
-        """
-        return self._token_tracker.estimate_tokens(self.messages)
 
     async def _summarize_messages(self) -> None:
         """Message history summarization: delegate to MessageManager."""
         new_messages = await self._message_manager.summarize_messages(self.messages, self.api_total_tokens, logger)
         if new_messages is not self.messages:
-            self.messages = new_messages
+            self.replace_messages(new_messages)
             self._token_tracker.invalidate_cache()
 
     async def run(self, cancel_event: asyncio.Event | None = None) -> str:
@@ -417,14 +442,14 @@ class Agent:
                     thinking=response.thinking,
                     tool_calls=optimized_calls,
                 )
-                self.messages[-1] = assistant_msg
+                self._context.replace_last_message(assistant_msg)
 
             # Append tool messages and handle cancellation
             for _tool_call, tool_msg in results:
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
                     return "Task cancelled by user."
-                self.messages.append(tool_msg)
+                self._context.add_message(tool_msg)
 
             step_elapsed = perf_counter() - step_start_time
             self._metrics.record_step_duration(step_elapsed)
@@ -473,6 +498,7 @@ class Agent:
         """Switch agent mode."""
         old_mode = self.mode
         self.mode = mode
+        self._context.mode = mode  # Sync to context for health check visibility
         self._approval_manager.mode = mode
         print(f"{Colors.GREEN}✅ Mode switched: {old_mode.value} → {mode.value}{Colors.RESET}")
 
@@ -485,7 +511,7 @@ class Agent:
         messages = self._session_manager.load_session(session_id)
         if messages is None:
             return False
-        self.messages = messages
+        self.replace_messages(messages)
         return True
 
     def list_sessions(self) -> list[dict[str, Any]]:

@@ -1,6 +1,10 @@
 """Tests for HealthChecker."""
 
+from pathlib import Path
+
 from mini_agent.core.health_check import HealthChecker, HealthCheckResult
+from mini_agent.core.agent_context import AgentContext
+from mini_agent.schema import AgentMode
 
 
 class MockMessage:
@@ -10,34 +14,32 @@ class MockMessage:
         self.role = role
 
 
-class MockAgent:
-    """Mock agent for testing."""
+class MockTokenTracker:
+    """Mock token tracker for testing."""
 
-    def __init__(self, token_limit=100000, messages_count=5):
-        self.token_limit = token_limit
-        self._messages = [MockMessage("user")] * messages_count
-        self.api_call_count = 0
-        self.auto_save = True
-        self._last_auto_save_step = 0
-        self.thinking_budget = 16384
-        self.mode = type("Mode", (), {"value": "YOLO"})()
-        self._consecutive_failures = 0
-        self._estimated_tokens_value = 50000
+    def __init__(self, estimated_tokens=50000):
+        self._estimated_tokens = estimated_tokens
 
-    def _estimate_tokens(self):
-        return self._estimated_tokens_value
+    def estimate_tokens(self, messages):
+        return self._estimated_tokens
 
-    @property
-    def messages(self):
-        return self._messages
 
-    @property
-    def _error_recovery(self):
-        return self
-
-    @property
-    def consecutive_failures(self):
-        return self._consecutive_failures
+def create_mock_context(token_limit=100000, messages_count=5, estimated_tokens=50000, consecutive_failures=0):
+    """Create a mock AgentContext for testing."""
+    messages = [MockMessage("user")] * max(1, messages_count)
+    return AgentContext(
+        messages=messages,
+        mode=AgentMode.YOLO,
+        max_steps=50,
+        workspace_dir=Path("."),
+        token_limit=token_limit,
+        api_call_count=0,
+        api_total_tokens=0,
+        is_m27=False,
+        thinking_budget=16384,
+        auto_save=True,
+        token_tracker=MockTokenTracker(estimated_tokens),
+    )
 
 
 class TestHealthCheckResult:
@@ -71,7 +73,7 @@ class TestHealthCheckResult:
     def test_empty_issues(self):
         """Test HealthCheckResult with empty issues list."""
         result = HealthCheckResult([])
-        assert result.issues == []
+        result.issues == []
         assert result.has_critical_issues is False
         assert result.has_warnings is False
 
@@ -81,10 +83,9 @@ class TestHealthChecker:
 
     def test_check_token_warning(self):
         """Test health check detects token usage warning."""
-        agent = MockAgent(token_limit=100000)
-        agent._estimated_tokens_value = 85000  # 85% of limit
+        context = create_mock_context(token_limit=100000, estimated_tokens=85000)  # 85% of limit
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         assert result.has_warnings is True
@@ -92,10 +93,9 @@ class TestHealthChecker:
 
     def test_check_token_critical(self):
         """Test health check detects token usage critical."""
-        agent = MockAgent(token_limit=100000)
-        agent._estimated_tokens_value = 95000  # 95% of limit
+        context = create_mock_context(token_limit=100000, estimated_tokens=95000)  # 95% of limit
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         assert result.has_critical_issues is True
@@ -103,20 +103,19 @@ class TestHealthChecker:
 
     def test_check_token_ok(self):
         """Test health check passes when token usage is ok."""
-        agent = MockAgent(token_limit=100000)
-        agent._estimated_tokens_value = 50000  # 50% of limit
+        context = create_mock_context(token_limit=100000, estimated_tokens=50000)  # 50% of limit
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         assert result.has_warnings is False
 
     def test_check_consecutive_failures_warning(self):
         """Test health check detects consecutive failures warning."""
-        agent = MockAgent()
-        agent._consecutive_failures = 2
+        context = create_mock_context(consecutive_failures=2)
+        context._consecutive_failures = 2
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         assert result.has_warnings is True
@@ -124,10 +123,10 @@ class TestHealthChecker:
 
     def test_check_consecutive_failures_critical(self):
         """Test health check detects critical consecutive failures."""
-        agent = MockAgent()
-        agent._consecutive_failures = 3
+        context = create_mock_context(consecutive_failures=3)
+        context._consecutive_failures = 3
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         # Should detect consecutive failures issue
@@ -136,20 +135,19 @@ class TestHealthChecker:
 
     def test_check_message_consistency(self):
         """Test health check detects incomplete message history."""
-        agent = MockAgent(messages_count=1)  # Less than MIN_MESSAGE_COUNT
+        context = create_mock_context(messages_count=1)  # Less than MIN_MESSAGE_COUNT
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         assert any("incomplete" in issue.lower() or "message" in issue.lower() for issue in result.issues)
 
     def test_check_no_issues(self):
         """Test health check passes when no issues."""
-        agent = MockAgent()
-        agent._estimated_tokens_value = 50000
-        agent._consecutive_failures = 0
+        context = create_mock_context(estimated_tokens=50000, consecutive_failures=0)
+        context._consecutive_failures = 0
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         assert result.has_warnings is False
@@ -157,11 +155,10 @@ class TestHealthChecker:
 
     def test_get_status(self):
         """Test get_status returns correct structure."""
-        agent = MockAgent()
-        agent._estimated_tokens_value = 50000
-        agent._consecutive_failures = 2
+        context = create_mock_context(estimated_tokens=50000, consecutive_failures=2)
+        context._consecutive_failures = 2
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         status = checker.get_status()
 
         assert "token_usage" in status
@@ -176,11 +173,10 @@ class TestHealthChecker:
 
     def test_get_status_report(self):
         """Test get_status_report generates human readable output."""
-        agent = MockAgent()
-        agent._estimated_tokens_value = 50000
-        agent._consecutive_failures = 0
+        context = create_mock_context(estimated_tokens=50000, consecutive_failures=0)
+        context._consecutive_failures = 0
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         report = checker.get_status_report()
 
         assert "Status Report" in report
@@ -197,14 +193,15 @@ class TestHealthChecker:
 
     def test_check_handles_token_estimation_error(self):
         """Test health check handles token estimation errors gracefully."""
-        agent = MockAgent()
+        context = create_mock_context()
 
-        def raising_estimate():
-            raise Exception("Token estimation failed")
+        class RaisingTokenTracker:
+            def estimate_tokens(self, messages):
+                raise Exception("Token estimation failed")
 
-        agent._estimate_tokens = raising_estimate
+        context.token_tracker = RaisingTokenTracker()
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         # Should not raise, just continue without token warnings
@@ -212,12 +209,10 @@ class TestHealthChecker:
 
     def test_multiple_issues_detected(self):
         """Test that multiple issues are detected and accumulated."""
-        agent = MockAgent()
-        agent._estimated_tokens_value = 95000  # Critical token
-        agent._consecutive_failures = 3  # Critical failures
-        agent._messages = [MockMessage("user")]  # Incomplete messages
+        context = create_mock_context(estimated_tokens=95000, messages_count=1, consecutive_failures=3)
+        context._consecutive_failures = 3
 
-        checker = HealthChecker(agent)
+        checker = HealthChecker(context)
         result = checker.check()
 
         # Should detect multiple issues

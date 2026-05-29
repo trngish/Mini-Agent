@@ -190,7 +190,7 @@ class TestAgentTokenTracking:
             workspace_dir=str(temp_workspace),
         )
         agent.add_user_message("Hello!")
-        count = agent._estimate_tokens()
+        count = agent._context.estimate_tokens()
         assert count > 0
 
 

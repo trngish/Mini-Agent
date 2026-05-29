@@ -6,7 +6,7 @@ Provides self-health checks after each step to detect and warn about issues.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agent import Agent
+    from .agent_context import AgentContext
 
 
 class HealthCheckResult:
@@ -42,8 +42,8 @@ class HealthChecker:
     CONSECUTIVE_FAILURE_CRITICAL = 3
     MIN_MESSAGE_COUNT = 2
 
-    def __init__(self, agent: "Agent"):
-        self._agent = agent
+    def __init__(self, context: "AgentContext"):
+        self._context = context
 
     def check(self) -> HealthCheckResult:
         """Perform health check.
@@ -55,8 +55,8 @@ class HealthChecker:
 
         # Check token usage
         try:
-            tokens = self._agent._estimate_tokens()
-            limit = self._agent.token_limit
+            tokens = self._context.estimate_tokens()
+            limit = self._context.token_limit
 
             if tokens > limit * self.TOKEN_CRITICAL_THRESHOLD:
                 issues.append(f"Token usage critical: {tokens:,} / {limit:,}")
@@ -66,14 +66,15 @@ class HealthChecker:
             pass
 
         # Check consecutive failures
-        failures = self._agent._error_recovery.consecutive_failures
+        failures = self._context.consecutive_failures
         if failures >= self.CONSECUTIVE_FAILURE_CRITICAL:
             issues.append(f"Multiple consecutive tool failures: {failures}")
         elif failures >= self.CONSECUTIVE_FAILURE_WARNING:
             issues.append(f"Possible tool issue: {failures} consecutive failures")
 
         # Check for message consistency
-        if len(self._agent.messages) < self.MIN_MESSAGE_COUNT:
+        messages = self._context.get_messages()
+        if len(messages) < self.MIN_MESSAGE_COUNT:
             issues.append("Message history seems incomplete")
 
         return HealthCheckResult(issues)
@@ -85,15 +86,15 @@ class HealthChecker:
             Dict with current state information
         """
         return {
-            "token_usage": self._agent._estimate_tokens(),
-            "token_limit": self._agent.token_limit,
-            "api_call_count": self._agent.api_call_count,
-            "session_age_steps": len([m for m in self._agent.messages if m.role == "user"]),
-            "consecutive_failures": self._agent._error_recovery.consecutive_failures,
-            "auto_save_enabled": self._agent.auto_save,
-            "last_auto_save_step": self._agent._last_auto_save_step,
-            "thinking_budget": self._agent.thinking_budget,
-            "mode": self._agent.mode.value,
+            "token_usage": self._context.estimate_tokens(),
+            "token_limit": self._context.token_limit,
+            "api_call_count": self._context.api_call_count,
+            "session_age_steps": len([m for m in self._context.get_messages() if m.role == "user"]),
+            "consecutive_failures": self._context.consecutive_failures,
+            "auto_save_enabled": self._context.auto_save,
+            "last_auto_save_step": self._context.last_auto_save_step,
+            "thinking_budget": self._context.thinking_budget,
+            "mode": self._context.mode.value,
         }
 
     def get_status_report(self) -> str:

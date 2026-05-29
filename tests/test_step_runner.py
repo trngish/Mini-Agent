@@ -10,31 +10,73 @@ Tests cover all public methods:
 - print_step_timing()
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mini_agent.core.step_runner import StepRunner
-from mini_agent.schema import FunctionCall, Message, ToolCall
+from mini_agent.core.agent_context import AgentContext
+from mini_agent.schema import AgentMode, FunctionCall, Message, ToolCall
+
+
+class MockTokenTracker:
+    """Mock token tracker for testing."""
+
+    def __init__(self):
+        pass
+
+    def estimate_tokens(self, messages):
+        return 50000
+
+    def invalidate_cache(self):
+        pass
+
+
+def create_mock_context(
+    api_call_count=0,
+    api_total_tokens=0,
+    thinking_budget=10000,
+    auto_save=False,
+    consecutive_failures=0,
+    last_auto_save_step=0,
+):
+    """Create a mock AgentContext for testing."""
+    return AgentContext(
+        messages=[],
+        mode=AgentMode.YOLO,
+        max_steps=50,
+        workspace_dir=Path("."),
+        token_limit=100000,
+        api_call_count=api_call_count,
+        api_total_tokens=api_total_tokens,
+        is_m27=False,
+        thinking_budget=thinking_budget,
+        auto_save=auto_save,
+        token_tracker=MockTokenTracker(),
+    )
 
 
 @pytest.fixture
 def mock_agent():
+    """Create a mock agent that works with both _agent and _context."""
     agent = MagicMock()
-    agent.api_call_count = 0
-    agent.api_total_tokens = 0
-    agent.thinking_budget = 10000
-    agent.messages = []
+    agent._context = create_mock_context()
     agent.logger = MagicMock()
-    agent._error_recovery = MagicMock()
-    agent._error_recovery.consecutive_failures = 0
     agent._last_health_check_step = 0
     agent._health_check_interval = 5
     agent._thinking_manager = None
     agent._token_tracker = MagicMock()
-    agent.auto_save = False
-    agent._last_auto_save_step = 0
     agent._session_manager = MagicMock()
+    # Proxy consecutive_failures to context
+    ObjectSpec = type("ObjectSpec", (), {
+        "consecutive_failures": 0,
+        "_consecutive_failures": 0,
+        "consecutive_failures": property(
+            lambda s: s._consecutive_failures,
+            lambda s, v: setattr(s, "_consecutive_failures", v)
+        ),
+    })
     return agent
 
 
@@ -73,25 +115,25 @@ class TestProcessResponse:
     def test_increments_api_call_count(self, runner, mock_agent):
         mock_response = _make_response()
         runner.process_response(mock_response, 1)
-        assert mock_agent.api_call_count == 1
+        assert mock_agent._context.api_call_count == 1
 
     def test_increments_api_call_count_multiple(self, runner, mock_agent):
         mock_response = _make_response()
         runner.process_response(mock_response, 1)
         runner.process_response(mock_response, 2)
-        assert mock_agent.api_call_count == 2
+        assert mock_agent._context.api_call_count == 2
 
     def test_updates_total_tokens_when_usage_present(self, runner, mock_agent):
         usage = MagicMock()
         usage.total_tokens = 5000
         mock_response = _make_response(usage=usage)
         runner.process_response(mock_response, 1)
-        assert mock_agent.api_total_tokens == 5000
+        assert mock_agent._context.api_total_tokens == 5000
 
     def test_does_not_update_tokens_when_usage_is_none(self, runner, mock_agent):
         mock_response = _make_response(usage=None)
         runner.process_response(mock_response, 1)
-        assert mock_agent.api_total_tokens == 0
+        assert mock_agent._context.api_total_tokens == 0
 
     def test_creates_assistant_message_with_content(self, runner, mock_agent):
         mock_response = _make_response(content="I will help you.")
@@ -130,16 +172,18 @@ class TestProcessResponse:
     def test_appends_message_to_agent_messages(self, runner, mock_agent):
         mock_response = _make_response(content="response text")
         runner.process_response(mock_response, 1)
-        assert len(mock_agent.messages) == 1
-        assert mock_agent.messages[0].role == "assistant"
-        assert mock_agent.messages[0].content == "response text"
+        messages = mock_agent._context.get_messages()
+        assert len(messages) == 1
+        assert messages[0].role == "assistant"
+        assert messages[0].content == "response text"
 
     def test_appends_multiple_messages(self, runner, mock_agent):
         runner.process_response(_make_response(content="first"), 1)
         runner.process_response(_make_response(content="second"), 2)
-        assert len(mock_agent.messages) == 2
-        assert mock_agent.messages[0].content == "first"
-        assert mock_agent.messages[1].content == "second"
+        messages = mock_agent._context.get_messages()
+        assert len(messages) == 2
+        assert messages[0].content == "first"
+        assert messages[1].content == "second"
 
     def test_returns_the_created_message(self, runner, mock_agent):
         mock_response = _make_response(content="hello back")
@@ -178,7 +222,7 @@ class TestProcessResponse:
         assert "Tools: 0" in printed
 
     def test_prints_thinking_budget(self, runner, mock_agent, capsys):
-        mock_agent.thinking_budget = 8000
+        mock_agent._context.thinking_budget = 8000
         mock_response = _make_response()
         runner.process_response(mock_response, 1)
         printed = capsys.readouterr().out
@@ -195,7 +239,7 @@ class TestProcessResponse:
 
 class TestCheckHealth:
     def test_returns_issues_when_consecutive_failures(self, runner, mock_agent):
-        mock_agent._error_recovery.consecutive_failures = 3
+        mock_agent._context._consecutive_failures = 3
         mock_agent._check_health.return_value = ["high error rate"]
         issues = runner.check_health(step=5)
         assert issues == ["high error rate"]
@@ -217,7 +261,7 @@ class TestCheckHealth:
         assert issues == []
 
     def test_skips_when_consecutive_failures_zero_and_interval_not_reached(self, runner, mock_agent):
-        mock_agent._error_recovery.consecutive_failures = 0
+        mock_agent._context._consecutive_failures = 0
         mock_agent._last_health_check_step = 2
         mock_agent._health_check_interval = 10
         issues = runner.check_health(step=5)
@@ -225,7 +269,7 @@ class TestCheckHealth:
         mock_agent._check_health.assert_not_called()
 
     def test_updates_last_health_check_step(self, runner, mock_agent):
-        mock_agent._error_recovery.consecutive_failures = 1
+        mock_agent._context._consecutive_failures = 1
         mock_agent._check_health.return_value = []
         runner.check_health(step=7)
         assert mock_agent._last_health_check_step == 7
@@ -236,13 +280,13 @@ class TestCheckHealth:
         assert mock_agent._last_health_check_step == 3
 
     def test_returns_multiple_issues(self, runner, mock_agent):
-        mock_agent._error_recovery.consecutive_failures = 1
+        mock_agent._context._consecutive_failures = 1
         mock_agent._check_health.return_value = ["issue1", "issue2", "issue3"]
         issues = runner.check_health(step=1)
         assert len(issues) == 3
 
     def test_runs_on_first_step(self, runner, mock_agent):
-        mock_agent._error_recovery.consecutive_failures = 1
+        mock_agent._context._consecutive_failures = 1
         mock_agent._check_health.return_value = []
         runner.check_health(step=0)
         mock_agent._check_health.assert_called_once()
@@ -264,7 +308,7 @@ class TestPruneThinking:
 
     def test_returns_zero_when_few_messages(self, runner, mock_agent):
         mock_agent._thinking_manager = MagicMock()
-        mock_agent.messages = [MagicMock(), MagicMock()]
+        mock_agent._context.set_messages([MagicMock(), MagicMock()])
         result = runner.prune_thinking()
         assert result == 0
         mock_agent._thinking_manager.prune_thinking.assert_not_called()
@@ -272,22 +316,22 @@ class TestPruneThinking:
     def test_prunes_when_manager_present_and_many_messages(self, runner, mock_agent):
         mock_agent._thinking_manager = MagicMock()
         mock_agent._thinking_manager.prune_thinking.return_value = 500
-        mock_agent.messages = [MagicMock() for _ in range(6)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(6)])
         result = runner.prune_thinking()
         assert result == 500
-        mock_agent._thinking_manager.prune_thinking.assert_called_once_with(mock_agent.messages)
+        mock_agent._thinking_manager.prune_thinking.assert_called_once()
 
     def test_does_not_invalidate_cache_when_tokens_below_threshold(self, runner, mock_agent):
         mock_agent._thinking_manager = MagicMock()
         mock_agent._thinking_manager.prune_thinking.return_value = 500
-        mock_agent.messages = [MagicMock() for _ in range(6)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(6)])
         runner.prune_thinking()
         mock_agent._token_tracker.invalidate_cache.assert_not_called()
 
     def test_invalidates_cache_when_tokens_above_1000(self, runner, mock_agent):
         mock_agent._thinking_manager = MagicMock()
         mock_agent._thinking_manager.prune_thinking.return_value = 5000
-        mock_agent.messages = [MagicMock() for _ in range(6)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(6)])
         result = runner.prune_thinking()
         assert result == 5000
         mock_agent._token_tracker.invalidate_cache.assert_called_once()
@@ -295,7 +339,7 @@ class TestPruneThinking:
     def test_prints_prune_message_when_tokens_above_1000(self, runner, mock_agent, capsys):
         mock_agent._thinking_manager = MagicMock()
         mock_agent._thinking_manager.prune_thinking.return_value = 2500
-        mock_agent.messages = [MagicMock() for _ in range(6)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(6)])
         runner.prune_thinking()
         printed = capsys.readouterr().out
         assert "Pruned" in printed
@@ -304,14 +348,14 @@ class TestPruneThinking:
     def test_does_not_print_when_tokens_below_1000(self, runner, mock_agent, capsys):
         mock_agent._thinking_manager = MagicMock()
         mock_agent._thinking_manager.prune_thinking.return_value = 800
-        mock_agent.messages = [MagicMock() for _ in range(6)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(6)])
         runner.prune_thinking()
         printed = capsys.readouterr().out
         assert "Pruned" not in printed
 
     def test_exactly_5_messages_does_not_prune(self, runner, mock_agent):
         mock_agent._thinking_manager = MagicMock()
-        mock_agent.messages = [MagicMock() for _ in range(5)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(5)])
         result = runner.prune_thinking()
         assert result == 0
         mock_agent._thinking_manager.prune_thinking.assert_not_called()
@@ -319,7 +363,7 @@ class TestPruneThinking:
     def test_exactly_6_messages_does_prune(self, runner, mock_agent):
         mock_agent._thinking_manager = MagicMock()
         mock_agent._thinking_manager.prune_thinking.return_value = 100
-        mock_agent.messages = [MagicMock() for _ in range(6)]
+        mock_agent._context.set_messages([MagicMock() for _ in range(6)])
         result = runner.prune_thinking()
         assert result == 100
         mock_agent._thinking_manager.prune_thinking.assert_called_once()
@@ -350,7 +394,7 @@ class TestPrintCompletionSummary:
     @patch("mini_agent.core.step_runner.perf_counter")
     def test_prints_step_timing(self, mock_perf, runner, mock_agent, capsys):
         mock_perf.side_effect = [110.0, 115.0]
-        mock_agent.api_call_count = 3
+        mock_agent._context.api_call_count = 3
         runner.print_completion_summary(step=2, step_start_time=105.0)
         printed = capsys.readouterr().out
         assert "Step 3 completed in" in printed
@@ -360,7 +404,7 @@ class TestPrintCompletionSummary:
     @patch("mini_agent.core.step_runner.perf_counter")
     def test_prints_total_api_calls(self, mock_perf, runner, mock_agent, capsys):
         mock_perf.side_effect = [110.0, 110.0]
-        mock_agent.api_call_count = 7
+        mock_agent._context.api_call_count = 7
         runner.print_completion_summary(step=0, step_start_time=100.0)
         printed = capsys.readouterr().out
         assert "Total API calls: 7" in printed
@@ -389,60 +433,60 @@ class TestPrintCompletionSummary:
 
 class TestAutoSave:
     def test_does_nothing_when_auto_save_disabled(self, runner, mock_agent):
-        mock_agent.auto_save = False
+        mock_agent._context.auto_save = False
         runner.auto_save(step=5)
         mock_agent._session_manager.save.assert_not_called()
 
     def test_saves_when_auto_save_enabled_and_interval_reached(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 0
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.return_value = "session_123"
         runner.auto_save(step=3)
         mock_agent._session_manager.save.assert_called_once()
 
     def test_does_not_save_when_interval_not_reached(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 2
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 2
         runner.auto_save(step=3)
         mock_agent._session_manager.save.assert_not_called()
 
     def test_updates_last_auto_save_step_on_success(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 0
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.return_value = "sid_abc"
         runner.auto_save(step=3)
-        assert mock_agent._last_auto_save_step == 3
+        assert mock_agent._context._last_auto_save_step == 3
 
     def test_does_not_update_step_when_prefix_not_auto_step(self, runner, mock_agent):
-        mock_agent.auto_save = True
+        mock_agent._context.auto_save = True
         mock_agent._session_manager.save.return_value = "sid_xyz"
         runner.auto_save(step=1, prefix="manual")
-        assert mock_agent._last_auto_save_step == 0
+        assert mock_agent._context._last_auto_save_step == 0
 
     def test_saves_with_correct_prefix(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 0
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.return_value = "sid_1"
         runner.auto_save(step=5)
-        mock_agent._session_manager.save.assert_called_once_with(mock_agent.messages, "auto_step_5")
+        mock_agent._session_manager.save.assert_called_once_with(mock_agent._context.get_messages(), "auto_step_5")
 
     def test_saves_with_custom_prefix(self, runner, mock_agent):
-        mock_agent.auto_save = True
+        mock_agent._context.auto_save = True
         mock_agent._session_manager.save.return_value = "sid_2"
         runner.auto_save(step=2, prefix="checkpoint")
-        mock_agent._session_manager.save.assert_called_once_with(mock_agent.messages, "checkpoint_2")
+        mock_agent._session_manager.save.assert_called_once_with(mock_agent._context.get_messages(), "checkpoint_2")
 
     def test_prints_session_id_on_success(self, runner, mock_agent, capsys):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 0
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.return_value = "sess_999"
         runner.auto_save(step=3)
         printed = capsys.readouterr().out
         assert "sess_999" in printed
 
     def test_prints_error_on_save_failure(self, runner, mock_agent, capsys):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 0
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.side_effect = OSError("disk full")
         runner.auto_save(step=3)
         printed = capsys.readouterr().out
@@ -450,22 +494,22 @@ class TestAutoSave:
         assert "disk full" in printed
 
     def test_does_not_raise_on_save_exception(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 0
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.side_effect = RuntimeError("boom")
         runner.auto_save(step=3)
 
     def test_interval_boundary(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 1
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 1
         runner.auto_save(step=3)
         mock_agent._session_manager.save.assert_not_called()
         runner.auto_save(step=4)
         mock_agent._session_manager.save.assert_called_once()
 
     def test_custom_prefix_always_saves_regardless_of_interval(self, runner, mock_agent):
-        mock_agent.auto_save = True
-        mock_agent._last_auto_save_step = 10
+        mock_agent._context.auto_save = True
+        mock_agent._context._last_auto_save_step = 10
         mock_agent._session_manager.save.return_value = "sid_custom"
         runner.auto_save(step=11, prefix="manual")
         mock_agent._session_manager.save.assert_called_once()

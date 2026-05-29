@@ -1,10 +1,11 @@
-"""Background shell process management."""
+"""Background shell process management with thread-safe access."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import re
+from threading import Lock as ThreadLock
 from typing import Any
 
 
@@ -65,12 +66,16 @@ class BackgroundShell:
 
 
 class BackgroundShellManager:
-    """Manager for all background shell processes.
+    """Thread-safe manager for all background shell processes.
 
     Uses class-level storage with agent_id prefixes to avoid cross-agent pollution.
     Each agent should use a unique agent_id when adding shells.
+
+    Thread-safe: uses Lock for concurrent access protection on all class methods
+    that access shared state (_shells, _monitor_tasks).
     """
 
+    _lock = ThreadLock()
     _shells: dict[str, BackgroundShell] = {}
     _monitor_tasks: dict[str, asyncio.Task[Any]] = {}
 
@@ -81,42 +86,46 @@ class BackgroundShellManager:
 
     @classmethod
     def add(cls, shell: BackgroundShell, agent_id: str = "default") -> None:
-        """Add a background shell to management.
+        """Add a background shell to management (thread-safe).
 
         Args:
             shell: The BackgroundShell to add
             agent_id: Unique identifier for the agent (to isolate storage)
         """
-        key = cls._prefix_key(agent_id, shell.bash_id)
-        cls._shells[key] = shell
+        with cls._lock:
+            key = cls._prefix_key(agent_id, shell.bash_id)
+            cls._shells[key] = shell
 
     @classmethod
     def get(cls, bash_id: str, agent_id: str = "default") -> BackgroundShell | None:
-        """Get a background shell by ID.
+        """Get a background shell by ID (thread-safe).
 
         Args:
             bash_id: The shell ID
             agent_id: Agent identifier used when adding the shell
         """
-        key = cls._prefix_key(agent_id, bash_id)
-        return cls._shells.get(key)
+        with cls._lock:
+            key = cls._prefix_key(agent_id, bash_id)
+            return cls._shells.get(key)
 
     @classmethod
     def get_available_ids(cls, agent_id: str = "default") -> list[str]:
-        """Get all available bash IDs for an agent.
+        """Get all available bash IDs for an agent (thread-safe).
 
         Args:
             agent_id: Agent identifier to filter shells
         """
-        prefix = f"{agent_id}:"
-        return [k.replace(prefix, "") for k in cls._shells if k.startswith(prefix)]
+        with cls._lock:
+            prefix = f"{agent_id}:"
+            return [k.replace(prefix, "") for k in cls._shells if k.startswith(prefix)]
 
     @classmethod
     def _remove(cls, bash_id: str, agent_id: str = "default") -> None:
-        """Remove a background shell from management (internal use only)."""
-        key = cls._prefix_key(agent_id, bash_id)
-        if key in cls._shells:
-            del cls._shells[key]
+        """Remove a background shell from management (internal use only, thread-safe)."""
+        with cls._lock:
+            key = cls._prefix_key(agent_id, bash_id)
+            if key in cls._shells:
+                del cls._shells[key]
 
     @classmethod
     async def start_monitor(cls, bash_id: str, agent_id: str = "default") -> None:
@@ -155,30 +164,34 @@ class BackgroundShellManager:
 
             except Exception as e:
                 key = cls._prefix_key(agent_id, bash_id)
-                if key in cls._shells:
-                    cls._shells[key].status = "error"
-                    cls._shells[key].add_output(f"Monitor error: {str(e)}")
+                with cls._lock:
+                    if key in cls._shells:
+                        cls._shells[key].status = "error"
+                        cls._shells[key].add_output(f"Monitor error: {str(e)}")
             finally:
                 monitor_key = f"{agent_id}:monitor:{bash_id}"
-                if monitor_key in cls._monitor_tasks:
-                    del cls._monitor_tasks[monitor_key]
+                with cls._lock:
+                    if monitor_key in cls._monitor_tasks:
+                        del cls._monitor_tasks[monitor_key]
 
         task = asyncio.create_task(monitor())
-        monitor_key = f"{agent_id}:monitor:{bash_id}"
-        cls._monitor_tasks[monitor_key] = task
+        with cls._lock:
+            monitor_key = f"{agent_id}:monitor:{bash_id}"
+            cls._monitor_tasks[monitor_key] = task
 
     @classmethod
     def _cancel_monitor(cls, bash_id: str, agent_id: str = "default") -> None:
-        """Cancel and remove a monitoring task (internal use only)."""
+        """Cancel and remove a monitoring task (internal use only, thread-safe)."""
         monitor_key = f"{agent_id}:monitor:{bash_id}"
-        if monitor_key in cls._monitor_tasks:
-            task = cls._monitor_tasks[monitor_key]
-            if not task.done():
-                task.cancel()
+        with cls._lock:
+            if monitor_key in cls._monitor_tasks:
+                task = cls._monitor_tasks[monitor_key]
+                if not task.done():
+                    task.cancel()
 
     @classmethod
     async def terminate(cls, bash_id: str, agent_id: str = "default") -> BackgroundShell:
-        """Terminate a background shell and clean up all resources.
+        """Terminate a background shell and clean up all resources (thread-safe).
 
         Args:
             bash_id: The unique identifier of the background shell
@@ -205,7 +218,7 @@ class BackgroundShellManager:
 
     @classmethod
     async def cleanup_all(cls, agent_id: str = "default") -> list[str]:
-        """Clean up all background shells for an agent.
+        """Clean up all background shells for an agent (thread-safe).
 
         Args:
             agent_id: Agent identifier to clean up shells for
@@ -224,7 +237,7 @@ class BackgroundShellManager:
 
     @classmethod
     def get_stats(cls, agent_id: str = "default") -> dict[str, Any]:
-        """Get statistics about managed shells for an agent.
+        """Get statistics about managed shells for an agent (thread-safe).
 
         Args:
             agent_id: Agent identifier to get stats for
@@ -232,17 +245,28 @@ class BackgroundShellManager:
         Returns:
             Dictionary with shell counts and status
         """
-        prefix = f"{agent_id}:"
-        agent_shells = {
-            k: v for k, v in cls._shells.items() if k.startswith(prefix) and not k.startswith(f"{agent_id}:monitor:")
-        }
-        running = sum(1 for s in agent_shells.values() if s.status == "running")
-        completed = sum(1 for s in agent_shells.values() if s.status == "completed")
-        failed = sum(1 for s in agent_shells.values() if s.status == "failed")
+        with cls._lock:
+            prefix = f"{agent_id}:"
+            agent_shells = {
+                k: v for k, v in cls._shells.items() if k.startswith(prefix) and not k.startswith(f"{agent_id}:monitor:")
+            }
+            running = sum(1 for s in agent_shells.values() if s.status == "running")
+            completed = sum(1 for s in agent_shells.values() if s.status == "completed")
+            failed = sum(1 for s in agent_shells.values() if s.status == "failed")
 
-        return {
-            "total": len(agent_shells),
-            "running": running,
-            "completed": completed,
-            "failed": failed,
-        }
+            return {
+                "total": len(agent_shells),
+                "running": running,
+                "completed": completed,
+                "failed": failed,
+            }
+
+    @classmethod
+    def clear_all(cls) -> None:
+        """Clear all shells and monitors (thread-safe). Used for testing."""
+        with cls._lock:
+            cls._shells.clear()
+            for task in cls._monitor_tasks.values():
+                if not task.done():
+                    task.cancel()
+            cls._monitor_tasks.clear()

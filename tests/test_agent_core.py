@@ -76,38 +76,38 @@ class TestCheckCancelled:
 
 class TestCleanupIncompleteMessages:
     def test_no_cleanup_when_no_assistant_message(self, agent):
-        agent.messages = [
+        agent.replace_messages([
             Message(role="system", content="system"),
             Message(role="user", content="hello"),
-        ]
+        ])
         original_len = len(agent.messages)
         agent._cleanup_incomplete_messages()
         assert len(agent.messages) == original_len
 
     def test_removes_last_assistant_message(self, agent):
-        agent.messages = [
+        agent.replace_messages([
             Message(role="system", content="system"),
             Message(role="user", content="hello"),
             Message(role="assistant", content="thinking..."),
-        ]
+        ])
         agent._cleanup_incomplete_messages()
         assert len(agent.messages) == 2
         assert agent.messages[-1].role == "user"
 
     def test_removes_assistant_and_trailing_tool_messages(self, agent):
-        agent.messages = [
+        agent.replace_messages([
             Message(role="system", content="system"),
             Message(role="user", content="hello"),
             Message(role="assistant", content="using tool..."),
             Message(role="tool", content="result1", tool_call_id="1"),
             Message(role="tool", content="result2", tool_call_id="2"),
-        ]
+        ])
         agent._cleanup_incomplete_messages()
         assert len(agent.messages) == 2
         assert agent.messages[-1].role == "user"
 
     def test_preserves_earlier_assistant_messages(self, agent):
-        agent.messages = [
+        agent.replace_messages([
             Message(role="system", content="system"),
             Message(role="user", content="hello"),
             Message(role="assistant", content="done with step 1"),
@@ -115,7 +115,7 @@ class TestCleanupIncompleteMessages:
             Message(role="user", content="next request"),
             Message(role="assistant", content="incomplete step"),
             Message(role="tool", content="partial result", tool_call_id="2"),
-        ]
+        ])
         agent._cleanup_incomplete_messages()
         assert len(agent.messages) == 5
         assert agent.messages[-1].role == "user"
@@ -124,39 +124,39 @@ class TestCleanupIncompleteMessages:
         assert agent.messages[2].content == "done with step 1"
 
     def test_no_cleanup_with_empty_messages(self, agent):
-        agent.messages = []
+        agent.replace_messages([])
         agent._cleanup_incomplete_messages()
         assert len(agent.messages) == 0
 
     def test_only_system_message(self, agent):
-        agent.messages = [Message(role="system", content="system")]
+        agent.replace_messages([Message(role="system", content="system")])
         agent._cleanup_incomplete_messages()
         assert len(agent.messages) == 1
 
 
 class TestEstimateTokens:
     def test_delegates_to_token_tracker(self, agent):
-        agent._token_tracker = MagicMock()
-        agent._token_tracker.estimate_tokens.return_value = 42
-        result = agent._estimate_tokens()
+        agent._context.token_tracker = MagicMock()
+        agent._context.token_tracker.estimate_tokens.return_value = 42
+        result = agent._context.estimate_tokens()
         assert result == 42
-        agent._token_tracker.estimate_tokens.assert_called_once_with(agent.messages)
+        agent._context.token_tracker.estimate_tokens.assert_called_once()
 
     def test_returns_zero_for_empty_messages(self, agent):
-        agent.messages = []
-        result = agent._estimate_tokens()
+        agent.replace_messages([])
+        result = agent._context.estimate_tokens()
         assert result == 0
 
     def test_returns_positive_for_nonempty_messages(self, agent):
         agent.add_user_message("Hello world")
-        result = agent._estimate_tokens()
+        result = agent._context.estimate_tokens()
         assert result > 0
 
     def test_increases_with_more_messages(self, agent):
         agent.add_user_message("Short")
-        count1 = agent._estimate_tokens()
+        count1 = agent._context.estimate_tokens()
         agent.add_user_message("This is a longer message with more words and content")
-        count2 = agent._estimate_tokens()
+        count2 = agent._context.estimate_tokens()
         assert count2 > count1
 
 
@@ -334,7 +334,7 @@ class TestGetStatus:
         assert status["mode"] == AgentMode.YOLO.value
 
     def test_get_status_reflects_api_call_count(self, agent):
-        agent.api_call_count = 5
+        agent._context.api_call_count = 5
         status = agent.get_status()
         assert status["api_call_count"] == 5
 
@@ -382,7 +382,7 @@ class TestCheckHealth:
         assert isinstance(issues, list)
 
     def test_detects_incomplete_messages(self, agent):
-        agent.messages = [Message(role="system", content="sys")]
+        agent.replace_messages([Message(role="system", content="sys")])
         issues = agent._check_health()
         assert any("incomplete" in issue.lower() for issue in issues)
 
@@ -453,7 +453,7 @@ class TestGetPerformanceMetrics:
         agent._metrics.get_metrics.assert_called_once()
 
     def test_reflects_api_call_count(self, agent):
-        agent.api_call_count = 7
+        agent._context.api_call_count = 7
         metrics = agent.get_performance_metrics()
         assert metrics["api_call_count"] == 7
 

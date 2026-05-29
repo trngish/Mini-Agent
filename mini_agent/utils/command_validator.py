@@ -40,6 +40,14 @@ CAUTION_PATTERNS = [
     re.compile(r"\breg\s+(add|delete|set)", re.IGNORECASE),  # Windows registry
     re.compile(r"\bcurl\s+.*\|\s*(bash|sh)", re.IGNORECASE),  # pipe curl to shell
     re.compile(r"\bwget\s+.*\|\s*(bash|sh)", re.IGNORECASE),  # pipe wget to shell
+    # Command injection via environment variables (blocked for safety)
+    re.compile(r"\$\{[^}]+\}"),  # ${VAR} - braced variable expansion
+    re.compile(r"\$\w+"),  # $VAR - simple variable expansion
+    re.compile(r"%[^%]+%"),  # %VAR% - Windows variable expansion
+    # Obfuscation patterns (blocked for safety)
+    re.compile(r"base64\s+-d", re.IGNORECASE),  # base64 decode
+    re.compile(r"\|\s*bash\s+-c", re.IGNORECASE),  # piped shell execution
+    re.compile(r"eval\s+\$"),  # eval dynamic command
 ]
 
 

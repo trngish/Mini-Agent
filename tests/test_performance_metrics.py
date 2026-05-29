@@ -2,24 +2,29 @@
 
 import pytest
 
+from mini_agent.core.agent_context import AgentContext
 from mini_agent.core.metrics import PerformanceMetrics
-
-
-class MockAgent:
-    """Mock agent for testing."""
-
-    def __init__(self):
-        self.api_call_count = 0
+from mini_agent.schema import AgentMode, Message
 
 
 @pytest.fixture
-def mock_agent():
-    return MockAgent()
+def mock_agent_context():
+    """Create AgentContext for testing."""
+    return AgentContext(
+        messages=[Message(role="system", content="You are a test agent.")],
+        mode=AgentMode.YOLO,
+        max_steps=10,
+        token_limit=100000,
+        api_call_count=0,
+        api_total_tokens=0,
+        is_m27=False,
+        thinking_budget=16384,
+    )
 
 
 @pytest.fixture
-def metrics(mock_agent):
-    return PerformanceMetrics(mock_agent)
+def metrics(mock_agent_context):
+    return PerformanceMetrics(mock_agent_context)
 
 
 class TestPerformanceMetrics:

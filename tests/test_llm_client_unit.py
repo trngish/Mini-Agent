@@ -367,8 +367,10 @@ class TestAnthropicParseResponse:
         )
         result = client._parse_response(streamed)
         assert result.usage is not None
-        assert result.usage.prompt_tokens == 10
-        assert result.usage.total_tokens == 20
+        # cache_creation_input_tokens intentionally excluded from input tokens
+        # They represent one-time setup cost, amortized over cache hits
+        assert result.usage.prompt_tokens == 8  # 5 + 3, cache_creation excluded
+        assert result.usage.total_tokens == 18  # 8 + 10
 
     def test_parse_streamed_response_empty_thinking(self):
         client = _make_anthropic_client()

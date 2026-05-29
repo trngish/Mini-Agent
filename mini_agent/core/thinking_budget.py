@@ -7,7 +7,7 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..agent import Agent
+    from .agent_context import AgentContext
 
 # Adaptive thinking budget levels (tokens)
 # Higher budgets enable deeper reasoning for complex tasks
@@ -56,8 +56,8 @@ class ThinkingBudgetManager:
     to optimize for fewer API calls (per-call billing optimization).
     """
 
-    def __init__(self, agent: "Agent"):
-        self._agent = agent
+    def __init__(self, context: "AgentContext"):
+        self._context = context
         self._max_budget: int = 16384
         self._current_budget: int = 16384
 
@@ -81,7 +81,7 @@ class ThinkingBudgetManager:
         Args:
             user_message: The user's message to analyze for complexity
         """
-        if not self._agent.is_m27:
+        if not self._context.is_m27:
             return
 
         msg_lower = user_message.lower()
@@ -135,9 +135,11 @@ class ThinkingBudgetManager:
             budget: New thinking budget in tokens
         """
         self._current_budget = budget
+        # Sync to context so status displays current value
+        self._context.thinking_budget = budget
         # Update the LLM client's thinking budget via public API
-        if hasattr(self._agent.llm, "configure_thinking_budget"):
-            self._agent.llm.configure_thinking_budget(budget)
+        if self._context.llm and hasattr(self._context.llm, "configure_thinking_budget"):
+            self._context.llm.configure_thinking_budget(budget)
 
     @property
     def current_budget(self) -> int:
