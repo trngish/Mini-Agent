@@ -53,7 +53,9 @@ class HealthChecker:
         """
         issues = []
 
-        # Check token usage
+        # Check token usage - use AgentContext's token tracker directly for accuracy
+        # AgentContext.estimate_tokens() already uses tiktoken for accurate counting
+        # but provides fallback for edge cases
         try:
             tokens = self._context.estimate_tokens()
             limit = self._context.token_limit
