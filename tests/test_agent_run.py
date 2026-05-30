@@ -560,23 +560,26 @@ class TestRunCheckCancelled:
 class TestRunCleanupIncompleteMessages:
     async def test_cleanup_removes_last_assistant_and_tool_messages(self, mock_llm, temp_workspace):
         agent = _make_agent(mock_llm, temp_workspace)
-        initial_count = len(agent.messages)
-        agent.messages.append(Message(role="assistant", content="partial", tool_calls=[_make_tool_call()]))
-        agent.messages.append(Message(role="tool", content="result", tool_call_id="c1", name="test"))
-        assert len(agent.messages) == initial_count + 2
+        # Use internal context directly for test manipulation
+        ctx = agent._context
+        initial_count = len(ctx.messages)
+        ctx.messages.append(Message(role="assistant", content="partial", tool_calls=[_make_tool_call()]))
+        ctx.messages.append(Message(role="tool", content="result", tool_call_id="c1", name="test"))
+        assert len(ctx.messages) == initial_count + 2
         agent._cleanup_incomplete_messages()
-        assert len(agent.messages) == initial_count
+        assert len(ctx.messages) == initial_count
 
     async def test_cleanup_no_assistant_message(self, mock_llm, temp_workspace):
         agent = _make_agent(mock_llm, temp_workspace)
-        initial_count = len(agent.messages)
+        initial_count = len(agent._context.messages)
         agent._cleanup_incomplete_messages()
-        assert len(agent.messages) == initial_count
+        assert len(agent._context.messages) == initial_count
 
     async def test_cleanup_preserves_earlier_messages(self, mock_llm, temp_workspace):
         agent = _make_agent(mock_llm, temp_workspace)
-        agent.messages.append(Message(role="user", content="keep me"))
-        agent.messages.append(Message(role="assistant", content="partial"))
+        ctx = agent._context
+        ctx.messages.append(Message(role="user", content="keep me"))
+        ctx.messages.append(Message(role="assistant", content="partial"))
         agent._cleanup_incomplete_messages()
-        roles = [m.role for m in agent.messages]
+        roles = [m.role for m in ctx.messages]
         assert "user" in roles

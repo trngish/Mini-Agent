@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.tool_execution import compress_tool_result, should_compress_result
-from ..utils.context_cache import get_context_cache
+from ..utils.context_cache import create_cache_for_workspace
 from ..utils.platform_utils import normalize_path_separators as normalize_path
 from .base import Tool, ToolResult
 
@@ -72,7 +72,8 @@ class MultiGrepTool(Tool):
         searches = _ensure_list(searches)
         results = []
         total_matches = 0
-        cache = get_context_cache()
+        # P0 FIX: Use workspace-namespaced cache, matching Agent's cache
+        cache = create_cache_for_workspace(self.workspace_dir)
 
         for search in searches:
             pattern = search.get("pattern", "")

@@ -7,11 +7,15 @@ English | [中文](./README_CN.md)
 This project comes packed with features designed for a robust and intelligent agent development experience:
 
 *   ✅ **Full Agent Execution Loop**: A complete and reliable foundation with a basic toolset for file system and shell operations.
-*   ✅ **Persistent Memory**: An active **Session Note Tool** ensures the agent retains key information across multiple sessions.
-*   ✅ **Intelligent Context Management**: Automatically summarizes conversation history to handle contexts up to a configurable token limit, enabling infinitely long tasks.
+*   ✅ **Semantic Cross-Session Memory**: Automatically extracts decisions, preferences, and findings from conversations for cross-session context injection.
+*   ✅ **Intelligent Context Management**: Auto-summarization with anti-degeneration protection ensures the AI never "forgets" what it just said; configurable token limits.
+*   ✅ **Self-Healing Engine**: Runtime anomaly detection (loops, LLM errors, health issues) with optional auto-diagnosis and source code repair (`MINI_AGENT_AUTO_HEAL=1`).
+*   ✅ **Workspace Isolation**: Cache and sessions are namespaced per workspace, preventing cross-project pollution.
+*   ✅ **Dual-Protocol Streaming**: Both Anthropic and OpenAI protocols support streaming output; thinking content renders before results.
+*   ✅ **Full Session Recovery**: Complete runtime state (token counts, thinking budget, loop counters) is persisted and restored on session load.
 *   ✅ **Claude Skills Integration**: Comes with 30 professional skills for documents, design, testing, and development workflows.
 *   ✅ **MCP Tool Integration**: Natively supports MCP for tools like knowledge graph access and web search.
-*   ✅ **Comprehensive Logging**: Detailed logs for every request, response, and tool execution for easy debugging.
+*   ✅ **Comprehensive Logging**: Detailed logs for every request, response, health check, and tool execution — fully auditable.
 *   ✅ **Clean & Simple Design**: A beautiful CLI and a codebase that is easy to understand, making it the perfect starting point for building advanced agents.
 
 ## Table of Contents
@@ -329,6 +333,34 @@ Issues and Pull Requests are welcome!
 
 - [Contributing Guide](CONTRIBUTING.md) - How to contribute
 - [Code of Conduct](CODE_OF_CONDUCT.md) - Community guidelines
+
+## Advanced Features
+
+### Self-Healing Engine
+
+Mini-Agent continuously monitors its own state during execution, detecting anomaly patterns (loop detection, LLM errors, health issues, token pressure, etc.). When anomaly scores exceed thresholds, it triggers automatic diagnosis and optional source-code repair.
+
+```bash
+# Detection + report only (default, safe)
+mini-agent run "your task"
+
+# Enable auto-repair (diagnosis + auto-edit source code)
+MINI_AGENT_AUTO_HEAL=1 mini-agent run "your task"
+```
+
+All fixes are backed up (`~/.mini-agent/heal_backups/`) and support rollback. Changes take effect on next restart (editable install).
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MINI_AGENT_AUTO_HEAL` | `0` | Enable self-healing auto-repair (1=on) |
+| `MINI_AGENT_AUTO_SAVE` | `true` | Auto-save sessions |
+| `MINI_AGENT_SESSION_ISOLATION` | `1` | Workspace-isolated session storage |
+| `MINI_AGENT_MAX_SESSIONS` | `100` | Max retained sessions (auto-cleanup) |
+| `MINI_AGENT_STREAM_BUFFER_SIZE` | `8` | Stream output buffer size |
+| `MINI_AGENT_CACHE_WARMUP` | `true` | Warm up file cache on start |
+| `NO_COLOR` | — | Disable ANSI color output |
 
 ## License
 

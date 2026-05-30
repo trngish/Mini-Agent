@@ -72,6 +72,99 @@ class OpenAIClient(LLMClientBase):
         configured_budget = config.get("thinking_budget_tokens", 16384)
         self._thinking_budget_tokens = min(configured_budget, 32768)
 
+    async def _make_streaming_request(
+        self,
+        api_messages: list[dict[str, Any]],
+        tools: list[Any] | None = None,
+        on_text: Any = None,
+        on_thinking: Any = None,
+    ) -> Any:
+        """Execute streaming API request with callback support (A1 FIX).
+
+        Args:
+            api_messages: List of messages in OpenAI format
+            tools: Optional list of tools
+            on_text: Callback for text deltas
+            on_thinking: Callback for thinking/reasoning deltas
+
+        Returns:
+            Accumulated response data dict with text, thinking, tool_calls, usage
+        """
+        params = {
+            "model": self.model,
+            "messages": api_messages,
+            "extra_body": {"reasoning_split": True},
+            "max_tokens": get_max_output_tokens(self.model),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+
+        if tools:
+            params["tools"] = self._convert_tools(tools)
+
+        accumulated = {
+            "text": "",
+            "thinking": "",
+            "tool_calls": {},
+            "finish_reason": "stop",
+            "usage": None,
+        }
+
+        try:
+            stream = await self.client.chat.completions.create(**params)
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                # Text content
+                if delta.content and on_text:
+                    on_text(delta.content)
+                    accumulated["text"] += delta.content
+                elif delta.content:
+                    accumulated["text"] += delta.content
+
+                # Reasoning/thinking content
+                if hasattr(delta, "reasoning_details") and delta.reasoning_details:
+                    for detail in delta.reasoning_details:
+                        if hasattr(detail, "text") and detail.text:
+                            if on_thinking:
+                                on_thinking(detail.text)
+                            accumulated["thinking"] += detail.text
+
+                # Tool calls (accumulated across chunks)
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in accumulated["tool_calls"]:
+                            accumulated["tool_calls"][idx] = {
+                                "id": tc.id or "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        entry = accumulated["tool_calls"][idx]
+                        if tc.id:
+                            entry["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                entry["function"]["name"] += tc.function.name
+                            if tc.function.arguments:
+                                entry["function"]["arguments"] += tc.function.arguments
+
+                # Finish reason
+                if chunk.choices[0].finish_reason:
+                    accumulated["finish_reason"] = chunk.choices[0].finish_reason
+
+                # Usage (sent at end with stream_options)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    accumulated["usage"] = chunk.usage
+
+        except Exception as e:
+            logger.warning("Streaming request error: %s", e)
+            raise
+
+        return accumulated
+
     async def _make_api_request(
         self,
         api_messages: list[dict[str, Any]],
@@ -228,6 +321,48 @@ class OpenAIClient(LLMClientBase):
             "tools": tools,
         }
 
+    def _parse_streamed_response(self, accumulated: dict[str, Any]) -> LLMResponse:
+        """Parse accumulated streaming response into LLMResponse (A1 FIX)."""
+        text = accumulated.get("text", "")
+        thinking = accumulated.get("thinking", "") or None
+
+        # Parse tool calls from accumulated dict
+        tool_calls = []
+        for idx in sorted(accumulated.get("tool_calls", {}).keys()):
+            tc_data = accumulated["tool_calls"][idx]
+            try:
+                arguments = json.loads(tc_data["function"]["arguments"])
+            except (json.JSONDecodeError, KeyError):
+                arguments = {}
+            tool_calls.append(
+                ToolCall(
+                    id=tc_data["id"],
+                    type="function",
+                    function=FunctionCall(
+                        name=tc_data["function"]["name"],
+                        arguments=arguments,
+                    ),
+                )
+            )
+
+        # Parse usage
+        usage = None
+        if accumulated.get("usage"):
+            u = accumulated["usage"]
+            usage = TokenUsage(
+                prompt_tokens=getattr(u, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(u, "completion_tokens", 0) or 0,
+                total_tokens=getattr(u, "total_tokens", 0) or 0,
+            )
+
+        return LLMResponse(
+            content=text,
+            thinking=thinking,
+            tool_calls=tool_calls if tool_calls else None,
+            finish_reason=accumulated.get("finish_reason", "stop"),
+            usage=usage,
+        )
+
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse OpenAI response into LLMResponse.
 
@@ -292,23 +427,35 @@ class OpenAIClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        on_text: Any = None,
+        on_thinking: Any = None,
         **_kwargs: Any,
     ) -> LLMResponse:
-        """Generate response from OpenAI LLM.
+        """Generate response from OpenAI LLM (A1 FIX: added streaming support).
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            on_text: Optional callback for streaming text content
+            on_thinking: Optional callback for streaming thinking/reasoning content
 
         Returns:
             LLMResponse containing the generated content
         """
-        # Prepare request
         request_params = self._prepare_request(messages, tools)
 
-        # Make API request with retry logic
+        # A1 FIX: Use streaming when callbacks are provided
+        if on_text or on_thinking:
+            accumulated = await self._make_streaming_request(
+                request_params["api_messages"],
+                request_params["tools"],
+                on_text=on_text,
+                on_thinking=on_thinking,
+            )
+            return self._parse_streamed_response(accumulated)
+
+        # Fallback: non-streaming for retry or no-callback scenarios
         if self.retry_config.enabled:
-            # Apply retry logic
             retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
             api_call = retry_decorator(self._make_api_request)
             response = await api_call(
@@ -316,11 +463,9 @@ class OpenAIClient(LLMClientBase):
                 request_params["tools"],
             )
         else:
-            # Don't use retry
             response = await self._make_api_request(
                 request_params["api_messages"],
                 request_params["tools"],
             )
 
-        # Parse and return response
         return self._parse_response(response)

@@ -178,4 +178,8 @@ def main() -> None:
     )
 
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run_agent(workspace_dir, task=args.task, cli_overrides=cli_overrides, continue_session=args.continue_session))
+        asyncio.run(
+            run_agent(
+                workspace_dir, task=args.task, cli_overrides=cli_overrides, continue_session=args.continue_session
+            )
+        )

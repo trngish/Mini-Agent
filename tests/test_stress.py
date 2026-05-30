@@ -542,7 +542,7 @@ class TestAgentIntegration:
         start = perf_counter()
         for i in range(25000):
             agent.add_user_message(f"User message {i}")
-            agent.messages.append(Message(role="assistant", content=f"Agent response {i}"))
+            agent.append_message(Message(role="assistant", content=f"Agent response {i}"))
         elapsed = perf_counter() - start
 
         stats = len(agent.messages)
@@ -779,8 +779,7 @@ class TestConcurrentToolStress:
         )
 
         tool_calls = [
-            ToolCall(id=f"call-{i}", type="function",
-                    function=FunctionCall(name="slow_tool", arguments={}))
+            ToolCall(id=f"call-{i}", type="function", function=FunctionCall(name="slow_tool", arguments={}))
             for i in range(10)
         ]
 

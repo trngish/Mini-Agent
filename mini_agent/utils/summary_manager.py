@@ -170,15 +170,25 @@ class AdaptiveSummaryManager:
 
         if not exceeded:
             # Only consider early summarization if:
-            # 1. High repetition detected
-            # 2. Low info density
-            # 3. High complexity (might benefit from early compression)
+            # 1. High repetition detected (repeated patterns suggesting loop)
+            # 2. High complexity with very high tool call rate (many tool calls piling up)
             complexity = self._complexity_analyzer.analyze(messages[-10:])  # Last 10 msgs
 
+            # CRITICAL FIX: Early trigger was too aggressive.
+            # - "analyze" + "optimize" in keywords → always "high" complexity
+            # - Analysis tasks naturally have tool_call_rate > 0.5 (reading files)
+            # - This caused premature summarization that lost the AI's own analysis output
+            #
+            # Fix: Require BOTH repetition AND high complexity for early trigger.
+            # For high tool_call_rate alone, only trigger when it's extreme (> 0.8)
             early_trigger = (
-                complexity["has_repetition"]
-                or complexity["info_density"] < 0.3
-                or (complexity["complexity_level"] == "high" and complexity["tool_call_rate"] > 0.5)
+                # Case 1: Explicit repetition detected (strong signal of loop)
+                (complexity["has_repetition"] and complexity["complexity_level"] != "low")
+                # Case 2: Very high tool call rate (8+ out of 10 messages) - genuine pile-up
+                or (
+                    complexity["complexity_level"] == "high"
+                    and complexity["tool_call_rate"] > 0.8  # Raised from 0.5 to 0.8
+                )
             )
 
             if early_trigger:
@@ -186,14 +196,25 @@ class AdaptiveSummaryManager:
             return False, "below_threshold"
 
         # Token exceeded - determine summary quality tier
+        # NOTE: info_density is NOT a good signal after summarization because
+        # summaries themselves have low info_density by design (condensed content).
+        # Using it would cause consecutive low-quality summarizations.
         complexity = self._complexity_analyzer.analyze(messages)
 
-        if complexity["has_repetition"] or complexity["info_density"] < 0.4:
+        if complexity["has_repetition"]:
             tier = "low"
         elif complexity["complexity_level"] == "high":
             tier = "high"
         else:
             tier = "medium"
+
+        # D12 FIX: Check if we're re-summarizing already-summarized content.
+        # Re-summarizing is inherently lossier, so we force high-quality tier
+        # and signal the message_manager to apply anti-degeneration boost.
+        is_repeated = self._is_repeated_summarization(messages)
+        if is_repeated:
+            tier = "high"
+            return True, f"threshold_exceeded:tier={tier}:degen_w{is_repeated}"
 
         return True, f"threshold_exceeded:tier={tier}"
 
@@ -248,3 +269,19 @@ class AdaptiveSummaryManager:
         Skip after high-quality summary to avoid consecutive triggers.
         """
         return last_summary_quality > 0.7
+
+    @staticmethod
+    def _is_repeated_summarization(messages: list[Message]) -> int:
+        """D12 FIX: Detect if we're re-summarizing already-summarized content.
+
+        Counts the number of [Execution Summary] markers to determine
+        how many times the content has been through the summarization cycle.
+
+        Returns:
+            Number of summary generations detected (0 = first time).
+        """
+        count = 0
+        for msg in messages:
+            if msg.role == "user" and msg.content and isinstance(msg.content, str):
+                count += msg.content.count("[Execution Summary")
+        return count

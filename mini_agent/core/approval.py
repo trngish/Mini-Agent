@@ -105,7 +105,9 @@ class ApprovalManager:
             return True
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._lock, self._get_approval_sync, function_name)
+        # P1 FIX: self._lock is a threading.Lock, not an Executor.
+        # Use None to default to the thread pool executor.
+        return await loop.run_in_executor(None, self._get_approval_sync, function_name)
 
     def is_write_tool(self, function_name: str) -> bool:
         """Check if a tool is a write operation."""

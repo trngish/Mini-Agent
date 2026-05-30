@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..utils.context_cache import get_context_cache
+from ..utils.context_cache import create_cache_for_workspace
 from ..utils.platform_utils import normalize_path_separators as normalize_path
+from ..utils.task_state import get_task_manager
 from .base import Tool, ToolResult
 from .file_tools import get_file_token_limit, truncate_text_by_tokens
 
@@ -30,6 +31,11 @@ class MultiReadTool(Tool):
     """Read multiple files in a single tool call.
 
     Per-call billing optimization: merge multiple read_file calls into one, reducing API call count.
+
+    Caching features:
+    - Results are cached for reuse across steps
+    - Tracks which files have been read
+    - Warns when re-reading files unnecessarily
     """
 
     def __init__(self, workspace_dir: str = "."):
@@ -43,7 +49,8 @@ class MultiReadTool(Tool):
     def description(self) -> str:
         return (
             "Read multiple files at once. Returns all file contents separated by headers. "
-            "Use this instead of multiple read_file calls to save API calls."
+            "Use this instead of multiple read_file calls to save API calls. "
+            "Results are cached for reuse."
         )
 
     @property
@@ -74,8 +81,12 @@ class MultiReadTool(Tool):
         results = []
         total_lines = 0
         errors = []
+        newly_cached = 0
 
-        cache = get_context_cache()
+        # P0 FIX: Use workspace-namespaced cache, matching Agent's cache
+        cache = create_cache_for_workspace(self.workspace_dir)
+        task_manager = get_task_manager()
+        files_read_this_call = []
 
         for path in paths:
             try:
@@ -88,12 +99,14 @@ class MultiReadTool(Tool):
                     errors.append(f"File not found: {path}")
                     continue
 
-                # Check cache first
+                # Check cache first (only for full-file reads)
                 if offset is None and limit is None:
                     cached_content = cache.get_file_content(file_path)
                     if cached_content:
-                        results.append(f"{normalized}: (cached {len(cached_content)} chars)")
+                        results.append(f"{'=' * 60}\n📄 {normalized}\n{'=' * 60}\n{cached_content}")
+                        results.append(f"  {'':>4}(cached {len(cached_content)} chars)")
                         total_lines += cached_content.count("\n")
+                        newly_cached += 1
                         continue
 
                 with open(file_path, encoding="utf-8") as f:
@@ -114,6 +127,13 @@ class MultiReadTool(Tool):
 
                 results.append(f"{'=' * 60}\n📄 {normalized}\n{'=' * 60}\n{content}")
 
+                # Cache full-file reads for future use
+                if offset is None and limit is None:
+                    cache.set_file_content(file_path, content, ttl=600)
+
+                # Mark file as read for task state tracking
+                files_read_this_call.append(str(file_path))
+
             except UnicodeDecodeError:
                 errors.append(f"Decode error: {path}")
             except Exception as e:
@@ -122,6 +142,16 @@ class MultiReadTool(Tool):
         combined = "\n".join(results)
         if errors:
             combined += "\n\n" + "\n".join(errors)
+
+        # Add cache statistics to output
+        cache_stats = cache.get_stats()
+        combined += f"\n\n📦 Cache: {cache_stats['file_entries']} entries, +{newly_cached} cached this call"
+
+        # Notify task manager about files read (after loop to avoid partial state on error)
+        for file_path in files_read_this_call:
+            task_manager.mark_file_read(file_path)
+        if files_read_this_call:
+            combined += f"\n📋 Files marked as read: {len(files_read_this_call)}"
 
         # Truncate if too long
         max_tokens = get_file_token_limit()

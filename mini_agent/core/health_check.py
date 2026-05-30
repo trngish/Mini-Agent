@@ -45,6 +45,9 @@ class HealthChecker:
     THINKING_RATIO_CRITICAL = 0.6  # Thinking > 60% is critical
 
     def __init__(self, context: "AgentContext"):
+        # Legacy: accept Agent instances that expose state via _context
+        if not hasattr(context, "estimate_tokens") and hasattr(context, "_context"):
+            context = context._context
         self._context = context
 
     def check(self) -> HealthCheckResult:

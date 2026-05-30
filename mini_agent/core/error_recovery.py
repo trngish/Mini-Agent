@@ -153,29 +153,19 @@ class ErrorRecoveryManager:
             if count >= 3:
                 # Provide tool-specific suggestions
                 if tool in ("read_file", "multi_read"):
-                    suggestions.append(
-                        f"'{tool}' failing frequently - check file paths and permissions"
-                    )
+                    suggestions.append(f"'{tool}' failing frequently - check file paths and permissions")
                 elif tool in ("edit_file", "multi_edit"):
-                    suggestions.append(
-                        f"'{tool}' failing frequently - verify content format and encoding"
-                    )
+                    suggestions.append(f"'{tool}' failing frequently - verify content format and encoding")
                 elif tool in ("bash", "multi_bash"):
-                    suggestions.append(
-                        f"'{tool}' failing frequently - review command syntax and shell availability"
-                    )
+                    suggestions.append(f"'{tool}' failing frequently - review command syntax and shell availability")
                 elif tool == "grep":
-                    suggestions.append(
-                        f"'{tool}' failing frequently - check regex syntax and search paths"
-                    )
+                    suggestions.append(f"'{tool}' failing frequently - check regex syntax and search paths")
                 else:
-                    suggestions.append(
-                        f"'{tool}' has failed {count} times - may need parameter adjustment"
-                    )
+                    suggestions.append(f"'{tool}' has failed {count} times - may need parameter adjustment")
 
         # Check for consecutive failures patterns
         if self._consecutive_failures >= 2:
-            suggestions.append("Multiple consecutive failures detected - consider /debug for details")
+            suggestions.append("Multiple consecutive failures detected - review /debug output for details")
             if self._consecutive_failures >= 3:
                 suggestions.append("Critical: consecutive failures may indicate systemic issue")
 

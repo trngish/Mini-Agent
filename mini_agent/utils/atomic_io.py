@@ -4,10 +4,9 @@ Provides atomic write/read operations using temp file pattern
 to ensure data integrity on crashes during I/O.
 """
 
+import json
 from pathlib import Path
 from typing import Any
-
-import json
 
 
 def atomic_write_json(data: Any, path: Path) -> None:

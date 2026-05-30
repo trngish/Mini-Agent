@@ -11,6 +11,16 @@ from mini_agent.llm import LLMClient
 from mini_agent.schema import AgentMode, Message, LLMProvider
 
 
+@pytest.fixture(autouse=True)
+def _reset_task_state():
+    """Reset global task state between tests."""
+    from mini_agent.utils.task_state import get_task_manager
+
+    get_task_manager().reset()
+    yield
+    get_task_manager().reset()
+
+
 @pytest.fixture
 def temp_workspace():
     """Create a temporary workspace directory."""

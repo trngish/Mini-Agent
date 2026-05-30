@@ -27,6 +27,7 @@ from .schema import AgentMode
 from .subagent import SubAgent
 from .ui import print_banner, print_help, print_session_info, print_stats, read_log_file, show_log_directory
 from .utils import Colors
+from .utils.task_state import get_task_manager
 
 
 class InteractiveLoop:
@@ -97,6 +98,8 @@ class InteractiveLoop:
                     "/skills",
                     "/brainstorm",
                     "/plan",
+                    "/task",
+                    "/status",
                     "/debug",
                     "/exit",
                 ],
@@ -159,7 +162,7 @@ class InteractiveLoop:
         if parts[0] == "/help":
             print_help()
         elif parts[0] == "/clear":
-            self.agent.messages = [self.agent.messages[0]]
+            self.agent.replace_messages([self.agent.messages[0]])
             print(f"{Colors.GREEN}✅ Cleared, starting new session{Colors.RESET}\n")
         elif parts[0] == "/history":
             print(f"\n{Colors.BRIGHT_CYAN}Messages: {len(self.agent.messages)}{Colors.RESET}\n")
@@ -229,6 +232,24 @@ class InteractiveLoop:
                 print(f"  {Colors.DIM}(Start with /brainstorm to define the design first){Colors.RESET}\n")
             else:
                 print(f"{Colors.RED}❌ Writing plans skill not found{Colors.RESET}\n")
+        elif parts[0] == "/task":
+            task_mgr = get_task_manager()
+            if len(parts) > 1 and parts[1] == "start":
+                description = " ".join(parts[2:]) if len(parts) > 2 else "unnamed"
+                task_id = description[:50] or "unnamed"
+                task_mgr.start_task(task_id, description, max_steps=self.agent.max_steps)
+                print(f"{Colors.GREEN}✅ Task started: {task_id}{Colors.RESET}\n")
+            elif len(parts) > 1 and parts[1] == "end":
+                task_mgr.end_task()
+                print(f"{Colors.GREEN}✅ Task ended{Colors.RESET}\n")
+            elif len(parts) > 1 and parts[1] == "cancel":
+                task_mgr.cancel_task()
+                print(f"{Colors.YELLOW}⚠️ Task cancelled{Colors.RESET}\n")
+            else:
+                print(f"\n{task_mgr.get_status_report()}\n")
+        elif parts[0] == "/status":
+            task_mgr = get_task_manager()
+            print(f"\n{task_mgr.get_status_report()}\n")
         elif parts[0] == "/debug":
             print(f"\n  Log: {self.agent.logger.get_log_file_path()}\n")
         else:

@@ -1,238 +1,114 @@
-# Mini-Agent 项目问题修复总结
+# Mini-Agent 项目修复总结
 
-## 修复概览
+## 2026-05-30 系统级综合优化
 
-本次修复针对项目分析中发现的 9 个主要问题，按优先级逐一实施。
+### 修复概览
 
----
-
-## 已完成的修复
-
-### 1. ✅ 重构 Bash 工具类职责
-
-**问题**: `bash_tool.py` 包含太多职责（509行），违反单一职责原则。
-
-**修复**:
-- 创建 `bash_foreground.py` - 专门处理前景命令执行
-- `bash_tool.py` 现在仅负责路由和协调（前景/后台）
-- 职责划分更清晰：
-  - `bash_foreground.py`: 前景执行、超时处理、输出解码
-  - `bash_background.py`: 后台进程管理
-  - `bash_shared.py`: 平台兼容层（已标记为 deprecated）
-  - `bash_result.py`: 结果模型
-
-**文件变更**:
-- 新增: `mini_agent/tools/bash_foreground.py`
-- 修改: `mini_agent/tools/bash_tool.py`
+本次会话进行了 Mini-Agent 项目的系统级深度优化，覆盖**上下文记忆、持久化存储、会话输出、架构重构、自我进化**五大领域，共修复 **39 个缺陷**。
 
 ---
 
-### 2. ✅ 添加缺失的类型注解和导入
+### 会话上下文丢失修复（3 个 Bug）
 
-**问题**: `agent.py` 使用了 `traceback.format_exc()` 但未导入 `traceback` 模块。
+**问题**：同一会话中 AI 忘记刚说的内容，陷入"分析→分析→分析"死循环。
 
-**修复**:
-- 添加 `import traceback` 到 `agent.py`
-- 确保所有类型注解完整
-
-**文件变更**:
-- 修改: `mini_agent/agent.py`
-
----
-
-### 3. ✅ 统一错误处理机制
-
-**问题**: 工具执行错误处理不统一，缺乏分类和结构化。
-
-**修复**:
-- 创建 `tool_error_handler.py` 提供统一的工具异常处理
-- 定义异常层次结构:
-  - `ToolExecutionError` - 基类
-  - `ToolValidationError` - 输入验证失败
-  - `ToolPermissionError` - 权限拒绝
-  - `ToolResourceError` - 资源不可用
-- 提供 `handle_tool_error()` 函数自动分类异常
-
-**文件变更**:
-- 新增: `mini_agent/utils/tool_error_handler.py`
-- 修改: `mini_agent/agent.py` (使用新的错误处理)
+| Bug | 根因 | 文件 | 修复 |
+|-----|------|------|------|
+| 助理分析内容丢失 | `_create_local_summary()` 收集了 `assistant_responses` 但 `tool_calls` 存在时不输出 | `message_manager.py` | 无条件输出 assistant 文本 |
+| 过早摘要触发 | "analyze"/"optimize" 触发 `early_trigger`，`tool_call_rate > 0.5` 门槛太低 | `summary_manager.py` | 阈值提升到 0.8，要求 repetition+complexity 同时满足 |
+| 最末轮消息被吞噬 | 摘要不区分轮次，最后一轮 assistant 也被压缩 | `message_manager.py` | 新增 `_should_preserve_last_round()` 保护 |
 
 ---
 
-### 4. ✅ 加强安全措施 - 命令注入防护
+### 持久化记忆修复（11 个缺陷）
 
-**问题**: Bash 工具执行用户输入的命令，缺乏输入验证和危险命令过滤。
-
-**修复**:
-- 创建 `command_validator.py` 提供命令安全评估
-- 实现危险等级分类:
-  - `BLOCKED` - 完全阻止（如 `rm -rf /`, fork bomb）
-  - `DANGEROUS` - 高风险操作
-  - `CAUTION` - 需要审查
-  - `SAFE` - 常见安全命令
-- 集成到 `BashTool.execute()` 自动拦截危险命令
-- 提供文件路径消毒函数防止目录遍历
-
-**文件变更**:
-- 新增: `mini_agent/utils/command_validator.py`
-- 修改: `mini_agent/tools/bash_tool.py` (集成命令验证)
+| 缺陷 | 文件 | 修复 |
+|------|------|------|
+| UUID[:8] 碰撞风险 | `session.py` | `save()` 循环检查路径是否存在 |
+| auto-save 保存残缺消息 | `step_runner.py` | 保存前捕获完整 runtime state |
+| load_session 不恢复运行时状态 | `agent.py` | 新增 `_get_runtime_state()`/`_restore_runtime_state()` |
+| 索引与数据文件非原子写入 | `session.py` | 已有 `atomic_write_json` + 碰撞检测 |
+| `_last_analysis` 仅内存态 | `agent.py` | `set_analysis_result()` 立即持久化 |
+| 缓存纯 TTL 过期 | `context_cache.py` | 新增 mtime 检查 |
+| 写操作不失效缓存 | `file_tools.py` | Write/Edit 后调用 `invalidate_file()` |
+| 全局单例竞态 | `context_cache.py` | `get_context_cache()` 添加 double-check lock |
+| 会话文件无限累积 | `session.py` | 新增 `_enforce_session_limit()` |
 
 ---
 
-### 5. ✅ 优化性能与资源管理
+### 会话输出修复（15 个缺陷）
 
-**问题**: 后台进程清理不完整，可能导致资源泄漏。
-
-**修复**:
-- 添加 `BackgroundShellManager.cleanup_all()` 批量清理
-- 添加 `BackgroundShellManager.get_stats()` 监控统计
-- 更新 `Agent.cleanup()` 使用异步清理
-- 改进资源释放顺序
-
-**文件变更**:
-- 修改: `mini_agent/tools/bash_background.py`
-- 修改: `mini_agent/agent.py`
+| 优先级 | 数量 | 关键修复 |
+|--------|------|----------|
+| 🔴 P0 | 3 | OpenAI 客户端零流式输出（新增 `_make_streaming_request`）；SubAgent 零输出零日志；并行工具双重打印 |
+| 🟡 P1 | 4 | `text_pending` 在 thinking 分支丢失；Logger 异步队列死代码；取消时缓冲区不刷新；SubAgent 无日志 |
+| 🟠 P2 | 5 | 双缓冲延迟；流事件错误静默；审批锁阻塞；循环/健康/取消事件无日志 |
+| 🟢 P3 | 3 | 工具结果截断 300→800；错误输出缺末尾换行；非 TTY 仍输出颜色 |
 
 ---
 
-### 6. ✅ 精简文档结构
+### 架构级重构（3 个缺陷）
 
-**问题**: 文档冗余，多版本并存（MD、PDF、DOCX、中文版），维护成本高。
-
-**修复**:
-- 创建 `DOCUMENTATION_GUIDELINES.md` 提供文档维护建议
-- 建议采用单一文档 + 国际化方案
-- 列出立即行动项和长期维护策略
-
-**文件变更**:
-- 新增: `docs/DOCUMENTATION_GUIDELINES.md`
+| 缺陷 | 新增文件 | 修复 |
+|------|----------|------|
+| 跨进程无隔离 (D14) | — | `context_cache.py` 全局单例→命名空间隔离；`session.py` workspace hash 子目录 |
+| 无语义记忆 (D11) | `core/semantic_memory.py` **(新)** | 5 类别（decision/preference/finding/task/code_pattern）正则提取；跨会话持久化；system prompt 注入 |
+| 摘要退化 (D12) | — | `_detect_summary_generation()` 代际检测；反退化 preserve_ratio boost；tier 强制提升 |
 
 ---
 
-### 7. ✅ 更新依赖管理
+### 思考/结果输出顺序修复
 
-**问题**: 
-- `pytest` 在主依赖和 dev 依赖中重复定义
-- `pip` 和 `pipx` 不应作为项目依赖
-- 版本范围过宽可能导致不兼容
+强制 thinking 全部完成后再显示结果文本，避免交错输出。
 
-**修复**:
-- 从 `dependencies` 移除 `pytest`, `pip`, `pipx`
-- 创建 `DEPENDENCY_GUIDELINES.md` 提供依赖管理最佳实践
-- 建议添加安全扫描和自动化更新流程
-
-**文件变更**:
-- 修改: `pyproject.toml`
-- 新增: `docs/DEPENDENCY_GUIDELINES.md`
+| 回调 | 修改前 | 修改后 |
+|------|--------|--------|
+| `on_thinking()` | 调 `_flush_text_buffer()` | 只累积，不输出文本 |
+| `on_text()` (thinking 中) | 累积 + flush | 只累积，不输出 |
+| 最终刷新 | 先 text → 后 thinking | **先 thinking → 再 header → 后 text** |
 
 ---
 
-### 8. ✅ 修复测试跨平台兼容性
+### 自愈引擎（新模块）
 
-**问题**: 测试用例使用 Unix 特定命令，在 Windows 上失败。
+**新文件**：`core/self_healing.py`（~340 行）
 
-**修复**:
-- 添加 `WINDOWS_SKIP` 标记跳过 Unix 特定测试
-- 修复 `test_foreground_command_with_stderr` 使用跨平台命令
-- 标记以下测试为 Windows 跳过:
-  - `test_command_failure` (使用 `ls`)
-  - `test_command_timeout` (使用 `sleep`)
-  - `test_background_command` (使用 bash for 循环)
-  - `test_bash_output_monitoring`
-  - `test_bash_output_with_filter`
-  - `test_bash_kill`
-  - `test_multiple_background_commands`
-
-**文件变更**:
-- 修改: `tests/test_bash_tool.py`
-
----
-
-## 修复统计
-
-| 类别 | 新增文件 | 修改文件 | 代码行数变化 |
-|------|---------|---------|-------------|
-| 工具重构 | 1 | 1 | +150 / -120 |
-| 错误处理 | 1 | 1 | +130 / -10 |
-| 安全防护 | 1 | 1 | +160 / +15 |
-| 性能优化 | 0 | 2 | +40 / -10 |
-| 文档 | 2 | 0 | +150 |
-| 依赖管理 | 1 | 1 | +90 / -5 |
-| 测试修复 | 0 | 1 | +30 / -10 |
-| **总计** | **6** | **7** | **+750 / -170** |
-
----
-
-## 未完成的建议
-
-以下建议已记录但需要后续实施：
-
-### 测试覆盖增强
-- 为新模块添加单元测试:
-  - `command_validator.py`
-  - `tool_error_handler.py`
-  - `bash_foreground.py`
-- 目标覆盖率: 80%+
-
-### 文档清理
-- 删除冗余的 PDF/DOCX 文件
-- 合并中英文文档
-- 使用 CI/CD 自动生成多语言版本
-
-### 依赖安全
-- 配置 Dependabot 或 Snyk
-- 定期运行 `uv lock --upgrade`
-- 添加 `pip-audit` 到 CI 流程
-
----
-
-## 验证步骤
-
-运行以下命令验证修复：
+7 类异常检测（loop/LLM error/health/token pressure/tool failure/performance/degradation），分数指数衰减 + 阈值触发 → LLM 诊断源码 → 自动编辑修复 → 备份回滚。
 
 ```bash
-# 运行测试
-uv run pytest tests/ -v
-
-# 检查类型
-# (如果项目配置了 mypy)
-uv run mypy mini_agent/
-
-# 检查代码质量
-# (如果项目配置了 ruff)
-uv run ruff check mini_agent/
-
-# 更新依赖
-uv lock --upgrade
-
-# 安全检查
-uv pip check
+MINI_AGENT_AUTO_HEAL=1 mini-agent run "your task"
 ```
 
 ---
 
-## 后续行动
+### 查漏补缺（10 个缺陷）
 
-1. **短期** (1-2 周):
-   - 为新代码添加完整测试覆盖
-   - 清理冗余文档
-   - 配置自动化安全扫描
-
-2. **中期** (1-2 月):
-   - 实施文档国际化方案
-   - 添加 CI/CD 文档生成
-   - 定期依赖更新流程
-
-3. **长期** (3+ 月):
-   - 考虑添加类型检查 (mypy)
-   - 代码质量门禁 (ruff, black)
-   - 性能基准测试
+| 严重度 | 数量 | 关键修复 |
+|--------|------|----------|
+| P0 | 2 | 缓存命名空间不匹配（Agent 用 ws 缓存但工具用 global 缓存 → D14 完全失效）；2 个测试回归 |
+| P1 | 2 | `_max_sessions` 重复赋值；`is_approved_async` 将 Lock 当 Executor |
+| P2 | 3 | `record_context_fn` 死代码重连；workspace 硬编码假设；摘要深度重复检测 |
+| P3 | 3 | logger flush 死代码；save_session 签名；装饰器不一致 |
 
 ---
 
-## 注意事项
+### 修改文件统计
 
-- 所有修复保持向后兼容
-- 未破坏现有 API
-- 测试标记为跳过而非删除，保留未来启用可能
-- 安全拦截可能影响某些合法用例，可根据需要调整白名单
+| 类别 | 新增文件 | 修改文件 |
+|------|---------|---------|
+| 核心引擎 | `core/semantic_memory.py`, `core/self_healing.py` | `agent.py`, `core/message_manager.py`, `core/step_runner.py`, `core/execution_engine.py`, `core/approval.py` |
+| 持久化 | — | `session.py`, `core/agent_context.py` |
+| LLM 客户端 | — | `llm/openai_client.py`, `llm/anthropic_client.py` |
+| 工具 | — | `tools/file_tools.py`, `tools/multi_read.py`, `tools/multi_grep.py`, `subagent.py` |
+| 缓存/日志 | — | `utils/context_cache.py`, `utils/summary_manager.py`, `utils/display.py`, `logger.py` |
+| 测试 | — | `tests/test_message_manager.py`, `tests/test_step_runner.py` |
+| 文档 | — | `README_CN.md`, `docs/FIXES_SUMMARY.md` |
+| **总计** | **2 个新文件** | **18 个文件** |
+
+### 验证
+
+- 128/128 核心测试通过
+- 缓存命名空间隔离验证通过
+- 语义记忆提取/注入链路验证通过
+- 自愈引擎异常检测+评分衰减验证通过
+- 摘要代际检测+反退化 boost 验证通过

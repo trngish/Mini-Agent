@@ -364,6 +364,9 @@ class WriteTool(Tool):
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             file_path.write_text(content, encoding="utf-8")
+            # D8 FIX: Invalidate context cache after write
+            from ..utils.context_cache import create_cache_for_workspace
+            create_cache_for_workspace(self.workspace_dir).invalidate_file(file_path)
             return ToolResult(success=True, content=f"Successfully wrote to {file_path}")
         except Exception as e:
             return ToolResult(success=False, content="", error=str(e))
@@ -449,6 +452,10 @@ class EditTool(Tool):
                 )
             new_content = content.replace(old_str, new_str)
             file_path.write_text(new_content, encoding="utf-8")
+            # D8 FIX: Invalidate context cache after edit to prevent stale reads
+            # P0 FIX: Use workspace-namespaced cache to match Agent
+            from ..utils.context_cache import create_cache_for_workspace
+            create_cache_for_workspace(self.workspace_dir).invalidate_file(file_path)
 
             return ToolResult(success=True, content=f"Successfully edited {file_path}")
         except Exception as e:

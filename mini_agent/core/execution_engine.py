@@ -109,9 +109,8 @@ class ExecutionEngine:
             async with semaphore:
                 return await self._execute_single_tool(tc, mode, check_approved_fn)
 
-        for tc in tool_calls:
-            self._print_tool_call(tc.function.name, tc.function.arguments)
-
+        # B1 FIX: _execute_single_tool already prints each tool call.
+        # Removing this loop prevents every tool from appearing twice.
         task_results = await asyncio.gather(*[execute_with_limit(tc) for tc in tool_calls], return_exceptions=True)
 
         processed_results: list[tuple[ToolCall, Message]] = []
@@ -332,11 +331,11 @@ class ExecutionEngine:
     def _print_tool_result(self, result: ToolResult) -> None:
         if result.success:
             text = result.content
-            if len(text) > 300:
-                text = text[:300] + f"{Colors.DIM}...{Colors.RESET}"
+            if len(text) > 800:  # F1 FIX: increased from 300 to show more context
+                text = text[:800] + f"{Colors.DIM}...{Colors.RESET}"
             print(f"{Colors.BRIGHT_GREEN}✓ Result:\n{Colors.RESET}{text}")
         else:
-            print(f"{Colors.BRIGHT_RED}✗ Error:\n{Colors.RESET}{Colors.RED}{result.error}{Colors.RESET}")
+            print(f"{Colors.BRIGHT_RED}✗ Error:\n{Colors.RESET}{Colors.RED}{result.error}{Colors.RESET}\n")  # F2 FIX: trailing newline
 
     def _on_tool_result(self, function_name: str, result: ToolResult, arguments: dict[str, Any] | None = None) -> None:
         self._print_tool_result(result)

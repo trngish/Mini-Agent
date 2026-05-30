@@ -145,7 +145,7 @@ class MiniMaxACPAgent:
         user_text = "\n".join(
             block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "") for block in params.prompt
         )
-        state.agent.messages.append(Message(role="user", content=user_text))
+        state.agent.add_user_message(user_text)
         stop_reason = await self._run_turn(state, params.sessionId)
         return PromptResponse(stopReason=stop_reason)
 
@@ -170,7 +170,7 @@ class MiniMaxACPAgent:
                 await self._send(session_id, update_agent_thought(text_block(response.thinking)))
             if response.content:
                 await self._send(session_id, update_agent_message(text_block(response.content)))
-            agent.messages.append(
+            state.agent.append_message(
                 Message(
                     role="assistant",
                     content=response.content,
@@ -207,7 +207,7 @@ class MiniMaxACPAgent:
                     session_id,
                     update_tool_call(call.id, status=status, content=[tool_content(text_block(text))], raw_output=text),
                 )
-                agent.messages.append(Message(role="tool", content=text, tool_call_id=call.id, name=name))
+                agent.append_message(Message(role="tool", content=text, tool_call_id=call.id, name=name))
         return "max_turn_requests"
 
     async def _send(self, session_id: str, update: Any) -> None:

@@ -11,6 +11,7 @@ from .llm import LLMClient
 from .schema import AgentMode, Message, ToolCall
 from .schema.schema import WRITE_TOOLS
 from .tools.base import Tool, ToolResult
+from .utils import Colors
 from .utils.model_utils import is_m27_model
 
 BLOCKED_TOOLS_FOR_SUBAGENT = frozenset({"bash_kill", "team_dispatch"})
@@ -69,8 +70,10 @@ class SubAgent:
         self.write_tools = WRITE_TOOLS
 
     async def run(self, task: str) -> SubAgentResult:
-        """Execute a sub-task and return the result."""
+        """Execute a sub-task and return the result (A2 FIX: added output)."""
         start = perf_counter()
+        task_short = task[:80] + "..." if len(task) > 80 else task
+        print(f"  {Colors.DIM}🔄 SubAgent: {task_short}{Colors.RESET}")
 
         # Configure M2.7 thinking budget if available
         if self.is_m27 and self.m27_config:
@@ -86,11 +89,13 @@ class SubAgent:
             try:
                 response = await self.llm.generate(messages=messages, tools=self.tool_list)
             except Exception as e:
+                elapsed = perf_counter() - start
+                print(f"  {Colors.RED}❌ SubAgent error ({elapsed:.1f}s): {e}{Colors.RESET}")
                 return SubAgentResult(
                     task=task,
                     content="",
                     success=False,
-                    elapsed=perf_counter() - start,
+                    elapsed=elapsed,
                     error=str(e),
                 )
 
@@ -119,18 +124,22 @@ class SubAgent:
                     messages.append(tool_msg)
                 continue
 
+            elapsed = perf_counter() - start
+            print(f"  {Colors.DIM}✅ SubAgent done ({elapsed:.1f}s): {task[:60]}{Colors.RESET}")
             return SubAgentResult(
                 task=task,
                 content=response.content or "",
                 success=True,
-                elapsed=perf_counter() - start,
+                elapsed=elapsed,
             )
 
+        elapsed = perf_counter() - start
+        print(f"  {Colors.YELLOW}⚠️  SubAgent max steps ({elapsed:.1f}s): {task[:60]}{Colors.RESET}")
         return SubAgentResult(
             task=task,
             content="",
             success=False,
-            elapsed=perf_counter() - start,
+            elapsed=elapsed,
             error="Max steps reached",
         )
 

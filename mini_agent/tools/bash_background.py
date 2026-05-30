@@ -248,7 +248,9 @@ class BackgroundShellManager:
         with cls._lock:
             prefix = f"{agent_id}:"
             agent_shells = {
-                k: v for k, v in cls._shells.items() if k.startswith(prefix) and not k.startswith(f"{agent_id}:monitor:")
+                k: v
+                for k, v in cls._shells.items()
+                if k.startswith(prefix) and not k.startswith(f"{agent_id}:monitor:")
             }
             running = sum(1 for s in agent_shells.values() if s.status == "running")
             completed = sum(1 for s in agent_shells.values() if s.status == "completed")

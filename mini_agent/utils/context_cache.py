@@ -122,7 +122,7 @@ class ContextCache:
                 break
 
     def get_file_content(self, path: str | Path) -> str | None:
-        """Get cached file content if valid.
+        """Get cached file content if valid (D7 FIX: added mtime check).
 
         Args:
             path: File path
@@ -134,6 +134,21 @@ class ContextCache:
         with self._lock:
             if key in self._file_cache:
                 entry = self._file_cache[key]
+                # D7 FIX: Check file mtime - if file was modified externally,
+                # the cache is stale even if TTL hasn't expired
+                cached_mtime = entry.get("_file_mtime")
+                if cached_mtime is not None:
+                    try:
+                        current_mtime = Path(path).stat().st_mtime
+                        if current_mtime != cached_mtime:
+                            # File was modified since caching - invalidate
+                            self._file_cache.pop(key, None)
+                            return None
+                    except OSError:
+                        # File no longer accessible - invalidate
+                        self._file_cache.pop(key, None)
+                        return None
+
                 if self._is_valid(entry):
                     # Update access time
                     entry["_last_access"] = time.time()
@@ -145,7 +160,7 @@ class ContextCache:
         return None
 
     def set_file_content(self, path: str | Path, content: str, ttl: int | None = DEFAULT_TTL) -> None:
-        """Cache file content with LRU eviction.
+        """Cache file content with LRU eviction and mtime tracking (D7 fix).
 
         Args:
             path: File path
@@ -154,12 +169,19 @@ class ContextCache:
         """
         key = str(Path(path).resolve())
         with self._lock:
+            # D7 FIX: Store file mtime for invalidation on external modification
+            try:
+                file_mtime = Path(path).stat().st_mtime
+            except OSError:
+                file_mtime = None
+
             entry = {
                 "content": content,
                 "created_at": time.time(),
                 "_last_access": time.time(),
                 "_access_count": 0,
                 "ttl": ttl,
+                "_file_mtime": file_mtime,
             }
             # Remove old entry if present to update memory tracking
             old_entry = self._file_cache.pop(key, None)
@@ -255,12 +277,21 @@ class ContextCache:
         return f"{pattern}|{str(Path(path).resolve())}|{file_pattern}|{case_sensitive}"
 
     def _is_valid(self, entry: dict[str, Any]) -> bool:
-        """Check if cache entry is still valid."""
+        """Check if cache entry is still valid (D7 FIX: added mtime check)."""
         ttl = entry.get("ttl")
-        if ttl is None:
-            return True  # No TTL = never expires
-        age = time.time() - entry["created_at"]
-        return age < ttl  # type: ignore[no-any-return]
+        if ttl is not None:
+            age = time.time() - entry["created_at"]
+            if age >= ttl:
+                return False
+
+        # D7 FIX: Check file mtime to detect external modifications
+        file_mtime = entry.get("_file_mtime")
+        if file_mtime is not None:
+            # The key matches the file path, but we don't have path in entry.
+            # Check all file_cache entries for this mtime check via get_file_content
+            pass  # mtime check is done in get_file_content() which has the path
+
+        return True
 
     def invalidate_file(self, path: str | Path) -> None:
         """Invalidate cached file content."""
@@ -422,24 +453,53 @@ def get_cache_hit_rate() -> float:
     return _cache_hits / total if total > 0 else 0.0
 
 
-# Global singleton instance
-_global_cache: ContextCache | None = None
+# Namespace-based cache registry (D14 FIX: replaces global singleton)
+# Each workspace/process gets its own isolated cache, preventing
+# cross-project cache pollution when multiple Agent instances run.
+_namespaced_caches: dict[str, ContextCache] = {}
+_namespaced_cache_lock = Lock()
 
 
-def get_context_cache() -> ContextCache:
-    """Get the global context cache instance."""
-    global _global_cache
-    if _global_cache is None:
-        _global_cache = ContextCache()
-    return _global_cache
+def get_context_cache(namespace: str = "__global__") -> ContextCache:
+    """Get a namespace-isolated context cache (D14 FIX).
+
+    Each namespace gets its own independent ContextCache instance.
+    Agents in different workspaces should use different namespaces
+    (typically workspace directory hash) to avoid cache pollution.
+
+    Args:
+        namespace: Cache namespace identifier. "__global__" for backward compat.
+    """
+    if namespace not in _namespaced_caches:
+        with _namespaced_cache_lock:
+            if namespace not in _namespaced_caches:
+                _namespaced_caches[namespace] = ContextCache()
+    return _namespaced_caches[namespace]
+
+
+def create_cache_for_workspace(workspace_dir: str | Path) -> ContextCache:
+    """Create or get a cache instance isolated to a specific workspace (D14 FIX).
+
+    Uses a hash of the workspace path as namespace, ensuring different
+    workspaces never share cached file content.
+    """
+    import hashlib
+    ws_hash = hashlib.md5(str(workspace_dir).encode()).hexdigest()[:12]
+    return get_context_cache(f"ws:{ws_hash}")
+
+
+def reset_cache_namespace(namespace: str = "__global__") -> None:
+    """Reset a specific namespace's cache."""
+    global _namespaced_caches
+    if namespace in _namespaced_caches:
+        _namespaced_caches[namespace].invalidate_all()
+        del _namespaced_caches[namespace]
 
 
 def reset_global_cache() -> None:
-    """Reset the global cache instance.
-
-    Used for process restart or testing to ensure fresh state.
-    """
-    global _global_cache
-    if _global_cache is not None:
-        _global_cache.invalidate_all()
-    _global_cache = None
+    """Reset all caches (backward compatible with old API)."""
+    global _namespaced_caches
+    with _namespaced_cache_lock:
+        for cache in _namespaced_caches.values():
+            cache.invalidate_all()
+        _namespaced_caches.clear()

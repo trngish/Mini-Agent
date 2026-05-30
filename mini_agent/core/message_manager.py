@@ -117,8 +117,23 @@ class MessageManager:
             print(f"{Colors.BRIGHT_YELLOW}⚠️  Insufficient messages, cannot summarize{Colors.RESET}")
             return messages
 
+        # D12 FIX: Detect summary generation depth to prevent cascading degeneration.
+        # Each time a summary is summarized again, we need higher preservation.
+        summary_generation = self._detect_summary_generation(messages)
+        if summary_generation > 0:
+            print(
+                f"{Colors.BRIGHT_YELLOW}🔍 Summary generation {summary_generation} detected"
+                f" - applying anti-degeneration boost{Colors.RESET}"
+            )
+
         new_messages = [messages[0]]
         summary_count = 0
+
+        # D12 FIX: Anti-degeneration minimum preservation ratios
+        # Generation 0 (fresh): normal ratios
+        # Generation 1: +20% boost
+        # Generation 2+: +35% boost with golden fact preservation
+        gen_boost = min(0.35, summary_generation * 0.15)
 
         for i, user_idx in enumerate(user_indices):
             new_messages.append(messages[user_idx])
@@ -136,18 +151,40 @@ class MessageManager:
             execution_messages = messages[user_idx + 1 : next_user_idx]
 
             if execution_messages:
+                is_last_round = (i == len(user_indices) - 1)
+
+                # CRITICAL FIX: For the most recent round, preserve assistant messages
+                # verbatim instead of summarizing them. The user's follow-up instruction
+                # almost always references the AI's most recent output. Summarizing it
+                # away causes the "AI forgets what it just said" problem.
+                if is_last_round and self._should_preserve_last_round(execution_messages):
+                    for msg in execution_messages:
+                        if msg.role in ("assistant", "tool"):
+                            new_messages.append(msg)
+                    summary_count += 1  # Count as "handled" even though preserved
+                    continue
+
                 tier = "medium"
                 if ":" in reason and "tier=" in reason:
-                    tier = reason.split("tier=")[1]
+                    # D12 FIX: Parse tier from reason, handle degen_w suffix
+                    tier_part = reason.split("tier=")[1]
+                    tier = tier_part.split(":")[0]  # Strip :degen_w{N} suffix
                 elif reason.startswith("early_trigger"):
                     tier = "low"
 
                 summary_config = self._summary_manager.get_summary_config(tier)
+                # D12 FIX: Apply anti-degeneration boost
+                # Higher generation → higher preservation to prevent cascading loss
+                boosted_ratio = min(1.0, summary_config["preserve_ratio"] + gen_boost)
+                boosted_truncation = summary_config["max_truncation"]
+                if summary_generation > 0:
+                    # Don't truncate as aggressively when re-summarizing
+                    boosted_truncation = min(summary_config["max_truncation"] * 2, 3000)
                 summary_text = self._create_local_summary(
                     execution_messages,
                     i + 1,
-                    preserve_ratio=summary_config["preserve_ratio"],
-                    max_truncation=summary_config["max_truncation"],
+                    preserve_ratio=boosted_ratio,
+                    max_truncation=boosted_truncation,
                 )
                 if summary_text:
                     summary_message = Message(
@@ -182,6 +219,50 @@ class MessageManager:
         )
 
         return new_messages
+
+    @staticmethod
+    def _detect_summary_generation(messages: list[Message]) -> int:
+        """D12 FIX: Detect how many generations of summarization have occurred.
+
+        Scans for [Execution Summary] markers in user messages to determine
+        the depth of the summary chain. Each layer of summarization adds
+        another generation.
+
+        Returns:
+            Summary generation depth (0 = fresh, 1+ = re-summarized).
+        """
+        max_gen = 0
+        for msg in messages:
+            if msg.role == "user" and msg.content and isinstance(msg.content, str):
+                content = msg.content
+                # Count nested summary markers
+                if "[Execution Summary" in content:
+                    gen = content.count("[Execution Summary")
+                    max_gen = max(max_gen, gen)
+                if "Stats:" in content and "tool(s)" in content:
+                    # Also count re-summarized stats
+                    gen = content.count("tool(s)")
+                    max_gen = max(max_gen, gen)
+        return max_gen
+
+    @staticmethod
+    def _should_preserve_last_round(execution_messages: list[Message]) -> bool:
+        """Determine if the last round's assistant messages should be preserved verbatim.
+
+        When the AI has just provided analysis/suggestions that the user will
+        reference in their next message, summarizing those messages causes
+        the AI to "forget" what it just said.
+
+        We preserve the last round if any assistant message has substantial
+        text content (more than 100 chars) — this indicates meaningful output
+        the user is likely to follow up on.
+        """
+        for msg in execution_messages:
+            if msg.role == "assistant":
+                content = msg.content if isinstance(msg.content, str) else str(msg.content) if msg.content else ""
+                if len(content) > 100:
+                    return True
+        return False
 
     def _create_local_summary(
         self,
@@ -236,8 +317,18 @@ class MessageManager:
                     result = result[:result_max] + "..."
                 lines.append(f"  Result: {result}")
 
-        if not tool_calls_count and assistant_responses:
-            lines.append(f"  Response: {assistant_responses[0]}")
+        # CRITICAL FIX: Include assistant's analysis responses in summary
+        # Previously, assistant_responses were collected but only output when NO tool_calls existed.
+        # In analysis scenarios, the AI reads files (tool_calls) AND gives suggestions (assistant content).
+        # The suggestions were being silently discarded, causing the AI to "forget" what it just said
+        # and re-analyze the same files repeatedly.
+        if assistant_responses:
+            for resp in assistant_responses:
+                # Truncate long assistant responses proportionally
+                resp_max = max(2000, int(2000 * preserve_ratio * 1.5))
+                if len(resp) > resp_max:
+                    resp = resp[:resp_max] + "..."
+                lines.append(f"  Assistant: {resp}")
 
         if tool_calls_count or tool_results_count:
             lines.append(f"  Stats: {tool_calls_count} tool(s), {tool_results_count} result(s)")

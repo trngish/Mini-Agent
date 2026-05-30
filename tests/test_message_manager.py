@@ -250,7 +250,7 @@ class TestCreateLocalSummary:
         messages = [Message(role="assistant", content="Hello from assistant")]
         result = mm._create_local_summary(messages, round_num=1)
         assert "Round 1:" in result
-        assert "Response: Hello from assistant" in result
+        assert "Assistant: Hello from assistant" in result
 
     def test_assistant_with_tool_calls(self):
         mm = MessageManager(token_limit=100000)
@@ -309,7 +309,7 @@ class TestCreateLocalSummary:
         mm = MessageManager(token_limit=100000)
         messages = [Message(role="assistant", content="Just a response")]
         result = mm._create_local_summary(messages, round_num=1)
-        assert "Response: Just a response" in result
+        assert "Assistant: Just a response" in result
         assert "Stats:" not in result
 
     def test_with_tool_calls_no_response_line(self):
@@ -334,7 +334,7 @@ class TestCreateLocalSummary:
         content = [{"type": "text", "text": "Hello"}]
         messages = [Message(role="assistant", content=content)]
         result = mm._create_local_summary(messages, round_num=1)
-        assert "Response:" in result
+        assert "Assistant:" in result
 
     def test_round_number_in_output(self):
         mm = MessageManager(token_limit=100000)

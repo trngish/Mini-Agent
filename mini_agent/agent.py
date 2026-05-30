@@ -17,10 +17,12 @@ from .core.approval import ApprovalManager
 from .core.error_recovery import ErrorRecoveryManager
 from .core.execution_engine import ExecutionEngine
 from .core.health_check import HealthChecker
+from .core.self_healing import SelfHealingManager
 from .core.message_manager import MessageManager
 from .core.metrics import PerformanceMetrics
 from .core.rate_limiter import RateLimiter
 from .core.retry_handler import create_retry_handler
+from .core.semantic_memory import SemanticMemory
 from .core.step_runner import StepRunner
 from .core.thinking_budget import ThinkingBudgetManager
 from .core.token_tracker import TokenTracker
@@ -32,9 +34,10 @@ from .session import SessionManager
 from .subagent import SubAgentResult
 from .tools.base import Tool
 from .utils import Colors
-from .utils.context_cache import get_context_cache
+from .utils.context_cache import create_cache_for_workspace
 from .utils.error_handler import LLMErrorClassifier, format_llm_error
 from .utils.model_utils import get_token_limit_for_model, is_m27_model
+from .utils.task_state import get_task_manager
 from .utils.thinking_manager import ThinkingManager
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,14 @@ class Agent:
 
         self.system_prompt = system_prompt
 
+        # D11 FIX: Semantic memory for cross-session knowledge persistence
+        self._semantic_memory = SemanticMemory(workspace_dir=self.workspace_dir)
+
+        # Inject cross-session memories into system prompt
+        memory_context = self._semantic_memory.get_context_for_injection(max_entries=6)
+        if memory_context:
+            self.system_prompt += "\n" + memory_context
+
         # Inject mode instructions into system prompt
         mode_instructions = {
             AgentMode.PLAN: (
@@ -144,6 +155,7 @@ class Agent:
             llm=self.llm,
             auto_save=self.auto_save,
             token_tracker=self._token_tracker,
+            record_context_fn=self._record_context_internal,
         )
 
         # Now initialize core modules with AgentContext (no circular dependency)
@@ -176,7 +188,8 @@ class Agent:
         )
 
         # Context cache for reducing redundant file reads/searches
-        self._context_cache = get_context_cache()
+        # D14 FIX: Workspace-isolated cache - each workspace gets its own cache instance
+        self._context_cache = create_cache_for_workspace(self.workspace_dir)
 
         # Warmup cache with frequently accessed files
         if os.environ.get("MINI_AGENT_CACHE_WARMUP", "true").lower() == "true":
@@ -198,11 +211,24 @@ class Agent:
         # Performance: throttle health checks
         self._last_health_check_step = -1
         self._health_check_interval = 5
+        self._loop_detection_streak = 0
 
         # Store last run result for session persistence
         self._last_result: str | None = None
         # Store analysis results for session persistence
         self._last_analysis: str | None = None
+
+        # Self-healing engine: detects anomalies and auto-fixes source code.
+        # Auto-detect source dir: check if mini_agent package is in this workspace.
+        _heal_source = self.workspace_dir
+        if (_heal_source / "mini_agent" / "agent.py").exists():
+            pass  # workspace IS the project root (editable install case)
+        elif (_heal_source.parent / "mini_agent" / "agent.py").exists():
+            _heal_source = _heal_source.parent  # workspace is a subdir
+        self._self_healing = SelfHealingManager(
+            source_dir=_heal_source,
+            llm_client=self.llm if os.environ.get("MINI_AGENT_AUTO_HEAL", "0") == "1" else None,
+        )
 
     def _record_context_internal(self, content: str, category: str = "auto") -> None:
         """Internal method for AgentContext to record context."""
@@ -218,6 +244,11 @@ class Agent:
     def messages(self) -> list[Message]:
         """Get message history via AgentContext."""
         return self._context.get_messages()
+
+    @messages.setter
+    def messages(self, value: list[Message]) -> None:
+        """Replace message history (backward-compatible assignment)."""
+        self.replace_messages(value)
 
     def append_message(self, message: Message) -> None:
         """Append a message to history via AgentContext."""
@@ -248,6 +279,16 @@ class Agent:
     def api_total_tokens(self, value: int) -> None:
         """Set API total tokens via AgentContext."""
         self._context.api_total_tokens = value
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Get consecutive failure count via AgentContext."""
+        return self._context.consecutive_failures
+
+    @consecutive_failures.setter
+    def consecutive_failures(self, value: int) -> None:
+        """Set consecutive failure count via AgentContext."""
+        self._context.consecutive_failures = value
 
     def record_context(self, content: str, category: str = "auto") -> None:
         """Automatically record important context without needing explicit tool call.
@@ -303,10 +344,16 @@ class Agent:
 
     async def _summarize_messages(self) -> None:
         """Message history summarization: delegate to MessageManager."""
+        old_token_count = self._context.api_total_tokens
         new_messages = await self._message_manager.summarize_messages(self.messages, self.api_total_tokens, logger)
         if new_messages is not self.messages:
             self.replace_messages(new_messages)
             self._token_tracker.invalidate_cache()
+            # Self-healing: record token pressure when summarization triggers
+            self._self_healing.record_anomaly(
+                "token_pressure", 0.5,
+                {"api_tokens": old_token_count, "limit": self.token_limit}, 0,
+            )
 
     async def run(self, cancel_event: asyncio.Event | None = None) -> str:
         """Execute agent loop until task is complete or max steps reached.
@@ -333,13 +380,49 @@ class Agent:
         step = 0
         run_start_time = perf_counter()
         step_runner = StepRunner(self, run_start_time)
+        self._loop_detection_streak = 0
+
+        task_mgr = get_task_manager()
+        if task_mgr.current_task:
+            task_mgr.end_task()
+        last_user = next(
+            (m.content for m in reversed(self.messages) if m.role == "user" and m.content),
+            "agent-run",
+        )
+        task_mgr.start_task(str(id(self)), last_user[:200], max_steps=self.max_steps)
 
         while step < self.max_steps:
+            task_mgr.increment_steps()
+
+            # Self-healing: tick and decay anomaly scores each step
+            self._self_healing.tick(step)
+            should_heal, heal_reason = self._self_healing.should_heal(step)
+            if should_heal:
+                await self._trigger_self_healing(step, heal_reason)
+
+            should_stop, stop_reason = task_mgr.check_should_stop()
+            if should_stop:
+                stop_msg = f"Task stopped: {stop_reason}"
+                self._last_result = stop_msg
+                print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {stop_msg}{Colors.RESET}")
+                return stop_msg
+
             # Check for cancellation at start of each step
             if self._check_cancelled():
+                # D1 FIX: Flush any buffered streaming content before cancelling.
+                # Without this, partially-streamed assistant response content is
+                # lost and the user never sees what the AI was about to say.
+                if self._stream_buffer_text:
+                    print("".join(self._stream_buffer_text), end="", flush=True)
+                    self._stream_buffer_text = []
+                if self._stream_buffer_thinking:
+                    print(f"{Colors.DIM}{''.join(self._stream_buffer_thinking)}{Colors.RESET}", end="", flush=True)
+                    self._stream_buffer_thinking = []
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 self._last_result = cancel_msg
+                # E4 FIX: Log cancellation for audit trail
+                logger.info("Task cancelled by user")
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
@@ -387,23 +470,22 @@ class Agent:
                     if not thinking_started:
                         print(f"\n  {Colors.BOLD}{Colors.MAGENTA}🧠 Think{Colors.RESET}")
                         thinking_started = True
-                    self._stream_buffer_thinking.append(text)
-                    # Flush buffer when reaching threshold
-                    if len(self._stream_buffer_thinking) >= self._buffer_flush_threshold:
-                        _flush_thinking_buffer()
-                    # Flush pending text when thinking starts
+                    # FIX: Move text_pending into text_buffer but DON'T flush.
+                    # Text must wait until ALL thinking is complete before display.
                     while text_pending:  # noqa: B023
                         pending = text_pending.pop(0)  # noqa: B023
                         self._stream_buffer_text.append(pending)
-                    if len(self._stream_buffer_text) >= self._buffer_flush_threshold:
-                        _flush_text_buffer()
+                    # Stream thinking content progressively
+                    self._stream_buffer_thinking.append(text)
+                    if len(self._stream_buffer_thinking) >= self._buffer_flush_threshold:
+                        _flush_thinking_buffer()
 
                 def on_text(text: str) -> None:  # noqa: B023
                     nonlocal thinking_started, text_pending  # noqa: B023
                     if thinking_started:  # noqa: B023
+                        # FIX: Accumulate text silently while thinking is in progress.
+                        # Text will only be displayed after thinking is fully complete.
                         self._stream_buffer_text.append(text)
-                        if len(self._stream_buffer_text) >= self._buffer_flush_threshold:
-                            _flush_text_buffer()
                     else:
                         text_pending.append(text)  # noqa: B023
 
@@ -414,12 +496,18 @@ class Agent:
                     on_thinking=on_thinking,
                 )
 
-                # Print assistant header and flush any pending text (or just text if no thinking)
+                # Print assistant header. Flush thinking FIRST, then text.
+                # This guarantees the user sees all thinking before any result text.
                 if thinking_started:
-                    print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
-                    # Flush any text that arrived before thinking
-                    _flush_text_buffer()
+                    # Drain remaining text_pending into buffer (silently)
+                    while text_pending:
+                        pending = text_pending.pop(0)
+                        self._stream_buffer_text.append(pending)
+                    # Flush all thinking content first
                     _flush_thinking_buffer()
+                    # Then print header and flush all accumulated text
+                    print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
+                    _flush_text_buffer()
                     print()
                 elif text_pending:
                     # No thinking at all - just print assistant header and text
@@ -442,6 +530,11 @@ class Agent:
 
                 error_msg = format_llm_error(e)
                 print(f"\n{error_msg}")
+                # Self-healing: record LLM error anomaly
+                self._self_healing.record_anomaly(
+                    "llm_error_pattern", 0.7,
+                    {"error": str(e)[:200], "step": step}, step,
+                )
                 self._last_result = f"LLM call failed: {llm_error.user_guidance}"
                 return self._last_result
 
@@ -451,17 +544,56 @@ class Agent:
             if health_issues:
                 for issue in health_issues:
                     print(f"  {Colors.YELLOW}⚠️  {issue}{Colors.RESET}")
+                # Self-healing: record health anomaly
+                self._self_healing.record_anomaly(
+                    "health_issues", min(1.0, 0.3 * len(health_issues)),
+                    {"count": len(health_issues), "step": step}, step,
+                )
 
             step_runner.prune_thinking()
 
+            # Detect loop patterns early — stop after repeated repetition
+            if step > 2 and step_runner.detect_loop(response):
+                self._loop_detection_streak += 1
+                self._context.api_total_tokens = self._token_tracker.estimate_tokens(self.messages)
+                if self._loop_detection_streak >= 2:
+                    loop_msg = response.content or "Task stopped: repetitive analysis pattern detected."
+                    self._last_result = loop_msg
+                    # Self-healing: record loop detection anomaly
+                    self._self_healing.record_anomaly(
+                        "loop_detection", 0.85,
+                        {"msg": loop_msg[:100], "step": step}, step,
+                    )
+                    if task_mgr.current_task:
+                        task_mgr.current_task.analysis_complete = True
+                        task_mgr.end_task()
+                    # E3 FIX: Log loop detection for debugging
+                    logger.warning("Loop pattern detected twice, stopping agent")
+                    print(f"\n{Colors.BRIGHT_YELLOW}⚠️  Stopping: loop pattern detected twice{Colors.RESET}")
+                    return loop_msg
+            else:
+                self._loop_detection_streak = 0
+
             if step_runner.is_complete(response):
+                if task_mgr.current_task:
+                    task_mgr.end_task()
                 step_runner.print_completion_summary(step, step_start_time)
                 self._last_result = response.content
+                # D11 FIX: Extract semantic memories on completion
+                try:
+                    memories = self._semantic_memory.extract_from_session(
+                        self.messages, f"completed_step_{step}"
+                    )
+                    if memories:
+                        self._semantic_memory.add_entries(memories)
+                except Exception:
+                    pass
                 self._session_manager.save(
                     self.messages,
                     f"completed_step_{step}",
                     result=self._last_result,
                     analysis=self._last_analysis,
+                    state=self._get_runtime_state(),
                 )
                 return self._last_result
 
@@ -509,7 +641,7 @@ class Agent:
         # Auto-save on max steps (for potential resume)
         if self.auto_save:
             try:
-                sid = self._session_manager.save(self.messages, f"max_steps_{self.max_steps}")
+                sid = self._session_manager.save(self.messages, f"max_steps_{self.max_steps}", state=self._get_runtime_state())
                 print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
             except Exception as e:
                 print(f"  {Colors.DIM}⚠️  Auto-save failed: {e}{Colors.RESET}")
@@ -547,19 +679,120 @@ class Agent:
         self._approval_manager.mode = mode
         print(f"{Colors.GREEN}✅ Mode switched: {old_mode.value} → {mode.value}{Colors.RESET}")
 
+    async def _trigger_self_healing(self, step: int, reason: str) -> None:
+        """Trigger self-healing diagnosis and optional auto-fix.
+
+        Called when anomaly scores exceed thresholds. Runs diagnosis on
+        source code and optionally applies fixes if auto-heal is enabled.
+
+        Args:
+            step: Current agent step.
+            reason: Why healing was triggered.
+        """
+        status = self._self_healing.get_status()
+        top_cats = self._self_healing.get_top_anomaly_categories(3)
+
+        print(
+            f"\n{Colors.BRIGHT_CYAN}🩺 Self-healing triggered (step {step}, {reason}){Colors.RESET}"
+        )
+        print(f"  {Colors.DIM}Top anomalies: {', '.join(f'{c}({s:.2f})' for c, s in top_cats)}{Colors.RESET}")
+
+        if not status["auto_heal_enabled"]:
+            print(
+                f"  {Colors.DIM}Auto-heal disabled. Report only."
+                f" Set MINI_AGENT_AUTO_HEAL=1 to enable.{Colors.RESET}"
+            )
+            print(self._self_healing.get_healing_report())
+            return
+
+        try:
+            diagnosis = await self._self_healing.diagnose(top_cats)
+            fixes = diagnosis.get("suggested_fixes", [])
+
+            if not fixes:
+                print(f"  {Colors.DIM}No actionable fixes identified.{Colors.RESET}")
+                return
+
+            print(f"  {Colors.BRIGHT_YELLOW}Found {len(fixes)} potential fix(es):{Colors.RESET}")
+            for i, fix in enumerate(fixes):
+                desc = fix.get("description", fix.get("file", "unknown"))[:80]
+                print(f"  {Colors.DIM}  [{i + 1}] {desc}{Colors.RESET}")
+
+            # Apply fixes (with approval check in non-YOLO modes)
+            applied = 0
+            anomaly_ids = [a.id for a in self._self_healing._anomalies[-5:]]
+
+            for fix in fixes:
+                file_name = fix.get("file", "")
+                description = fix.get("description", "auto-fix")
+                old_str = fix.get("old_str", "")
+                new_str = fix.get("new_str", "")
+
+                if not file_name or not old_str:
+                    continue
+
+                # Approval gate in Agent mode
+                if self.mode == AgentMode.AGENT:
+                    print(
+                        f"  {Colors.BRIGHT_YELLOW}Apply fix to {file_name}?"
+                        f" {Colors.DIM}({description[:60]}){Colors.RESET}"
+                    )
+                    if not self._check_approved(f"heal:{file_name}"):
+                        print(f"  {Colors.DIM}  Skipped (not approved){Colors.RESET}")
+                        continue
+
+                result = self._self_healing.apply_fix(
+                    file_name=file_name,
+                    description=description,
+                    old_str=old_str,
+                    new_str=new_str,
+                    anomaly_ids=anomaly_ids,
+                )
+
+                if result:
+                    applied += 1
+                    print(
+                        f"  {Colors.BRIGHT_GREEN}✅ Fixed: {file_name} - {description[:60]}"
+                        f"{Colors.RESET}"
+                    )
+                    print(f"  {Colors.DIM}  Backup: {Path(result.backup_path).name}{Colors.RESET}")
+
+            if applied > 0:
+                print(
+                    f"  {Colors.BRIGHT_GREEN}🩺 Applied {applied} fix(es)."
+                    f" Changes take effect on next restart.{Colors.RESET}"
+                )
+            else:
+                print(f"  {Colors.DIM}No fixes applied.{Colors.RESET}")
+
+        except Exception as e:
+            logger.warning("Self-healing failed: %s", e)
+            print(f"  {Colors.YELLOW}⚠️  Self-healing error: {e}{Colors.RESET}")
+
     def save_session(self, label: str = "") -> str:
         """Save current session including last result and analysis. Returns session ID."""
-        return self._session_manager.save(self.messages, label=label, result=self._last_result)
+        # D11 FIX: Extract semantic memories before saving
+        try:
+            memories = self._semantic_memory.extract_from_session(self.messages, label or "manual_save")
+            if memories:
+                added = self._semantic_memory.add_entries(memories)
+                if added > 0:
+                    print(f"  {Colors.DIM}🧠 Extracted {added} semantic memories{Colors.RESET}")
+        except Exception:
+            pass
+        return self._session_manager.save(self.messages, label=label, result=self._last_result, state=self._get_runtime_state())
 
     def load_session(self, session_id: str) -> bool:
-        """Load a saved session including result and analysis. Returns True on success."""
-        messages, result = self._session_manager.load(session_id)
+        """Load a saved session including result, analysis, and runtime state. Returns True on success."""
+        messages, result, state = self._session_manager.load(session_id)
         if messages is None:
             return False
         self.replace_messages(messages)
         self._last_result = result  # Restore last result
         # Restore last analysis from metadata if available
         self._last_analysis = self._session_manager.load_analysis(session_id)
+        # D3 FIX: Restore full runtime state (thinking budget, loop counter, etc.)
+        self._restore_runtime_state(state)
         # Sync AgentContext state after session restore
         self._sync_context_state()
         return True
@@ -573,12 +806,54 @@ class Agent:
 
         This allows the agent to remember analysis results across sessions.
         Call this after completing an analysis task.
+
+        D5 FIX: Analysis is now persisted to the most recent session file
+        immediately, preventing data loss on crash.
         """
         self._last_analysis = analysis
+        # D5: Auto-persist to most recent session
+        try:
+            latest_sid = self._session_manager.get_latest_session_id()
+            if latest_sid:
+                self._session_manager.save_analysis(latest_sid, analysis)
+        except Exception:
+            pass  # Non-critical, don't block the agent
 
     def get_analysis_result(self) -> str | None:
         """Get the last analysis result."""
         return self._last_analysis
+
+    def _get_runtime_state(self) -> dict[str, Any]:
+        """D3 FIX: Serialize all critical runtime state for session persistence.
+
+        Captures state that would otherwise be lost on session restore:
+        api_total_tokens, thinking_budget, loop_detection_streak, etc.
+        """
+        return {
+            "api_call_count": self._context.api_call_count,
+            "api_total_tokens": self._context.api_total_tokens,
+            "thinking_budget": self.thinking_budget,
+            "loop_detection_streak": self._loop_detection_streak,
+            "consecutive_failures": self._context.consecutive_failures,
+            "last_auto_save_step": self._context.last_auto_save_step,
+            "mode": self.mode.value if hasattr(self.mode, "value") else str(self.mode),
+        }
+
+    def _restore_runtime_state(self, state: dict[str, Any]) -> None:
+        """D3 FIX: Restore runtime state from a saved session."""
+        if not state:
+            return
+        self._context.api_call_count = state.get("api_call_count", self._context.api_call_count)
+        self._context.api_total_tokens = state.get("api_total_tokens", self._context.api_total_tokens)
+        self.thinking_budget = state.get("thinking_budget", self.thinking_budget)
+        self._loop_detection_streak = state.get("loop_detection_streak", 0)
+        self._context.consecutive_failures = state.get("consecutive_failures", 0)
+        self._context.last_auto_save_step = state.get("last_auto_save_step", 0)
+        print(
+            f"{Colors.DIM}  State restored: {state.get('api_call_count', 0)} API calls,"
+            f" {state.get('api_total_tokens', 0)} tokens,"
+            f" budget={state.get('thinking_budget', 'N/A')}{Colors.RESET}"
+        )
 
     def _sync_context_state(self) -> None:
         """Sync AgentContext state after session restore.

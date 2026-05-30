@@ -18,7 +18,8 @@ class TestThinkingManager:
 
     def test_default_max(self):
         tm = ThinkingManager()
-        assert tm.max_thinking_tokens == 100_000
+        assert tm.max_thinking_tokens == ThinkingManager.DEFAULT_MAX_THINKING_TOKENS
+        assert tm.max_thinking_tokens == 150_000
 
     def test_estimate_thinking_tokens_none(self):
         tm = ThinkingManager()

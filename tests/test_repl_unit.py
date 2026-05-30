@@ -11,7 +11,9 @@ from mini_agent.schema import AgentMode
 def _make_mock_agent(mode=AgentMode.AGENT, messages=None, api_call_count=0, workspace_dir="."):
     agent = MagicMock()
     agent.mode = mode
-    agent.messages = messages if messages is not None else [MagicMock()]
+    msgs = messages if messages is not None else [MagicMock()]
+    agent.messages = msgs
+    agent.replace_messages = MagicMock(side_effect=lambda value: setattr(agent, "messages", value))
     agent.api_call_count = api_call_count
     agent.workspace_dir = Path(workspace_dir)
     agent.tools = {}

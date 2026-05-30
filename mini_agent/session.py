@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +11,7 @@ from typing import Any
 
 from .schema import Message
 from .utils import Colors
-from .utils.atomic_io import atomic_write_json, atomic_read_json
+from .utils.atomic_io import atomic_read_json, atomic_write_json
 
 
 class SessionManager:
@@ -21,14 +23,27 @@ class SessionManager:
 
     INDEX_FILENAME = ".session_index.json"
     MAX_SESSIONS_IN_INDEX = 1000
+    DEFAULT_MAX_SESSIONS = 100
 
     def __init__(self, workspace_dir: Path | None = None, logger: Any = None, session_dir: Path | None = None):
         self.workspace_dir = workspace_dir
         self.logger = logger
-        self.session_dir = session_dir or Path.home() / ".mini-agent" / "sessions"
+
+        # D14 FIX: Workspace-isolated session storage
+        # Sessions from different projects are stored in separate subdirectories
+        # based on workspace hash, preventing cross-project collision.
+        if session_dir:
+            self.session_dir = session_dir
+        elif workspace_dir and os.environ.get("MINI_AGENT_SESSION_ISOLATION", "1") != "0":
+            ws_hash = hashlib.md5(str(workspace_dir.absolute()).encode()).hexdigest()[:12]
+            self.session_dir = Path.home() / ".mini-agent" / "sessions" / ws_hash
+        else:
+            self.session_dir = Path.home() / ".mini-agent" / "sessions"
+
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._index: list[dict[str, Any]] | None = None
         self._index_loaded = False
+        self._max_sessions = int(os.environ.get("MINI_AGENT_MAX_SESSIONS", str(self.DEFAULT_MAX_SESSIONS)))
 
     def _get_index_path(self) -> Path:
         """Get path to index file."""
@@ -55,6 +70,7 @@ class SessionManager:
         """Invalidate cached index."""
         self._index = None
         self._index_loaded = False
+        self._max_sessions = int(os.environ.get("MINI_AGENT_MAX_SESSIONS", str(self.DEFAULT_MAX_SESSIONS)))
 
     def _serialize_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         return [msg.model_dump() for msg in messages]
@@ -69,8 +85,9 @@ class SessionManager:
         label: str,
         result: str | None = None,
         analysis: str | None = None,
+        state: dict[str, Any] | None = None,
     ) -> None:
-        """Internal method to save messages to a session file.
+        """Internal method to save messages to a session file (D3: added state param).
 
         Args:
             messages: List of messages to save
@@ -87,6 +104,7 @@ class SessionManager:
             "messages": self._serialize_messages(messages),
             "result": result,
             "analysis": analysis,
+            "state": state or {},
         }
         path = self.session_dir / f"{session_id}.json"
         atomic_write_json(data, path)
@@ -124,18 +142,29 @@ class SessionManager:
         label: str = "",
         result: str | None = None,
         analysis: str | None = None,
+        state: dict[str, Any] | None = None,
     ) -> str:
         """Save messages to a session file. Returns session ID."""
+        # D1 FIX: Check for ID collisions before saving
+        max_attempts = 5
         session_id = str(uuid.uuid4())[:8]
+        for _ in range(max_attempts):
+            path = self.session_dir / f"{session_id}.json"
+            if not path.exists():
+                break
+            session_id = str(uuid.uuid4())[:8]
         timestamp = datetime.now().isoformat()
 
-        self._save_to_file(messages, session_id, label, result, analysis)
+        self._save_to_file(messages, session_id, label, result, analysis, state)
         self._update_index(session_id, label, len(messages), timestamp)
+
+        # D13 FIX: Auto-cleanup old sessions when exceeding max
+        self._enforce_session_limit()
 
         return session_id
 
-    def load(self, session_id: str) -> tuple[list[Message] | None, str | None]:
-        """Load messages and result from a session file.
+    def load(self, session_id: str) -> tuple[list[Message] | None, str | None, dict[str, Any] | None]:
+        """Load messages, result, and runtime state from a session file.
 
         Returns:
             Tuple of (messages list, result string). Either may be None if not found.
@@ -143,14 +172,15 @@ class SessionManager:
         path = self.session_dir / f"{session_id}.json"
         data = atomic_read_json(path)
         if data is None:
-            return None, None
+            return None, None, None
         messages = self._deserialize_messages(data.get("messages", []))
         result = data.get("result")
-        return messages, result
+        state = data.get("state", {})
+        return messages, result, state
 
     def load_messages(self, session_id: str) -> list[Message] | None:
         """Load messages only from a session file (backwards compatibility)."""
-        messages, _ = self.load(session_id)
+        messages, _, _ = self.load(session_id)
         return messages
 
     def load_analysis(self, session_id: str) -> str | None:
@@ -168,6 +198,7 @@ class SessionManager:
         if data is None:
             return
         data["analysis"] = analysis
+        data["updated"] = datetime.now().isoformat()
         atomic_write_json(data, path)
 
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -235,6 +266,29 @@ class SessionManager:
         sessions = self.list_sessions()
         return sessions[0]["id"] if sessions else None
 
+    def _enforce_session_limit(self) -> int:
+        """D13 FIX: Auto-cleanup oldest sessions when exceeding max_sessions."""
+        removed = 0
+        try:
+            sessions = sorted(
+                self.session_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,
+            )
+            excess = len(sessions) - self._max_sessions
+            for path in sessions[:excess]:
+                if path.name == self.INDEX_FILENAME:
+                    continue
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+            if removed > 0:
+                self._invalidate_index()
+        except Exception:
+            pass
+        return removed
+
     def delete(self, session_id: str) -> bool:
         """Delete a session file."""
         path = self.session_dir / f"{session_id}.json"
@@ -257,22 +311,22 @@ class SessionManager:
         if index_path.exists():
             index_path.unlink()
 
-    def save_session(self, messages: list[Message], session_id: str | None = None, label: str = "") -> str:
+    def save_session(self, messages: list[Message], session_id: str | None = None, label: str = "", state: dict[str, Any] | None = None) -> str:
         """Save messages to a session with user feedback. Returns session ID."""
         if session_id is not None:
             timestamp = datetime.now().isoformat()
-            self._save_to_file(messages, session_id, label)
+            self._save_to_file(messages, session_id, label, state=state)
             self._update_index(session_id, label, len(messages), timestamp)
             print(f"{Colors.GREEN}✅ Session saved: {session_id}{Colors.RESET}")
             return session_id
 
-        sid = self.save(messages, label)
+        sid = self.save(messages, label, state=state)
         print(f"{Colors.GREEN}✅ Session saved: {sid}{Colors.RESET}")
         return sid
 
     def load_session(self, session_id: str) -> list[Message] | None:
         """Load a session with user feedback. Returns messages or None."""
-        messages = self.load(session_id)
+        messages, _, _ = self.load(session_id)
         if messages is None:
             print(f"{Colors.RED}❌ Session not found: {session_id}{Colors.RESET}")
             return None
@@ -282,3 +336,4 @@ class SessionManager:
             f" ({len(messages)} messages, {system_count} system prompts){Colors.RESET}"
         )
         return messages
+

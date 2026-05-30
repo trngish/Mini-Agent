@@ -1,10 +1,10 @@
 """StepRunner interface for agent decoupling."""
 
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..agent import Agent
+    pass
 
 
 class IStepRunnerDelegate(ABC):

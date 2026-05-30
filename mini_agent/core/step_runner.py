@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 from ..schema import Message
 from ..utils import Colors
+from ..utils.task_state import detect_completion, detect_loop_pattern
 
 if TYPE_CHECKING:
-    from .agent_context import AgentContext
     from ..agent import Agent
 
 
@@ -111,8 +111,30 @@ class StepRunner:
         return 0
 
     def is_complete(self, response: Any) -> bool:
-        """Check if the task is complete (no tool calls in response)."""
-        return not response.tool_calls
+        """Check if the task is complete (no tool calls in response).
+
+        Also detects completion patterns and loop patterns to prevent
+        infinite loops during analysis tasks.
+        """
+        # No tool calls means task is likely complete
+        if not response.tool_calls:
+            # Check for completion patterns in content (only if content exists)
+            if response.content and detect_completion(response.content):
+                print(f"{Colors.BRIGHT_GREEN}✅ Completion pattern detected{Colors.RESET}")
+                return True
+            # Also complete if no tool calls (empty response with no tools = done)
+            return True
+        return False
+
+    def detect_loop(self, response: Any) -> bool:
+        """Detect if response shows loop/repetition patterns.
+
+        Returns True if a loop pattern is detected, False otherwise.
+        """
+        if response.content and detect_loop_pattern(response.content):
+            print(f"{Colors.YELLOW}⚠️  Loop pattern detected: repeating previous work{Colors.RESET}")
+            return True
+        return False
 
     def print_completion_summary(self, step: int, step_start_time: float) -> None:
         """Print step and total timing summary."""
@@ -122,7 +144,9 @@ class StepRunner:
             f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s"
             f" (total: {total_elapsed:.2f}s){Colors.RESET}"
         )
-        print(f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self._context.api_call_count} (per-call billing){Colors.RESET}")
+        print(
+            f"{Colors.BRIGHT_GREEN}💰 Total API calls: {self._context.api_call_count} (per-call billing){Colors.RESET}"
+        )
 
     def auto_save(self, step: int, prefix: str = "auto_step") -> None:
         """Auto-save session if enabled and interval reached.
@@ -136,8 +160,15 @@ class StepRunner:
         if prefix == "auto_step" and step - self._context.last_auto_save_step < 3:
             return
         try:
-            sid = self._agent._session_manager.save(self._context.get_messages(), f"{prefix}_{step}")
-            print(f"  {Colors.DIM}💾 Session auto-saved: {sid}{Colors.RESET}")
+            # D2 FIX: Save runtime state alongside messages so restored
+            # sessions have full context (not just summarized messages)
+            state = self._agent._get_runtime_state()
+            sid = self._agent._session_manager.save(
+                self._context.get_messages(),
+                f"{prefix}_{step}",
+                state=state,
+            )
+            print(f"  {Colors.DIM}💾 Session auto-saved: {sid} (with state){Colors.RESET}")
             if prefix == "auto_step":
                 self._context.last_auto_save_step = step
         except Exception as e:

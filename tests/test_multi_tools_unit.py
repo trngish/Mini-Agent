@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from mini_agent.tools.multi_edit import MultiEditTool
-from mini_agent.tools.multi_edit import _ensure_list as edit_ensure_list
+from mini_agent.tools.multi_edit import _normalize_edits_param as edit_ensure_list
 from mini_agent.tools.multi_grep import MultiGrepTool
 from mini_agent.tools.multi_grep import _ensure_list as grep_ensure_list
 from mini_agent.tools.multi_read import MultiReadTool
@@ -115,26 +115,38 @@ class TestMultiEditToolMultipleEdits:
 
 
 class TestEditEnsureListHelper:
-    def test_none_returns_empty_list(self):
-        assert edit_ensure_list(None) == []
+    def test_none_and_no_shorthand_returns_empty_list(self):
+        assert edit_ensure_list(None, None, None, None) == []
 
-    def test_list_returns_list(self):
+    def test_list_returns_parsed(self):
         data = [{"path": "a"}]
-        assert edit_ensure_list(data) is data
+        result = edit_ensure_list(data, None, None, None)
+        # New function returns the parsed list
+        assert result == data
 
     def test_json_string_parses(self):
         data = '[{"path": "a"}]'
-        result = edit_ensure_list(data)
+        result = edit_ensure_list(data, None, None, None)
         assert isinstance(result, list)
         assert result[0]["path"] == "a"
 
-    def test_invalid_json_returns_wrapped(self):
-        result = edit_ensure_list("not json")
-        assert result == ["not json"]
+    def test_single_edit_shorthand(self):
+        result = edit_ensure_list(None, "path.txt", "old", "new")
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["path"] == "path.txt"
+        assert result[0]["old_str"] == "old"
+        assert result[0]["new_str"] == "new"
 
-    def test_non_list_json_returns_wrapped(self):
-        result = edit_ensure_list('{"key": "val"}')
-        assert result == ['{"key": "val"}']
+    def test_invalid_json_returns_empty(self):
+        # New function returns empty list for invalid JSON
+        result = edit_ensure_list("not json", None, None, None)
+        assert result == []
+
+    def test_non_list_json_returns_dict(self):
+        # New function parses JSON dict and returns as list
+        result = edit_ensure_list('{"key": "val"}', None, None, None)
+        assert result == [{"key": "val"}]
 
 
 class TestMultiGrepToolTextSearch:

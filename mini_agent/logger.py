@@ -312,16 +312,12 @@ class AgentLogger:
         entry += "-" * 80 + "\n"
         entry += content + "\n"
 
-        if self.ASYNC_WRITE_ENABLED and self._write_queue is not None:
-            # Use put() with timeout to ensure no log loss, fall back to sync write
-            try:
-                self._write_queue.put_nowait(entry)
-            except asyncio.QueueFull:
-                # Queue full - write synchronously instead of losing the entry
-                self._write_log_sync(entry)
-        else:
-            # Synchronous write
-            self._write_log_sync(entry)
+        # A3 FIX: Removed dead async queue path.
+        # ASYNC_WRITE_ENABLED was always True but _write_queue was never
+        # initialized, making this entire block unreachable dead code.
+        # Replaced with unconditional sync write which is sufficient for
+        # log durability (OS-level write caching already provides batching).
+        self._write_log_sync(entry)
 
     def _write_log_sync(self, entry: str) -> None:
         """Synchronously write log entry to file.
@@ -347,14 +343,7 @@ class AgentLogger:
         return self.log_file or self.LOG_DIR / "placeholder.log"
 
     def flush(self) -> None:
-        """Flush any pending writes to disk."""
-        if self._write_queue is not None:
-            while not self._write_queue.empty():
-                try:
-                    entry = self._write_queue.get_nowait()
-                    self._write_log_sync(entry)
-                except asyncio.QueueEmpty:
-                    break
+        """Flush any pending writes to disk (P3 FIX: removed dead queue code)."""
         if self.log_file is not None:
             with open(self.log_file, "a", encoding="utf-8"):
                 pass

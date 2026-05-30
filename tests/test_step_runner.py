@@ -468,13 +468,17 @@ class TestAutoSave:
         mock_agent._context._last_auto_save_step = 0
         mock_agent._session_manager.save.return_value = "sid_1"
         runner.auto_save(step=5)
-        mock_agent._session_manager.save.assert_called_once_with(mock_agent._context.get_messages(), "auto_step_5")
+        mock_agent._session_manager.save.assert_called_once_with(
+            mock_agent._context.get_messages(), "auto_step_5", state=mock_agent._get_runtime_state()
+        )
 
     def test_saves_with_custom_prefix(self, runner, mock_agent):
         mock_agent._context.auto_save = True
         mock_agent._session_manager.save.return_value = "sid_2"
         runner.auto_save(step=2, prefix="checkpoint")
-        mock_agent._session_manager.save.assert_called_once_with(mock_agent._context.get_messages(), "checkpoint_2")
+        mock_agent._session_manager.save.assert_called_once_with(
+            mock_agent._context.get_messages(), "checkpoint_2", state=mock_agent._get_runtime_state()
+        )
 
     def test_prints_session_id_on_success(self, runner, mock_agent, capsys):
         mock_agent._context.auto_save = True

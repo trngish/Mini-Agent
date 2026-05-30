@@ -203,6 +203,8 @@ def print_help() -> None:
         ("/skills", "List all available skills"),
         ("/brainstorm", "Learn about brainstorming workflow"),
         ("/plan", "Learn about planning workflow"),
+        ("/task [start|end|cancel]", "Manage task state"),
+        ("/status", "Show current task status"),
         ("/exit", "Exit the program"),
     ]:
         print(f"  {Colors.GREEN}{cmd:<20}{Colors.RESET} {Colors.DIM}{desc}{Colors.RESET}")

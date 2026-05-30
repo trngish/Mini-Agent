@@ -5,10 +5,11 @@ eliminating circular dependencies and providing clean interfaces
 for all components.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from ..schema import AgentMode, Message
 
@@ -37,7 +38,7 @@ class AgentContext:
     messages: list[Message] = field(default_factory=list)
     mode: AgentMode = AgentMode.YOLO
     max_steps: int = 50
-    workspace_dir: Path = field(default_factory=lambda: Path("."))
+    workspace_dir: Path = field(default_factory=lambda: Path())
     token_limit: int = 80000
 
     # LLM state
