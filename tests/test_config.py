@@ -56,12 +56,12 @@ class TestLLMConfig:
 
     def test_invalid_api_key_too_short(self):
         """Test LLMConfig rejects too-short API key."""
-        with pytest.raises(ValueError, match="at least 8 characters"):
+        with pytest.raises(ValueError, match=r"至少8个字符|at least 8 characters"):
             LLMConfig(api_key="short")
 
     def test_invalid_api_key_placeholder(self):
         """Test LLMConfig rejects placeholder API key."""
-        with pytest.raises(ValueError, match="not configured"):
+        with pytest.raises(ValueError, match="未配置|not configured"):
             LLMConfig(api_key="YOUR_API_KEY_HERE")
 
     def test_default_api_base(self):
@@ -274,7 +274,7 @@ class TestConfigToDict:
         assert "llm" in result
         assert "agent" in result
         assert "tools" in result
-        assert result["llm"]["api_key"] == "test_key_12345"
+        assert result["llm"]["api_key"] == "test***2345"
 
 
 class TestConfigFindConfigFile:

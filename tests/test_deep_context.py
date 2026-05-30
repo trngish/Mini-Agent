@@ -77,9 +77,9 @@ class TestDeepContextToolExecute:
     async def test_execute_default(self, mock_tree, mock_git, mock_compress, tool):
         result = await tool.execute()
         assert result.success is True
-        assert "Directory Tree" in result.content
-        assert "Git Status" in result.content
-        assert "Project Structure Analysis" in result.content
+        assert "目录树" in result.content or "Directory Tree" in result.content
+        assert "Git 状态" in result.content or "Git Status" in result.content
+        assert "项目结构分析" in result.content or "Project Structure Analysis" in result.content
         mock_tree.assert_called_once_with(tool.workspace_dir, 4)
         mock_git.assert_called_once_with(tool.workspace_dir, max_status_lines=50, max_commits=10)
 
@@ -99,7 +99,7 @@ class TestDeepContextToolExecute:
         (Path(temp_workspace) / "pyproject.toml").write_text("[project]\nname = 'test'", encoding="utf-8")
         result = await tool.execute(read_config_files=True)
         assert result.success is True
-        assert "Key Config Files" in result.content
+        assert "关键配置文件" in result.content or "Key Config Files" in result.content
         assert "pyproject.toml" in result.content
 
     @patch("mini_agent.tools.deep_context.should_compress_result", return_value=False)
@@ -108,7 +108,7 @@ class TestDeepContextToolExecute:
     async def test_execute_without_config_files(self, mock_tree, mock_git, mock_compress, tool):
         result = await tool.execute(read_config_files=False)
         assert result.success is True
-        assert "Key Config Files" not in result.content
+        assert "关键配置文件" not in result.content or "Key Config Files" not in result.content
 
     @patch("mini_agent.tools.deep_context.should_compress_result", return_value=False)
     @patch("mini_agent.tools.deep_context.get_git_status_sync", return_value="Branch: main")
@@ -117,7 +117,7 @@ class TestDeepContextToolExecute:
         (Path(temp_workspace) / "main.py").write_text("print('hello')\n", encoding="utf-8")
         result = await tool.execute(read_entry_files=True)
         assert result.success is True
-        assert "Entry Point Files" in result.content
+        assert "入口点文件" in result.content or "Entry Point Files" in result.content
         assert "main.py" in result.content
 
     @patch("mini_agent.tools.deep_context.should_compress_result", return_value=False)
@@ -126,7 +126,7 @@ class TestDeepContextToolExecute:
     async def test_execute_without_entry_files(self, mock_tree, mock_git, mock_compress, tool):
         result = await tool.execute(read_entry_files=False)
         assert result.success is True
-        assert "Entry Point Files" not in result.content
+        assert "入口点文件" not in result.content or "Entry Point Files" not in result.content
 
     @patch("mini_agent.tools.deep_context.should_compress_result", return_value=False)
     @patch("mini_agent.tools.deep_context.get_git_status_sync", return_value="Branch: main")
@@ -134,11 +134,11 @@ class TestDeepContextToolExecute:
     async def test_execute_both_disabled(self, mock_tree, mock_git, mock_compress, tool):
         result = await tool.execute(read_entry_files=False, read_config_files=False)
         assert result.success is True
-        assert "Key Config Files" not in result.content
-        assert "Entry Point Files" not in result.content
-        assert "Directory Tree" in result.content
-        assert "Git Status" in result.content
-        assert "Project Structure Analysis" in result.content
+        assert "关键配置文件" not in result.content or "Key Config Files" not in result.content
+        assert "入口点文件" not in result.content or "Entry Point Files" not in result.content
+        assert "目录树" in result.content or "Directory Tree" in result.content
+        assert "Git 状态" in result.content or "Git Status" in result.content
+        assert "项目结构分析" in result.content or "Project Structure Analysis" in result.content
 
     @patch("mini_agent.tools.deep_context.compress_tool_result")
     @patch("mini_agent.tools.deep_context.should_compress_result", return_value=True)
@@ -225,7 +225,7 @@ class TestReadConfigFiles:
     def test_config_file_format(self, tool, temp_workspace):
         (Path(temp_workspace) / "Dockerfile").write_text("FROM python:3.10", encoding="utf-8")
         result = tool._read_config_files()
-        assert result.startswith("File: Dockerfile:\n```\n")
+        assert result.startswith("文件: Dockerfile:\n```\n") or result.startswith("File: Dockerfile:\n```\n")
         assert result.endswith("\n```")
 
 
@@ -318,101 +318,101 @@ class TestReadEntryFiles:
     def test_entry_file_format(self, tool, temp_workspace):
         (Path(temp_workspace) / "main.py").write_text("hello", encoding="utf-8")
         result = tool._read_entry_files()
-        assert result.startswith("File: main.py:\n")
+        assert result.startswith("文件: main.py:\n") or result.startswith("File: main.py:\n")
 
 
 class TestAnalyzeStructure:
     def test_python_project(self, tool, temp_workspace):
         (Path(temp_workspace) / "pyproject.toml").write_text("[project]", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Python project" in result
+        assert "Python 项目" in result or "Python project" in result
 
     def test_nodejs_project(self, tool, temp_workspace):
         (Path(temp_workspace) / "package.json").write_text("{}", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Node.js project" in result
+        assert "Node.js 项目" in result or "Node.js project" in result
 
     def test_rust_project(self, tool, temp_workspace):
         (Path(temp_workspace) / "Cargo.toml").write_text("[package]", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Rust project" in result
+        assert "Rust 项目" in result or "Rust project" in result
 
     def test_go_project(self, tool, temp_workspace):
         (Path(temp_workspace) / "go.mod").write_text("module test", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Go project" in result
+        assert "Go 项目" in result or "Go project" in result
 
     def test_multiple_project_types(self, tool, temp_workspace):
         (Path(temp_workspace) / "pyproject.toml").write_text("[project]", encoding="utf-8")
         (Path(temp_workspace) / "package.json").write_text("{}", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Python project" in result
-        assert "Node.js project" in result
+        assert "Python 项目" in result or "Python project" in result
+        assert "Node.js 项目" in result or "Node.js project" in result
 
     def test_no_project_type(self, tool, temp_workspace):
         result = tool._analyze_structure()
-        assert result == "Standard project structure"
+        assert result == "标准项目结构" or result == "Standard project structure"
 
     def test_django_detection(self, tool, temp_workspace):
         (Path(temp_workspace) / "requirements.txt").write_text("django==4.0\nflask", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Django framework detected" in result
+        assert "检测到 Django 框架" in result or "Django framework detected" in result
 
     def test_flask_detection(self, tool, temp_workspace):
         (Path(temp_workspace) / "requirements.txt").write_text("flask==2.0", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Flask framework detected" in result
+        assert "检测到 Flask 框架" in result or "Flask framework detected" in result
 
     def test_fastapi_detection(self, tool, temp_workspace):
         (Path(temp_workspace) / "pyproject.toml").write_text("fastapi", encoding="utf-8")
         result = tool._analyze_structure()
-        assert "FastAPI framework detected" in result
+        assert "检测到 FastAPI 框架" in result or "FastAPI framework detected" in result
 
     def test_react_detection(self, tool, temp_workspace):
         (Path(temp_workspace) / "package.json").write_text('{"dependencies": {"react": "^18"}}', encoding="utf-8")
         result = tool._analyze_structure()
-        assert "React detected" in result
+        assert "检测到 React" in result or "React detected" in result
 
     def test_vue_detection(self, tool, temp_workspace):
         (Path(temp_workspace) / "package.json").write_text('{"dependencies": {"vue": "^3"}}', encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Vue.js detected" in result
+        assert "检测到 Vue.js" in result or "Vue.js detected" in result
 
     def test_nextjs_detection(self, tool, temp_workspace):
         (Path(temp_workspace) / "package.json").write_text('{"dependencies": {"next": "^13"}}', encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Next.js detected" in result
+        assert "检测到 Next.js" in result or "Next.js detected" in result
 
     def test_framework_detection_case_insensitive(self, tool, temp_workspace):
         (Path(temp_workspace) / "package.json").write_text('{"name": "My-Django-App"}', encoding="utf-8")
         result = tool._analyze_structure()
-        assert "Django framework detected" in result
+        assert "检测到 Django 框架" in result or "Django framework detected" in result
 
     def test_test_directory_tests(self, tool, temp_workspace):
         (Path(temp_workspace) / "tests").mkdir()
         result = tool._analyze_structure()
-        assert "Test directory found: tests/" in result
+        assert "找到测试目录: tests/" in result or "Test directory found: tests/" in result
 
     def test_test_directory_test(self, tool, temp_workspace):
         (Path(temp_workspace) / "test").mkdir()
         result = tool._analyze_structure()
-        assert "Test directory found: test/" in result
+        assert "找到测试目录: test/" in result or "Test directory found: test/" in result
 
     def test_test_directory_dunder_tests(self, tool, temp_workspace):
         (Path(temp_workspace) / "__tests__").mkdir()
         result = tool._analyze_structure()
-        assert "Test directory found: __tests__/" in result
+        assert "找到测试目录: __tests__/" in result or "Test directory found: __tests__/" in result
 
     def test_test_directory_spec(self, tool, temp_workspace):
         (Path(temp_workspace) / "spec").mkdir()
         result = tool._analyze_structure()
-        assert "Test directory found: spec/" in result
+        assert "找到测试目录: spec/" in result or "Test directory found: spec/" in result
 
     def test_only_first_test_directory_reported(self, tool, temp_workspace):
         (Path(temp_workspace) / "tests").mkdir()
         (Path(temp_workspace) / "test").mkdir()
         result = tool._analyze_structure()
-        assert result.count("Test directory found") == 1
+        assert result.count("找到测试目录") == 1 or result.count("Test directory found") == 1
 
     def test_ci_github_workflows(self, tool, temp_workspace):
         workflows = Path(temp_workspace) / ".github" / "workflows"
@@ -454,7 +454,7 @@ class TestAnalyzeStructure:
         workflows = Path(temp_workspace) / ".github" / "workflows"
         workflows.mkdir(parents=True)
         result = tool._analyze_structure()
-        assert "Python project" in result
-        assert "FastAPI framework detected" in result
-        assert "Test directory found" in result
+        assert "Python 项目" in result or "Python project" in result
+        assert "检测到 FastAPI 框架" in result or "FastAPI framework detected" in result
+        assert "找到测试目录" in result or "Test directory found" in result
         assert "CI/CD" in result

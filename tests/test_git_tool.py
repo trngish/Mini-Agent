@@ -125,7 +125,7 @@ class TestGitToolStatus:
         result = await tool.execute(operation="status")
 
         assert result.success
-        assert "Working tree clean" in result.content
+        assert "工作树干净" in result.content or "Working tree clean" in result.content
 
     @pytest.mark.asyncio
     async def test_status_with_staged_changes(self):
@@ -678,7 +678,7 @@ class TestGitStatusToolExecute:
 
         assert result.success
         assert "Branch: main" in result.content
-        assert "Working tree clean" in result.content
+        assert "工作树干净" in result.content or "Working tree clean" in result.content
 
     @pytest.mark.asyncio
     async def test_status_with_staged_and_unstaged(self):

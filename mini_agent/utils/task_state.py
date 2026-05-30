@@ -13,6 +13,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from threading import Lock
 from typing import Any
 
 
@@ -93,17 +94,19 @@ class TaskContext:
 class TaskStateManager:
     """Manages task state across agent execution.
 
-    Singleton pattern to track task state globally.
+    Singleton pattern to track task state globally. Thread-safe implementation.
     """
 
     _instance: TaskStateManager | None = None
+    _lock: Lock = Lock()  # Class-level lock for thread-safe singleton
 
     def __new__(cls) -> TaskStateManager:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._current_task: TaskContext | None = None
-            cls._instance._task_history: list[TaskContext] = []
-        return cls._instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._current_task: TaskContext | None = None
+                cls._instance._task_history: list[TaskContext] = []
+            return cls._instance
 
     @property
     def current_task(self) -> TaskContext | None:

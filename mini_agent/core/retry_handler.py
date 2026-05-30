@@ -1,10 +1,10 @@
-"""Unified retry handler for tool execution.
+"""统一重试处理器，用于工具执行。
 
-Consolidates retry logic from:
+整合了以下模块的重试逻辑：
 - ErrorRecoveryManager (should_retry, get_backoff_delay)
 - tool_execution.is_transient_error
 
-This provides a single, consistent retry interface for all tool executions.
+为所有工具执行提供单一、一致的重试接口。
 """
 
 from typing import TYPE_CHECKING
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from ..agent import Agent
 
 
-# Transient error patterns that warrant retry
+# 瞬态错误模式，值得重试
 TRANSIENT_PATTERNS = [
     # 网络超时
     "timeout",
@@ -59,35 +59,35 @@ TRANSIENT_PATTERNS = [
 
 
 class RetryHandler:
-    """Unified retry handler for tool execution.
+    """统一重试处理器，用于工具执行。
 
-    Provides:
-    - Transient error detection
-    - Retry decision making
-    - Exponential backoff calculation
+    提供：
+    - 瞬态错误检测
+    - 重试决策判断
+    - 指数退避计算
     """
 
     def __init__(self, agent: "Agent", max_retries: int = 3, base_delay: float = 0.5):
-        """Initialize RetryHandler.
+        """初始化 RetryHandler。
 
         Args:
-            agent: The agent instance (for accessing config)
-            max_retries: Maximum number of retry attempts
-            base_delay: Base delay for exponential backoff (seconds)
+            agent: 智能体实例（用于访问配置）
+            max_retries: 最大重试次数
+            base_delay: 指数退避基础延迟（秒）
         """
         self._agent = agent
         self._max_retries = max_retries
         self._base_delay = base_delay
 
     def should_retry(self, error: str | Exception, attempt: int) -> bool:
-        """Check if an error should trigger a retry.
+        """检查错误是否应触发重试。
 
         Args:
-            error: Error message or exception
-            attempt: Current attempt number (0-indexed)
+            error: 错误消息或异常
+            attempt: 当前尝试次数（从0开始计数）
 
         Returns:
-            True if the error is transient and retries remain
+            如果错误是瞬态的且还有重试机会则返回 True
         """
         if attempt >= self._max_retries:
             return False
@@ -96,51 +96,51 @@ class RetryHandler:
         return self.is_transient_error(error_str)
 
     def is_transient_error(self, error: str) -> bool:
-        """Check if an error is transient (worth retrying).
+        """检查错误是否为瞬态的（值得重试）。
 
         Args:
-            error: Error message (will be lowercased internally)
+            error: 错误消息（内部会自动转为小写）
 
         Returns:
-            True if error is transient
+            如果错误是瞬态的则返回 True
         """
         error_lower = error.lower()
         return any(pattern in error_lower for pattern in TRANSIENT_PATTERNS)
 
     def get_delay(self, attempt: int) -> float:
-        """Calculate exponential backoff delay.
+        """计算指数退避延迟。
 
         Args:
-            attempt: Current attempt number (0-indexed)
+            attempt: 当前尝试次数（从0开始计数）
 
         Returns:
-            Delay in seconds
+            延迟时间（秒）
         """
         return float(self._base_delay * (2**attempt))
 
     def get_max_retries(self) -> int:
-        """Get maximum retry attempts."""
+        """获取最大重试次数。"""
         return self._max_retries
 
 
 def create_retry_handler(agent: "Agent") -> RetryHandler:
-    """Factory function to create a RetryHandler from agent config.
+    """工厂函数，用于从智能体配置创建 RetryHandler。
 
     Args:
-        agent: The agent instance
+        agent: 智能体实例
 
     Returns:
-        RetryHandler configured from agent's settings
+        根据智能体设置配置好的 RetryHandler
     """
-    # Try to get config from agent, fallback to defaults
+    # 尝试从智能体获取配置，降级使用默认值
     max_retries = 3
     base_delay = 0.5
 
-    # Check for M27 config
+    # 检查 M27 配置
     if hasattr(agent, "m27_config") and agent.m27_config:
         max_retries = agent.m27_config.get("max_tool_retries", 3)
 
-    # Check for retry config on agent
+    # 检查智能体上的重试配置
     if hasattr(agent, "_retry_config"):
         max_retries = agent._retry_config.max_retries
         base_delay = agent._retry_config.initial_delay

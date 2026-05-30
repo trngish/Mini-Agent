@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Pulse Animation - Scale objects rhythmically for emphasis.
+脉冲动画 - 有节奏地缩放对象以增强效果。
 
-Creates pulsing, heartbeat, and throbbing effects.
+创建脉冲、心跳和跳动效果。
 """
 
 import math
@@ -21,7 +21,7 @@ def create_pulse_animation(
     object_type: str = "emoji",
     object_data: dict | None = None,
     num_frames: int = 30,
-    pulse_type: str = "smooth",  # 'smooth', 'heartbeat', 'throb', 'pop'
+    pulse_type: str = "smooth",  # 'smooth', 'heartbeat', 'throb', 'pop' - 平滑、心跳、跳动、弹出
     scale_range: tuple[float, float] = (0.8, 1.2),
     pulses: float = 2.0,
     center_pos: tuple[int, int] = (240, 240),
@@ -30,7 +30,7 @@ def create_pulse_animation(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list[Image.Image]:
     """
-    Create pulsing/scaling animation.
+    创建脉冲/缩放动画。
 
     Args:
         object_type: 'emoji', 'circle', 'text'
@@ -49,7 +49,7 @@ def create_pulse_animation(
     """
     frames = []
 
-    # Default object data
+    # 默认对象数据
     if object_data is None:
         if object_type == "emoji":
             object_data = {"emoji": "❤️", "size": 100}
@@ -62,32 +62,32 @@ def create_pulse_animation(
         frame = create_blank_frame(frame_width, frame_height, bg_color)
         t = i / (num_frames - 1) if num_frames > 1 else 0
 
-        # Calculate scale based on pulse type
+        # 根据脉冲类型计算缩放比例
         if pulse_type == "smooth":
-            # Simple sinusoidal pulse
+            # 简单的正弦脉冲
             scale = min_scale + (max_scale - min_scale) * (0.5 + 0.5 * math.sin(t * pulses * 2 * math.pi - math.pi / 2))
 
         elif pulse_type == "heartbeat":
-            # Double pump like a heartbeat
+            # 像心跳一样的双泵
             phase = (t * pulses) % 1.0
             if phase < 0.15:
-                # First pump
+                # 第一泵
                 scale = interpolate(min_scale, max_scale, phase / 0.15, "ease_out")
             elif phase < 0.25:
-                # First release
+                # 第一次释放
                 scale = interpolate(max_scale, min_scale, (phase - 0.15) / 0.10, "ease_in")
             elif phase < 0.35:
-                # Second pump (smaller)
+                # 第二泵（较小）
                 scale = interpolate(min_scale, (min_scale + max_scale) / 2, (phase - 0.25) / 0.10, "ease_out")
             elif phase < 0.45:
-                # Second release
+                # 第二次释放
                 scale = interpolate((min_scale + max_scale) / 2, min_scale, (phase - 0.35) / 0.10, "ease_in")
             else:
-                # Rest period
+                # 静止期
                 scale = min_scale
 
         elif pulse_type == "throb":
-            # Sharp pulse with quick return
+            # 快速脉冲快速返回
             phase = (t * pulses) % 1.0
             if phase < 0.2:
                 scale = interpolate(min_scale, max_scale, phase / 0.2, "ease_out")
@@ -95,19 +95,19 @@ def create_pulse_animation(
                 scale = interpolate(max_scale, min_scale, (phase - 0.2) / 0.8, "ease_in")
 
         elif pulse_type == "pop":
-            # Pop out and back with overshoot
+            # 弹出并返回，带有过冲
             phase = (t * pulses) % 1.0
             if phase < 0.3:
-                # Pop out with overshoot
+                # 带过冲的弹出
                 scale = interpolate(min_scale, max_scale * 1.1, phase / 0.3, "elastic_out")
             else:
-                # Settle back
+                # 稳定回缩
                 scale = interpolate(max_scale * 1.1, min_scale, (phase - 0.3) / 0.7, "ease_out")
 
         else:
             scale = min_scale + (max_scale - min_scale) * (0.5 + 0.5 * math.sin(t * pulses * 2 * math.pi))
 
-        # Draw object at calculated scale
+        # 以计算的缩放比例绘制对象
         if object_type == "emoji":
             base_size = object_data["size"]
             current_size = int(base_size * scale)
@@ -149,16 +149,16 @@ def create_attention_pulse(
     emoji: str = "⚠️", num_frames: int = 20, frame_size: int = 128, bg_color: tuple[int, int, int] = (255, 255, 255)
 ) -> list[Image.Image]:
     """
-    Create attention-grabbing pulse (good for emoji GIFs).
+    创建吸引注意力的脉冲动画（适合表情包GIF）。
 
-    Args:
-        emoji: Emoji to pulse
-        num_frames: Number of frames
-        frame_size: Frame size (square)
-        bg_color: Background color
+    参数:
+        emoji: 要脉冲的表情
+        num_frames: 帧数
+        frame_size: 帧尺寸（正方形）
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames optimized for emoji size
+    返回:
+        针对表情包尺寸优化的帧列表
     """
     return create_pulse_animation(
         object_type="emoji",
@@ -185,20 +185,20 @@ def create_breathing_animation(
     bg_color: tuple[int, int, int] = (240, 248, 255),
 ) -> list[Image.Image]:
     """
-    Create slow, calming breathing animation (in and out).
+    创建缓慢、平静的呼吸动画（吸气和呼气）。
 
-    Args:
-        object_type: Type of object
-        object_data: Object configuration
-        num_frames: Number of frames
-        breaths: Number of breathing cycles
-        scale_range: Min/max scale
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        object_type: 对象类型
+        object_data: 对象配置
+        num_frames: 帧数
+        breaths: 呼吸周期数
+        scale_range: 最小/最大缩放
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     if object_data is None:
         object_data = {"emoji": "😌", "size": 100}
@@ -217,13 +217,13 @@ def create_breathing_animation(
     )
 
 
-# Example usage
+# 示例用法
 if __name__ == "__main__":
     print("Creating pulse animations...")
 
     builder = GIFBuilder(width=480, height=480, fps=20)
 
-    # Example 1: Smooth pulse
+    # 示例 1: 平滑脉冲
     frames = create_pulse_animation(
         object_type="emoji",
         object_data={"emoji": "❤️", "size": 100},
@@ -235,7 +235,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("pulse_smooth.gif", num_colors=128)
 
-    # Example 2: Heartbeat
+    # 示例 2: 心跳
     builder.clear()
     frames = create_pulse_animation(
         object_type="emoji",
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("pulse_heartbeat.gif", num_colors=128)
 
-    # Example 3: Attention pulse (emoji size)
+    # 示例 3: 注意脉冲（表情包尺寸）
     builder = GIFBuilder(width=128, height=128, fps=15)
     frames = create_attention_pulse(emoji="⚠️", num_frames=20)
     builder.add_frames(frames)

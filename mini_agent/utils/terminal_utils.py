@@ -1,35 +1,35 @@
-"""Terminal display utilities for proper text alignment.
+"""终端显示工具，用于正确的文本对齐。
 
-This module provides utilities for calculating visible width of text in terminals,
-handling ANSI escape codes, emoji, and East Asian characters correctly.
+此模块提供用于计算文本在终端中可见宽度的工具，
+能正确处理ANSI转义码、emoji以及东亚语言字符。
 """
 
 import re
 import unicodedata
 
-# Compile regex once at module level for performance
+# 为提升性能，在模块级别编译一次正则表达式
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
-# Unicode ranges for emoji
+# Emoji的Unicode范围
 EMOJI_START = 0x1F300
 EMOJI_END = 0x1FAFF
 
 
 def calculate_display_width(text: str) -> int:
-    """Calculate the visible width of text in terminal columns.
+    """计算文本在终端列中的可见宽度。
 
-    This function correctly handles:
-    - ANSI escape codes (removed from width calculation)
-    - Emoji characters (counted as 2 columns)
-    - East Asian Wide/Fullwidth characters (counted as 2 columns)
-    - Combining characters (counted as 0 columns)
-    - Regular ASCII characters (counted as 1 column)
+    此函数能正确处理：
+    - ANSI转义码（不计入宽度）
+    - Emoji字符（计为2列）
+    - 东亚宽/全角字符（计为2列）
+    - 组合字符（计为0列）
+    - 常规ASCII字符（计为1列）
 
     Args:
-        text: Input text that may contain ANSI codes, emoji, or unicode characters
+        text: 输入文本，可能包含ANSI码、emoji或unicode字符
 
     Returns:
-        Number of terminal columns the text will occupy when displayed
+        文本显示时占据的终端列数
 
     Examples:
         >>> calculate_display_width("Hello")
@@ -41,24 +41,24 @@ def calculate_display_width(text: str) -> int:
         >>> calculate_display_width("\033[31mRed\033[0m")
         3
     """
-    # Remove ANSI escape codes (they don't occupy display space)
+    # 移除ANSI转义码（它们不占据显示空间）
     clean_text = ANSI_ESCAPE_RE.sub("", text)
 
     width = 0
     for char in clean_text:
-        # Skip combining characters (zero width)
+        # 跳过组合字符（零宽度）
         if unicodedata.combining(char):
             continue
 
         code_point = ord(char)
 
-        # Emoji range (most common emoji, counted as 2 columns)
+        # Emoji范围（最常见的emoji，计为2列）
         if EMOJI_START <= code_point <= EMOJI_END:
             width += 2
             continue
 
-        # East Asian Width property
-        # W = Wide, F = Fullwidth (both occupy 2 columns)
+        # 东亚宽度属性
+        # W = 宽字符，F = 全角字符（均占据2列）
         eaw = unicodedata.east_asian_width(char)
         if eaw in ("W", "F"):
             width += 2
@@ -69,15 +69,15 @@ def calculate_display_width(text: str) -> int:
 
 
 def truncate_with_ellipsis(text: str, max_width: int, ellipsis: str = "…") -> str:
-    """Truncate text to fit within max_width, adding ellipsis if needed.
+    """截断文本以适应max_width，必要时添加省略号。
 
     Args:
-        text: Text to truncate (ANSI codes are preserved but not counted)
-        max_width: Maximum visible width in terminal columns
-        ellipsis: Ellipsis character to use (default: "…")
+        text: 要截断的文本（ANSI码会被保留但不计宽度）
+        max_width: 最大可见宽度（终端列数）
+        ellipsis: 省略号字符（默认："…"）
 
     Returns:
-        Truncated text with ellipsis if needed
+        截断后的文本，必要时添加省略号
 
     Examples:
         >>> truncate_with_ellipsis("Hello World", 8)
@@ -90,19 +90,19 @@ def truncate_with_ellipsis(text: str, max_width: int, ellipsis: str = "…") -> 
 
     current_width = calculate_display_width(text)
 
-    # No truncation needed
+    # 无需截断
     if current_width <= max_width:
         return text
 
-    # Remove ANSI codes for truncation (we'll lose color, but that's expected)
+    # 截断时移除ANSI码（会失去颜色，但这是预期的）
     plain_text = ANSI_ESCAPE_RE.sub("", text)
 
-    # If max_width is too small for ellipsis
+    # 如果max_width对于省略号来说太小
     ellipsis_width = calculate_display_width(ellipsis)
     if max_width <= ellipsis_width:
         return plain_text[:max_width]
 
-    # Find truncation point
+    # 找到截断点
     available_width = max_width - ellipsis_width
     truncated = ""
     current_width = 0
@@ -118,16 +118,16 @@ def truncate_with_ellipsis(text: str, max_width: int, ellipsis: str = "…") -> 
 
 
 def pad_to_width(text: str, target_width: int, align: str = "left", fill_char: str = " ") -> str:
-    """Pad text to reach target width with proper alignment.
+    """填充文本至目标宽度，支持多种对齐方式。
 
     Args:
-        text: Text to pad (may contain ANSI codes)
-        target_width: Target width in terminal columns
-        align: Alignment mode - "left", "right", or "center"
-        fill_char: Character to use for padding (default: space)
+        text: 要填充的文本（可能包含ANSI码）
+        target_width: 目标宽度（终端列数）
+        align: 对齐模式 - "left"、"right"或"center"
+        fill_char: 用于填充的字符（默认：空格）
 
     Returns:
-        Padded text
+        填充后的文本
 
     Examples:
         >>> pad_to_width("Hello", 10)

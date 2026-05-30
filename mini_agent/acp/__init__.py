@@ -1,4 +1,4 @@
-"""ACP (Agent Client Protocol) bridge for Mini-Agent."""
+"""ACP (Agent Client Protocol) 桥接器，用于 Mini-Agent。"""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ from mini_agent.schema import Message
 
 
 class NewSessionRequest(BaseNewSessionRequest):  # type: ignore[misc]
-    """Override to make cwd and mcpServers optional."""
+    """重写以使 cwd 和 mcpServers 成为可选参数。"""
 
     cwd: str | None = None
     mcpServers: list[Any] = []  # noqa: N815
@@ -79,7 +79,7 @@ class SessionState:
 
 
 class MiniMaxACPAgent:
-    """Minimal ACP adapter wrapping the existing Agent runtime."""
+    """Minimal ACP 适配器，用于封装现有的 Agent 运行时。"""
 
     def __init__(
         self,
@@ -127,7 +127,7 @@ class MiniMaxACPAgent:
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         state = self._sessions.get(params.sessionId)
         if not state:
-            # Auto-create session if not found (compatibility with clients that skip newSession)
+            # 如果找不到会话则自动创建（兼容跳过 newSession 的客户端）
             logger.warning(f"Session '{params.sessionId}' not found, auto-creating new session")
             try:
                 new_session = await self.new_session(
@@ -182,7 +182,7 @@ class MiniMaxACPAgent:
                 return "end_turn"
             for call in response.tool_calls:
                 name, args = call.function.name, call.function.arguments
-                # Show tool name with key arguments for better visibility
+                # 显示工具名称及关键参数以便更好地查看
                 args_preview = (
                     ", ".join(f"{k}={repr(v)[:50]}" for k, v in list(args.items())[:2])
                     if isinstance(args, dict)
@@ -215,7 +215,7 @@ class MiniMaxACPAgent:
 
 
 async def run_acp_server(config: Config | None = None) -> None:
-    """Run Mini-Agent as an ACP-compatible stdio server."""
+    """以 ACP 兼容的 stdio 服务器方式运行 Mini-Agent。"""
     config = config or Config.load()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     base_tools, skill_loader = await initialize_base_tools(config)

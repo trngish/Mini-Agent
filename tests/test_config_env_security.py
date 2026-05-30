@@ -65,5 +65,5 @@ api_base: "https://api.test.com"
 
     def test_invalid_api_key_length_rejected(self):
         """Test that short API keys are rejected."""
-        with pytest.raises(ValidationError, match="at least 8 characters"):
+        with pytest.raises(ValidationError, match=r"至少8个字符|at least 8 characters"):
             LLMConfig(api_key="short", api_base="https://api.test.com")

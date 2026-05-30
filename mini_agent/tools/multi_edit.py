@@ -6,6 +6,7 @@ from typing import Any
 
 from ..utils.platform_utils import normalize_path_separators as normalize_path
 from .base import Tool, ToolResult
+from .file_tools import _resolve_and_validate_path
 
 
 class MultiEditTool(Tool):
@@ -127,10 +128,13 @@ class MultiEditTool(Tool):
                     results.append(f"Edit #{i + 1}: Missing path")
                     continue
 
-                normalized = normalize_path(edit_path)
-                file_path = Path(normalized)
-                if not file_path.is_absolute():
-                    file_path = self.workspace_dir / file_path
+                # Validate path stays within workspace and is not blacklisted
+                try:
+                    file_path = _resolve_and_validate_path(edit_path, self.workspace_dir)
+                except ValueError as e:
+                    error_count += 1
+                    results.append(f"Edit #{i + 1}: {str(e)}")
+                    continue
 
                 # Create new file if old_str is empty
                 if not edit_old:

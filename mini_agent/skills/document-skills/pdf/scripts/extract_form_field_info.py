@@ -3,11 +3,10 @@ import sys
 
 from pypdf import PdfReader
 
-# Extracts data for the fillable form fields in a PDF and outputs JSON that
-# Claude uses to fill the fields. See forms.md.
+# 提取 PDF 中可填表单字段的数据，并输出 Claude 用于填充字段的 JSON。
+# 参见 forms.md。
 
-
-# This matches the format used by PdfReader `get_fields` and `update_page_form_field_values` methods.
+# 此格式与 PdfReader 的 `get_fields` 和 `update_page_form_field_values` 方法兼容。
 def get_full_annotation_field_id(annotation):
     components = []
     while annotation:
@@ -24,12 +23,12 @@ def make_field_dict(field, field_id):
     if ft == "/Tx":
         field_dict["type"] = "text"
     elif ft == "/Btn":
-        field_dict["type"] = "checkbox"  # radio groups handled separately
+        field_dict["type"] = "checkbox"  # 单选组单独处理
         states = field.get("/_States_", [])
         if len(states) == 2:
-            # "/Off" seems to always be the unchecked value, as suggested by
+            # "/Off" 似乎始终是未选中值，如同以下文档所建议：
             # https://opensource.adobe.com/dc-acrobat-sdk-docs/standards/pdfstandards/pdf/PDF32000_2008.pdf#page=448
-            # It can be either first or second in the "/_States_" list.
+            # 它可以是 "/_States_" 列表中的第一个或第二个。
             if "/Off" in states:
                 field_dict["checked_value"] = states[0] if states[0] != "/Off" else states[1]
                 field_dict["unchecked_value"] = "/Off"
@@ -54,13 +53,13 @@ def make_field_dict(field, field_id):
     return field_dict
 
 
-# Returns a list of fillable PDF fields:
+# 返回可填表单字段列表：
 # [
 #   {
 #     "field_id": "name",
 #     "page": 1,
 #     "type": ("text", "checkbox", "radio_group", or "choice")
-#     // Per-type additional fields described in forms.md
+#     // 每个类型附加字段参见 forms.md
 #   },
 # ]
 def get_field_info(reader: PdfReader):
@@ -70,19 +69,18 @@ def get_field_info(reader: PdfReader):
     possible_radio_names = set()
 
     for field_id, field in fields.items():
-        # Skip if this is a container field with children, except that it might be
-        # a parent group for radio button options.
+        # 跳过包含子字段的容器字段，但可能它是单选按钮选项的父组
         if field.get("/Kids"):
             if field.get("/FT") == "/Btn":
                 possible_radio_names.add(field_id)
             continue
         field_info_by_id[field_id] = make_field_dict(field, field_id)
 
-    # Bounding rects are stored in annotations in page objects.
+    # 边界框存储在页面对象的注解中
 
-    # Radio button options have a separate annotation for each choice;
-    # all choices have the same field name.
-    # See https://westhealth.github.io/exploring-fillable-forms-with-pdfrw.html
+    # 单选按钮选项每个选项都有一个独立的注解；
+    # 所有选项使用相同的字段名。
+    # 参见 https://westhealth.github.io/exploring-fillable-forms-with-pdfrw.html
     radio_fields_by_id = {}
 
     for page_index, page in enumerate(reader.pages):
@@ -94,8 +92,8 @@ def get_field_info(reader: PdfReader):
                 field_info_by_id[field_id]["rect"] = ann.get("/Rect")
             elif field_id in possible_radio_names:
                 try:
-                    # ann['/AP']['/N'] should have two items. One of them is '/Off',
-                    # the other is the active value.
+                    # ann['/AP']['/N'] 应该有两项。一项是 '/Off'，
+                    # 另一项是活动值。
                     on_values = [v for v in ann["/AP"]["/N"] if v != "/Off"]
                 except KeyError:
                     continue
@@ -108,10 +106,9 @@ def get_field_info(reader: PdfReader):
                             "page": page_index + 1,
                             "radio_options": [],
                         }
-                    # Note: at least on macOS 15.7, Preview.app doesn't show selected
-                    # radio buttons correctly. (It does if you remove the leading slash
-                    # from the value, but that causes them not to appear correctly in
-                    # Chrome/Firefox/Acrobat/etc).
+                    # 注意：在 macOS 15.7 上的 Preview.app 不能正确显示选中的单选按钮
+                    # （如果去掉值前导的斜杠则可以正确显示，但这会导致它们在
+                    # Chrome/Firefox/Acrobat 等中显示不正确）。
                     radio_fields_by_id[field_id]["radio_options"].append(
                         {
                             "value": on_values[0],
@@ -119,16 +116,16 @@ def get_field_info(reader: PdfReader):
                         }
                     )
 
-    # Some PDFs have form field definitions without corresponding annotations,
-    # so we can't tell where they are. Ignore these fields for now.
+    # 有些 PDF 的表单字段定义没有对应的注解，
+    # 所以我们无法确定它们的位置。这些字段暂时忽略。
     fields_with_location = []
     for field_info in field_info_by_id.values():
         if "page" in field_info:
             fields_with_location.append(field_info)
         else:
-            print(f"Unable to determine location for field id: {field_info.get('field_id')}, ignoring")
+            print(f"无法确定字段 id 的位置: {field_info.get('field_id')}，已忽略")
 
-    # Sort by page number, then Y position (flipped in PDF coordinate system), then X.
+    # 按页号排序，然后是 Y 位置（PDF 坐标系中是翻转的），然后是 X。
     def sort_key(f):
         rect = f["radio_options"][0]["rect"] or [0, 0, 0, 0] if "radio_options" in f else f.get("rect") or [0, 0, 0, 0]
         adjusted_position = [-rect[1], rect[0]]

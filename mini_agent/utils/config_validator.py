@@ -1,6 +1,6 @@
-"""Configuration validation module.
+"""配置验证模块。
 
-Provides validation for configuration values with range checks and constraints.
+提供配置值的验证，包含范围检查和约束条件。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 
 
 class ConfigValidationError(Exception):
-    """Configuration validation error."""
+    """配置验证错误。"""
 
     def __init__(self, field: str, message: str, value: Any = None):
         self.field = field
@@ -22,7 +22,7 @@ class ConfigValidationError(Exception):
 
 @dataclass
 class ValidationRule:
-    """A single validation rule."""
+    """单个验证规则。"""
 
     field: str
     validate: Callable[[Any], bool]
@@ -30,85 +30,85 @@ class ValidationRule:
 
 
 class ConfigValidator:
-    """Configuration validator with range checks and constraints.
+    """配置验证器，包含范围检查和约束条件。
 
-    Provides validation for timeout values, token limits, and other
-    configuration parameters to ensure they are within acceptable ranges.
+    提供超时值、令牌限制和其他配置参数的验证，
+    确保它们在可接受的范围内。
     """
 
-    # Validation rules
+    # 验证规则
     RULES: list[ValidationRule] = [
         ValidationRule(
             field="tools.bash_timeout",
             validate=lambda v: 1 <= v <= 600,
-            message="Must be between 1 and 600 seconds",
+            message="必须在 1 到 600 秒之间",
         ),
         ValidationRule(
             field="tools.mcp.connect_timeout",
             validate=lambda v: 1 <= v <= 60,
-            message="Must be between 1 and 60 seconds",
+            message="必须在 1 到 60 秒之间",
         ),
         ValidationRule(
             field="tools.mcp.execute_timeout",
             validate=lambda v: 1 <= v <= 300,
-            message="Must be between 1 and 300 seconds",
+            message="必须在 1 到 300 秒之间",
         ),
         ValidationRule(
             field="tools.mcp.sse_read_timeout",
             validate=lambda v: 1 <= v <= 600,
-            message="Must be between 1 and 600 seconds",
+            message="必须在 1 到 600 秒之间",
         ),
         ValidationRule(
             field="agent.max_steps",
             validate=lambda v: 1 <= v <= 1000,
-            message="Must be between 1 and 3000",
+            message="必须在 1 到 3000 之间",
         ),
         ValidationRule(
             field="m27.thinking_budget_tokens",
             validate=lambda v: 0 <= v <= 32768,
-            message="Must be between 0 and 32768 tokens",
+            message="必须在 0 到 32768 tokens 之间",
         ),
         ValidationRule(
             field="m27.max_output_tokens",
             validate=lambda v: 1024 <= v <= 32768,
-            message="Must be between 1024 and 32768 tokens",
+            message="必须在 1024 到 32768 tokens 之间",
         ),
         ValidationRule(
             field="m27.token_limit",
             validate=lambda v: 100_000 <= v <= 1_000_000,
-            message="Must be between 100K and 1M tokens",
+            message="必须在 100K 到 1M tokens 之间",
         ),
         ValidationRule(
             field="m27.max_concurrent_tools",
             validate=lambda v: 1 <= v <= 30,
-            message="Must be between 1 and 30",
+            message="必须在 1 到 30 之间",
         ),
         ValidationRule(
             field="llm.retry.max_retries",
             validate=lambda v: 0 <= v <= 10,
-            message="Must be between 0 and 10",
+            message="必须在 0 到 10 之间",
         ),
         ValidationRule(
             field="llm.retry.initial_delay",
             validate=lambda v: 0.1 <= v <= 60,
-            message="Must be between 0.1 and 60 seconds",
+            message="必须在 0.1 到 60 秒之间",
         ),
         ValidationRule(
             field="llm.retry.max_delay",
             validate=lambda v: 1 <= v <= 300,
-            message="Must be between 1 and 300 seconds",
+            message="必须在 1 到 300 秒之间",
         ),
     ]
 
     @classmethod
     def validate(cls, config: Any) -> list[ConfigValidationError]:
-        """Validate configuration object.
+        """验证配置对象。
 
         Args:
-            config: Config object with validation rules applied
+            config: 应用了验证规则的配置对象
 
         Returns:
-            List of validation errors (empty if valid)
+            验证错误列表（如果有效则为空）
         """
         errors = []
 
@@ -124,21 +124,21 @@ class ConfigValidator:
                         )
                     )
             except (AttributeError, KeyError, TypeError):
-                # Skip fields that don't exist
+                # 跳过不存在的字段
                 pass
 
         return errors
 
     @classmethod
     def _get_nested_value(cls, obj: Any, path: str) -> Any:
-        """Get nested value from object using dot notation.
+        """使用点号表示法从对象获取嵌套值。
 
         Args:
-            obj: Object to traverse
-            path: Dot-separated path (e.g., "tools.bash_timeout")
+            obj: 要遍历的对象
+            path: 点分隔的路径（例如 "tools.bash_timeout"）
 
         Returns:
-            Value at path, or None if not found
+            路径处的值，如果未找到则返回 None
         """
         parts = path.split(".")
         current = obj
@@ -152,13 +152,13 @@ class ConfigValidator:
 
     @classmethod
     def validate_or_raise(cls, config: Any) -> None:
-        """Validate configuration or raise on error.
+        """验证配置，验证失败则抛出异常。
 
         Args:
-            config: Config object to validate
+            config: 要验证的配置对象
 
         Raises:
-            ConfigValidationError: If any validation fails
+            ConfigValidationError: 如果任何验证失败
         """
         errors = cls.validate(config)
         if errors:
@@ -170,16 +170,16 @@ class ConfigValidator:
 
     @classmethod
     def sanitize_timeout(cls, timeout: int, default: int = 120, min_val: int = 1, max_val: int = 600) -> int:
-        """Sanitize timeout value to be within acceptable range.
+        """清理超时值以使其在可接受范围内。
 
         Args:
-            timeout: Raw timeout value
-            default: Default if invalid
-            min_val: Minimum acceptable value
-            max_val: Maximum acceptable value
+            timeout: 原始超时值
+            default: 无效时的默认值
+            min_val: 最小可接受值
+            max_val: 最大可接受值
 
         Returns:
-            Sanitized timeout
+            清理后的超时值
         """
         if timeout < min_val or timeout > max_val:
             return default
@@ -189,16 +189,16 @@ class ConfigValidator:
     def sanitize_token_count(
         cls, tokens: int, default: int = 800_000, min_val: int = 1000, max_val: int = 1_000_000
     ) -> int:
-        """Sanitize token count to be within acceptable range.
+        """清理令牌计数以使其在可接受范围内。
 
         Args:
-            tokens: Raw token count
-            default: Default if invalid
-            min_val: Minimum acceptable value
-            max_val: Maximum acceptable value
+            tokens: 原始令牌计数
+            default: 无效时的默认值
+            min_val: 最小可接受值
+            max_val: 最大可接受值
 
         Returns:
-            Sanitized token count
+            清理后的令牌计数
         """
         if tokens < min_val or tokens > max_val:
             return default
@@ -206,14 +206,14 @@ class ConfigValidator:
 
     @classmethod
     def clamp(cls, value: float, min_val: float, max_val: float) -> float:
-        """Clamp value to range.
+        """将值限制在指定范围内。
 
         Args:
-            value: Value to clamp
-            min_val: Minimum value
-            max_val: Maximum value
+            value: 要限制的值
+            min_val: 最小值
+            max_val: 最大值
 
         Returns:
-            Clamped value
+            限制后的值
         """
         return max(min_val, min(max_val, value))

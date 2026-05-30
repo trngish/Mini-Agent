@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MD Converter - Markdown to PDF/DOCX conversion tools
+MD Converter - Markdown 转 PDF/DOCX 转换工具
 
-Usage:
+用法:
     from md_converter import convert_to_pdf, convert_to_docx
 
     convert_to_pdf("input.md", "output.pdf")

@@ -1,7 +1,7 @@
-"""Batch operation helpers.
+"""批量操作辅助工具。
 
-This file now only contains shared helper functions.
-Actual tools have been split into independent modules:
+本文件现仅包含共享的辅助函数。
+实际工具已拆分到独立模块：
 - multi_read.py: MultiReadTool
 - multi_edit.py: MultiEditTool
 - multi_grep.py: MultiGrepTool
@@ -17,9 +17,9 @@ from typing import Any
 
 
 def _ensure_list(data: list[Any] | str | None) -> list[Any]:
-    """Ensure input is a list, parsing JSON string if needed.
+    """确保输入是列表，必要时解析JSON字符串。
 
-    LLMs sometimes pass JSON-encoded strings instead of proper lists.
+    大语言模型有时会传递JSON编码的字符串而不是正确的列表。
     """
     if data is None:
         return []

@@ -198,7 +198,7 @@ class TestRunCancellation:
         cancel_event = asyncio.Event()
         cancel_event.set()
         result = await agent.run(cancel_event=cancel_event)
-        assert result == "Task cancelled by user."
+        assert result == "任务已被用户取消。" or "cancelled by user" in result
 
     async def test_cancel_during_tool_results(self, mock_llm, temp_workspace):
         tool = FakeTool("test_tool")
@@ -219,7 +219,7 @@ class TestRunCancellation:
         with patch.object(ExecutionEngine, "execute_tools", execute_and_cancel):
             result = await agent.run(cancel_event=cancel_event)
 
-        assert result == "Task cancelled by user."
+        assert result == "任务已被用户取消。" or "cancelled by user" in result
 
     async def test_cancel_event_set_via_attribute(self, mock_llm, temp_workspace):
         mock_llm.generate = AsyncMock(return_value=_make_response("ok"))
@@ -231,7 +231,7 @@ class TestRunCancellation:
         cancel_event.set()
 
         result = await agent.run()
-        assert result == "Task cancelled by user."
+        assert result == "任务已被用户取消。" or "cancelled by user" in result
 
     async def test_cancel_cleans_up_incomplete_messages(self, mock_llm, temp_workspace):
         tool = FakeTool("test_tool")
@@ -263,7 +263,7 @@ class TestRunLLMError:
         agent = _make_agent(mock_llm, temp_workspace)
         agent.add_user_message("hi")
         result = await agent.run()
-        assert "LLM call failed" in result
+        assert "LLM 调用失败" in result or "LLM call failed" in result
 
     async def test_llm_rate_limit_error(self, mock_llm, temp_workspace):
         error = LLMError(
@@ -275,7 +275,7 @@ class TestRunLLMError:
         agent = _make_agent(mock_llm, temp_workspace)
         agent.add_user_message("hi")
         result = await agent.run()
-        assert "LLM call failed" in result
+        assert "LLM 调用失败" in result or "LLM call failed" in result
 
     async def test_llm_auth_error(self, mock_llm, temp_workspace):
         error = LLMError(
@@ -286,7 +286,7 @@ class TestRunLLMError:
         agent = _make_agent(mock_llm, temp_workspace)
         agent.add_user_message("hi")
         result = await agent.run()
-        assert "LLM call failed" in result
+        assert "LLM 调用失败" in result or "LLM call failed" in result
 
     async def test_llm_context_length_exceeded(self, mock_llm, temp_workspace):
         error = LLMError(
@@ -297,7 +297,7 @@ class TestRunLLMError:
         agent = _make_agent(mock_llm, temp_workspace)
         agent.add_user_message("hi")
         result = await agent.run()
-        assert "LLM call failed" in result
+        assert "LLM 调用失败" in result or "LLM call failed" in result
 
 
 @pytest.mark.mock
@@ -309,8 +309,8 @@ class TestRunMaxSteps:
         agent = _make_agent(mock_llm, temp_workspace, tools=[tool], max_steps=2)
         agent.add_user_message("Keep going")
         result = await agent.run()
-        assert "couldn't be completed" in result
-        assert "2 steps" in result
+        assert "未完成" in result or "couldn't be completed" in result
+        assert "2 步" in result or "2 steps" in result
 
     async def test_max_steps_auto_save(self, mock_llm, temp_workspace):
         tool = FakeTool("loop_tool")
@@ -322,7 +322,7 @@ class TestRunMaxSteps:
 
         with patch.object(agent._session_manager, "save", return_value="test_session_id") as mock_save:
             result = await agent.run()
-            assert "couldn't be completed" in result
+            assert "未完成" in result or "couldn't be completed" in result
             mock_save.assert_called_once()
 
     async def test_max_steps_auto_save_failure(self, mock_llm, temp_workspace):
@@ -335,7 +335,7 @@ class TestRunMaxSteps:
 
         with patch.object(agent._session_manager, "save", side_effect=OSError("disk full")):
             result = await agent.run()
-            assert "couldn't be completed" in result
+            assert "未完成" in result or "couldn't be completed" in result
 
     async def test_max_steps_auto_save_disabled(self, mock_llm, temp_workspace):
         tool = FakeTool("loop_tool")
@@ -347,7 +347,7 @@ class TestRunMaxSteps:
 
         with patch.object(agent._session_manager, "save", return_value="sid") as mock_save:
             result = await agent.run()
-            assert "couldn't be completed" in result
+            assert "未完成" in result or "couldn't be completed" in result
             mock_save.assert_not_called()
 
 

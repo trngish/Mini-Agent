@@ -1,7 +1,7 @@
-"""Core execution engine module.
+"""核心执行引擎模块。
 
-This module provides the core execution engine for the agent,
-separating the main execution loop from agent orchestration logic.
+本模块为 Agent 提供核心执行引擎，
+将主执行循环与 Agent 编排逻辑分离。
 """
 
 import asyncio
@@ -22,10 +22,9 @@ from .rate_limiter import RateLimiter
 
 
 class ExecutionEngine:
-    """Handles tool execution and parallel processing.
+    """处理工具执行和并行处理。
 
-    Provides intelligent batching, parallel execution, and error handling
-    for tool calls.
+    为工具调用提供智能批处理、并行执行和错误处理。
     """
 
     def __init__(
@@ -54,17 +53,17 @@ class ExecutionEngine:
         mode: AgentMode,
         check_approved_fn: Callable[[str], bool],
     ) -> list[tuple[ToolCall, Message]]:
-        """Execute tool calls with intelligent batching.
+        """智能批处理执行工具调用。
 
-        Args:
-            tool_calls: List of tool calls to execute
-            max_concurrent: Maximum number of concurrent tool executions
-            parallel_enabled: Whether parallel execution is enabled
-            mode: Current agent mode (YOLO, AGENT, PLAN)
-            check_approved_fn: Callback to check if a tool is approved in AGENT mode
+        参数:
+            tool_calls: 要执行的工具调用列表
+            max_concurrent: 最大并发工具执行数
+            parallel_enabled: 是否启用并行执行
+            mode: 当前 Agent 模式 (YOLO, AGENT, PLAN)
+            check_approved_fn: 回调函数，用于检查工具在 AGENT 模式下是否已批准
 
-        Returns:
-            List of (tool_call, message) tuples
+        返回:
+            (tool_call, message) 元组列表
         """
         if not tool_calls:
             return []
@@ -79,7 +78,7 @@ class ExecutionEngine:
             return await self._execute_sequential(tool_calls, mode, check_approved_fn)
 
     def optimize_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolCall]:
-        """Optimize tool calls by deduplicating paths in multi_read."""
+        """通过去重 multi_read 中的路径来优化工具调用。"""
         return self._optimize_tool_calls(tool_calls)
 
     async def _execute_sequential(
@@ -88,7 +87,7 @@ class ExecutionEngine:
         mode: AgentMode,
         check_approved_fn: Callable[[str], bool],
     ) -> list[tuple[ToolCall, Message]]:
-        """Execute tools one at a time."""
+        """逐个执行工具。"""
         results = []
         for tc in tool_calls:
             result = await self._execute_single_tool(tc, mode, check_approved_fn)
@@ -102,19 +101,20 @@ class ExecutionEngine:
         mode: AgentMode,
         check_approved_fn: Callable[[str], bool],
     ) -> list[tuple[ToolCall, Message]]:
-        """Execute tools in parallel with concurrency limit."""
+        """带并发限制的并行执行工具。"""
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def execute_with_limit(tc: ToolCall) -> tuple[ToolCall, Message]:
             async with semaphore:
                 return await self._execute_single_tool(tc, mode, check_approved_fn)
 
-        # B1 FIX: _execute_single_tool already prints each tool call.
-        # Removing this loop prevents every tool from appearing twice.
+        # B1 修复: _execute_single_tool 已打印每个工具调用。
+        # 删除此循环可防止每个工具出现两次。
         task_results = await asyncio.gather(*[execute_with_limit(tc) for tc in tool_calls], return_exceptions=True)
 
         processed_results: list[tuple[ToolCall, Message]] = []
-        for tc, result in zip(tool_calls, task_results):
+        for i, result in enumerate(task_results):
+            tc = tool_calls[i]
             if isinstance(result, Exception):
                 tool_msg = Message(
                     role="tool",
@@ -135,7 +135,7 @@ class ExecutionEngine:
         mode: AgentMode,
         check_approved_fn: Callable[[str], bool],
     ) -> list[tuple[ToolCall, Message]]:
-        """Execute in dependency-ordered batches."""
+        """按依赖顺序分批执行。"""
         batches = ToolGroupOptimizer.group_by_dependency(tool_calls)
         results = []
         for batch in batches:
@@ -148,13 +148,13 @@ class ExecutionEngine:
         return results
 
     def _extract_error_retry_after(self, error: str) -> int | None:
-        """Extract retry_after delay from error message.
+        """从错误消息中提取 retry_after 延迟时间。
 
-        Args:
-            error: Error message to parse
+        参数:
+            error: 要解析的错误消息
 
-        Returns:
-            Delay in seconds if found, None otherwise
+        返回:
+            如找到则返回秒为单位的延迟，否则返回 None
         """
         patterns = [
             r"retry[_\s]?after[:\s]*(\d+)",
@@ -170,13 +170,13 @@ class ExecutionEngine:
         return None
 
     def _is_non_retryable_error(self, error: str | None) -> bool:
-        """Check if error should not be retried.
+        """检查错误是否不应重试。
 
-        Args:
-            error: Error message to check
+        参数:
+            error: 要检查的错误消息
 
-        Returns:
-            True if error should not be retried
+        返回:
+            如果错误不应重试则返回 True
         """
         if not error:
             return True
@@ -189,7 +189,7 @@ class ExecutionEngine:
         mode: AgentMode,
         check_approved_fn: Callable[[str], bool],
     ) -> tuple[ToolCall, Message]:
-        """Execute a single tool with mode-based approval and error handling."""
+        """根据模式执行单个工具，包含基于模式的批准和错误处理。"""
         tool_call_id = tool_call.id
         function_name = tool_call.function.name
         arguments = tool_call.function.arguments
@@ -257,17 +257,26 @@ class ExecutionEngine:
 
             max_retries = self._retry_handler.get_max_retries()
             last_retry_after: int | None = None
+            # 工具执行超时时间（秒），避免挂起的工具阻塞整个agent
+            tool_timeout = 60
             for attempt in range(max_retries):
                 try:
                     tool = self.tools[function_name]
-                    result = await tool.execute(**arguments)
+                    result = await asyncio.wait_for(tool.execute(**arguments), timeout=tool_timeout)
                     if result.success or self._is_non_retryable_error(result.error):
                         break
                     if result.error is not None and not self._retry_handler.is_transient_error(result.error):
                         break
-                    # Try to extract retry_after from error message
+                    # 尝试从错误消息中提取 retry_after
                     if result.error and last_retry_after is None:
                         last_retry_after = self._extract_error_retry_after(result.error)
+                except asyncio.TimeoutError:
+                    result = ToolResult(
+                        success=False,
+                        content="",
+                        error=f"Tool execution timed out after {tool_timeout}s: {function_name}",
+                    )
+                    break
                 except Exception as e:
                     tool_error = handle_tool_error(function_name, arguments, e)
                     result = ToolResult(
@@ -275,19 +284,19 @@ class ExecutionEngine:
                         content="",
                         error=tool_error.message,
                     )
-                    if self._is_non_retryable_error(str(e)):
+                    if self._is_non_retryable_error(tool_error.message):
                         break
                     if not self._retry_handler.is_transient_error(str(e)):
                         break
-                    # Try to extract retry_after from exception
+                    # 尝试从异常中提取 retry_after
                     if last_retry_after is None:
                         last_retry_after = self._extract_error_retry_after(str(e))
 
                 if attempt < max_retries - 1:
-                    # Prefer retry_after value if available, otherwise use exponential backoff
+                    # 如有 retry_after 值则优先使用，否则使用指数退避
                     delay = last_retry_after if last_retry_after else self._retry_handler.get_delay(attempt)
                     await asyncio.sleep(delay)
-                    last_retry_after = None  # Reset after use
+                    last_retry_after = None  # 重置以供后续使用
             else:
                 pass
 
@@ -331,11 +340,11 @@ class ExecutionEngine:
     def _print_tool_result(self, result: ToolResult) -> None:
         if result.success:
             text = result.content
-            if len(text) > 800:  # F1 FIX: increased from 300 to show more context
+            if len(text) > 800:  # F1 修复: 从 300 增加到显示更多上下文
                 text = text[:800] + f"{Colors.DIM}...{Colors.RESET}"
             print(f"{Colors.BRIGHT_GREEN}✓ Result:\n{Colors.RESET}{text}")
         else:
-            print(f"{Colors.BRIGHT_RED}✗ Error:\n{Colors.RESET}{Colors.RED}{result.error}{Colors.RESET}\n")  # F2 FIX: trailing newline
+            print(f"{Colors.BRIGHT_RED}✗ 错误:\n{Colors.RESET}{Colors.RED}{result.error}{Colors.RESET}\n")  # F2 修复: 尾部添加换行符
 
     def _on_tool_result(self, function_name: str, result: ToolResult, arguments: dict[str, Any] | None = None) -> None:
         self._print_tool_result(result)
@@ -348,7 +357,7 @@ class ExecutionEngine:
         )
 
     def _optimize_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolCall]:
-        """Optimize tool calls by deduplicating paths in multi_read."""
+        """通过去重 multi_read 中的路径来优化工具调用。"""
         multi_read_calls = []
         other_calls = []
 

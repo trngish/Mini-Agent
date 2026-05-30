@@ -1,4 +1,4 @@
-"""Message validation utilities for agent communication."""
+"""用于Agent通信的消息验证工具。"""
 
 from typing import Any
 
@@ -6,7 +6,7 @@ from ..schema import Message, ToolCall
 
 
 class ValidationError(Exception):
-    """Validation error with details."""
+    """带详细信息的验证错误。"""
 
     def __init__(self, message: str, field: str | None = None, value: Any = None):
         self.field = field
@@ -15,19 +15,19 @@ class ValidationError(Exception):
 
 
 class MessageValidator:
-    """Validates message structure before sending to LLM."""
+    """在发送到LLM之前验证消息结构。"""
 
     @staticmethod
     def validate_message(message: Message) -> None:
-        """Validate a single message.
+        """验证单条消息。
 
         Args:
-            message: Message to validate
+            message: 要验证的消息
 
         Raises:
-            ValidationError: If validation fails
+            ValidationError: 如果验证失败
         """
-        # Validate role
+        # 验证role
         valid_roles = {"system", "user", "assistant", "tool"}
         if message.role not in valid_roles:
             raise ValidationError(
@@ -36,7 +36,7 @@ class MessageValidator:
                 value=message.role,
             )
 
-        # Validate content
+        # 验证content
         if message.content is None:
             raise ValidationError(
                 "Content cannot be None",
@@ -44,7 +44,7 @@ class MessageValidator:
                 value=message.content,
             )
 
-        # Validate tool_call_id matches role
+        # 验证tool_call_id与role的匹配
         if message.tool_call_id and message.role != "tool":
             raise ValidationError(
                 f"tool_call_id only valid for tool role, got {message.role}",
@@ -52,7 +52,7 @@ class MessageValidator:
                 value=message.tool_call_id,
             )
 
-        # Validate name field
+        # 验证name字段
         if message.name and message.role != "tool":
             raise ValidationError(
                 f"name only valid for tool role, got {message.role}",
@@ -60,7 +60,7 @@ class MessageValidator:
                 value=message.name,
             )
 
-        # Validate tool_calls structure
+        # 验证tool_calls结构
         if message.tool_calls:
             if message.role not in ("assistant",):
                 raise ValidationError(
@@ -71,13 +71,13 @@ class MessageValidator:
 
     @staticmethod
     def _validate_tool_calls(tool_calls: list[ToolCall]) -> None:
-        """Validate tool calls list.
+        """验证工具调用列表。
 
         Args:
-            tool_calls: List of tool calls to validate
+            tool_calls: 要验证的工具调用列表
 
         Raises:
-            ValidationError: If validation fails
+            ValidationError: 如果验证失败
         """
         if not isinstance(tool_calls, list):
             raise ValidationError(
@@ -112,18 +112,18 @@ class MessageValidator:
 
     @staticmethod
     def validate_messages(messages: list[Message]) -> None:
-        """Validate message history.
+        """验证消息历史。
 
         Args:
-            messages: List of messages to validate
+            messages: 要验证的消息列表
 
         Raises:
-            ValidationError: If validation fails
+            ValidationError: 如果验证失败
         """
         if not messages:
             raise ValidationError("Messages list cannot be empty")
 
-        # First message must be system
+        # 第一条消息必须是system
         if messages[0].role != "system":
             raise ValidationError(
                 "First message must be system role",
@@ -131,7 +131,7 @@ class MessageValidator:
                 value=messages[0].role,
             )
 
-        # Validate each message
+        # 验证每条消息
         for i, msg in enumerate(messages):
             try:
                 MessageValidator.validate_message(msg)
@@ -147,17 +147,17 @@ class MessageValidator:
         assistant_message: Message,
         tool_message: Message,
     ) -> bool:
-        """Validate that tool result matches assistant's tool call.
+        """验证工具结果与Assistant的工具调用是否匹配。
 
         Args:
-            assistant_message: Assistant message with tool_calls
-            tool_message: Tool result message
+            assistant_message: 包含tool_calls的Assistant消息
+            tool_message: 工具结果消息
 
         Returns:
-            True if valid match
+            如果匹配则返回True
 
         Raises:
-            ValidationError: If validation fails
+            ValidationError: 如果验证失败
         """
         if assistant_message.role != "assistant":
             raise ValidationError(
@@ -177,7 +177,7 @@ class MessageValidator:
                 field="assistant_message.tool_calls",
             )
 
-        # Check if tool_call_id matches
+        # 检查tool_call_id是否匹配
         for tc in assistant_message.tool_calls:
             if tc.id == tool_message.tool_call_id:
                 return True

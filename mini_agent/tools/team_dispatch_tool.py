@@ -1,7 +1,7 @@
-"""Team dispatch tool for multi-agent collaboration.
+"""用于多智能体协作的团队调度工具。
 
-Provides a tool that allows the Agent to spawn a team of specialized agents
-for complex task decomposition and adversarial review/critique.
+提供允许Agent生成分工明确的专门智能体团队的工具，
+用于复杂任务分解和对抗性审查/批评。
 """
 
 import asyncio
@@ -15,17 +15,17 @@ DEFAULT_TIMEOUT = 300  # 5 minutes default timeout
 
 
 class TeamDispatchTool(Tool):
-    """Dispatch a team of agents for complex tasks.
+    """为复杂任务调度智能体团队。
 
-    This tool enables the main agent to spawn a team with:
-    - Task decomposition: Break complex tasks into parallel subtasks
-    - Adversarial review: Multiple critics challenge the solution
-    - Result synthesis: Combine results into final output
+    此工具使主智能体能够生成了一个具备以下能力的团队：
+    - 任务分解：将复杂任务分解为并行子任务
+    - 对抗性审查：多个批评者挑战解决方案
+    - 结果综合：将结果合成为最终输出
 
-    Use cases:
-    - Complex tasks that can be broken into independent subtasks
-    - Code review with multiple critics
-    - Design evaluation with adversarial reasoning
+    使用场景：
+    - 可分解为独立子任务的复杂任务
+    - 多批评者的代码审查
+    - 对抗性推理的设计评估
     """
 
     def __init__(
@@ -46,23 +46,23 @@ class TeamDispatchTool(Tool):
 
     @property
     def description(self) -> str:
-        return """Dispatch a team of specialized agents to work on complex tasks.
+        return """调度专门化智能体团队来处理复杂任务。
 
-Supports two modes:
-1. **decompose**: Break a complex task into parallel subtasks executed by multiple agents
-2. **review**: Run adversarial review with multiple critics challenging the solution
+支持两种模式：
+1. **decompose**: 将复杂任务分解为由多个智能体执行的并行子任务
+2. **review**: 运行对抗性审查，多个批评者挑战解决方案
 
-Parameters:
-  - task: The main task or problem to solve
-  - mode: "decompose" for task splitting, "review" for adversarial critique
-  - roles: Which roles to include (defaults depend on mode)
+参数:
+  - task: 要执行的主要任务或问题
+  - mode: "decompose"用于任务拆分，"review"用于对抗性批评
+  - roles: 包含的角色（默认值取决于模式）
 
-For decompose mode, roles typically include: planner, executor
-For review mode, roles typically include: reviewer, critic (multiple)
+对于decompose模式，角色通常包括：planner, executor
+对于review模式，角色通常包括：reviewer, critic（多个）
 
-Examples:
-  - Decompose: team_dispatch(task="Build a full web app", mode="decompose")
-  - Review: team_dispatch(task="Review this design", mode="review")
+示例:
+  - 分解: team_dispatch(task="构建一个完整的Web应用", mode="decompose")
+  - 审查: team_dispatch(task="审查这个设计", mode="review")
 """
 
     @property
@@ -72,24 +72,24 @@ Examples:
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "The task to execute or have the team work on",
+                    "description": "要执行的任务或让团队处理的任务",
                 },
                 "mode": {
                     "type": "string",
                     "enum": ["decompose", "review"],
                     "description": (
-                        "Execution mode: 'decompose' for parallel execution, 'review' for adversarial critique"
+                        "执行模式：'decompose'用于并行执行，'review'用于对抗性批评"
                     ),
                     "default": "decompose",
                 },
                 "max_rounds": {
                     "type": "integer",
-                    "description": "Maximum number of critique rounds for review mode",
+                    "description": "审查模式的最多批评轮数",
                     "default": 2,
                 },
                 "timeout_per_agent": {
                     "type": "integer",
-                    "description": "Timeout per agent in seconds",
+                    "description": "每个智能体的超时时间（秒）",
                     "default": 120,
                 },
             },
@@ -103,16 +103,16 @@ Examples:
         max_rounds: int = 2,
         timeout_per_agent: int = 120,
     ) -> ToolResult:
-        """Execute team dispatch.
+        """执行团队调度。
 
-        Args:
-            task: The task to execute
-            mode: "decompose" or "review"
-            max_rounds: Number of critique rounds (for review mode)
-            timeout_per_agent: Timeout per agent in seconds
+        参数:
+            task: 要执行的任务
+            mode: "decompose" 或 "review"
+            max_rounds: 批评轮数（用于review模式）
+            timeout_per_agent: 每个智能体的超时时间（秒）
 
-        Returns:
-            ToolResult with team execution results
+        返回:
+            包含团队执行结果的ToolResult
         """
         try:
             team = AgentTeam(
@@ -125,7 +125,7 @@ Examples:
                 m27_config=self._m27_config,
             )
 
-            # Use a reasonable overall timeout
+            # 使用合理的总体超时时间
             overall_timeout = min(timeout_per_agent * 3, DEFAULT_TIMEOUT)
 
             async with asyncio.timeout(overall_timeout):  # type: ignore[attr-defined]
@@ -158,7 +158,7 @@ Examples:
         task: str,
         timeout: int,
     ) -> ToolResult:
-        """Execute in decompose mode: planner + executor + reviewer."""
+        """以decompose模式执行：planner + executor + reviewer。"""
         team.add_planner("planner", max_steps=40)
         team.add_executor("executor", max_steps=50)
         team.add_reviewer("reviewer", max_steps=30)
@@ -184,7 +184,7 @@ Examples:
         timeout: int,
         max_rounds: int,  # noqa: ARG002
     ) -> ToolResult:
-        """Execute in review mode: reviewer + multiple critics."""
+        """以review模式执行：reviewer + 多个critics。"""
         team.add_reviewer("reviewer", max_steps=30)
         team.add_critic("critic1", max_steps=30)
         team.add_critic("critic2", max_steps=30)

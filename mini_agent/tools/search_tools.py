@@ -1,7 +1,6 @@
-"""File search and content search tools.
+"""文件搜索和内容搜索工具。
 
-Provides grep-like functionality for searching file contents and
-finding files by patterns.
+提供类似grep的功能用于搜索文件内容和按模式查找文件。
 """
 
 from __future__ import annotations
@@ -16,13 +15,13 @@ from .base import Tool, ToolResult
 
 
 class GrepTool(Tool):
-    """Search for patterns in file contents."""
+    """在文件内容中搜索模式。"""
 
     def __init__(self, workspace_dir: str = "."):
-        """Initialize GrepTool with workspace directory.
+        """使用工作区目录初始化GrepTool。
 
-        Args:
-            workspace_dir: Base directory for resolving relative paths
+        参数:
+            workspace_dir: 用于解析相对路径的基础目录
         """
         self.workspace_dir = Path(workspace_dir).absolute()
 
@@ -32,26 +31,26 @@ class GrepTool(Tool):
 
     @property
     def description(self) -> str:
-        return """Search for text patterns in files (similar to grep).
+        return """在文件中搜索文本模式（类似于grep）。
 
-Supports:
-- Simple text search
-- Regular expression patterns
-- Case-sensitive and case-insensitive search
-- Line number display for found matches
+支持:
+- 简单文本搜索
+- 正则表达式模式
+- 大小写敏感和不敏感搜索
+- 显示匹配行的行号
 
-Parameters:
-  - pattern: Text or regex pattern to search for
-  - path: Directory or file path to search in (default: workspace root)
-  - file_pattern: Glob pattern for file names to search (e.g., "*.py", "*.md")
-  - case_sensitive: Whether search should be case-sensitive (default: false)
-  - regex: Whether pattern is a regular expression (default: false)
-  - max_results: Maximum number of results to return (default: 100)
+参数:
+  - pattern: 要搜索的文本或正则表达式模式
+  - path: 要搜索的目录或文件路径（默认: 工作区根目录）
+  - file_pattern: 要搜索的文件名的Glob模式（例如："*.py", "*.md"）
+  - case_sensitive: 搜索是否区分大小写（默认: false）
+  - regex: 模式是否为正则表达式（默认: false）
+  - max_results: 返回的最大结果数量（默认: 100）
 
-Examples:
-  - Search for "TODO" in all Python files
-  - Search for "function" in src/ directory
-  - Search for "^class " pattern in .py files using regex
+示例:
+  - 在所有Python文件中搜索"TODO"
+  - 在src/目录中搜索"function"
+  - 使用正则表达式在.py文件中搜索"^class "模式
 """
 
     @property
@@ -61,31 +60,31 @@ Examples:
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Text or regex pattern to search for",
+                    "description": "要搜索的文本或正则表达式模式",
                 },
                 "path": {
                     "type": "string",
-                    "description": "Directory or file path to search in (default: workspace root)",
+                    "description": "要搜索的目录或文件路径（默认: 工作区根目录）",
                     "default": ".",
                 },
                 "file_pattern": {
                     "type": "string",
-                    "description": "Glob pattern for file names to search (e.g., '*.py', '*.md')",
+                    "description": "要搜索的文件名的Glob模式（例如：'*.py', '*.md'）",
                     "default": "*",
                 },
                 "case_sensitive": {
                     "type": "boolean",
-                    "description": "Whether search should be case-sensitive (default: false)",
+                    "description": "搜索是否区分大小写（默认: false）",
                     "default": False,
                 },
                 "regex": {
                     "type": "boolean",
-                    "description": "Whether pattern is a regular expression (default: false)",
+                    "description": "模式是否为正则表达式（默认: false）",
                     "default": False,
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results to return (default: 100)",
+                    "description": "返回的最大结果数量（默认: 100）",
                     "default": 100,
                 },
             },
@@ -101,9 +100,9 @@ Examples:
         regex: bool = False,
         max_results: int = 100,
     ) -> ToolResult:
-        """Execute grep search."""
+        """执行grep搜索。"""
         try:
-            # Normalize path
+            # 规范化路径
             search_path = normalize_path_separators(path)
             search_dir = Path(search_path)
             if not search_dir.is_absolute():
@@ -113,10 +112,10 @@ Examples:
                 return ToolResult(
                     success=False,
                     content="",
-                    error=f"Path not found: {path}",
+                    error=f"路径未找到: {path}",
                 )
 
-            # Compile regex pattern if needed
+            # 如果需要则编译正则表达式
             if regex:
                 flags = 0 if case_sensitive else re.IGNORECASE
                 try:
@@ -125,13 +124,13 @@ Examples:
                     return ToolResult(
                         success=False,
                         content="",
-                        error=f"Invalid regex pattern: {e}",
+                        error=f"无效的正则表达式模式: {e}",
                     )
             else:
                 compiled_pattern = None
                 search_text = pattern if case_sensitive else pattern.lower()
 
-            # Search files
+            # 搜索文件
             results: list[dict[str, Any]] = []
             files_searched = 0
 
@@ -166,23 +165,23 @@ Examples:
                                     break
 
                 except Exception:
-                    # Skip files that can't be read
+                    # 跳过无法读取的文件
                     continue
 
-            # Format results
+            # 格式化结果
             if not results:
                 return ToolResult(
                     success=True,
-                    content=f"No matches found for '{pattern}' in {files_searched} files",
+                    content=f"在 {files_searched} 个文件中未找到 '{pattern}' 的匹配",
                 )
 
-            output = f"Found {len(results)} matches in {files_searched} files:\n\n"
+            output = f"在 {files_searched} 个文件中找到 {len(results)} 个匹配:\n\n"
             current_file = None
             for result in results:
                 if result["file"] != current_file:
                     current_file = result["file"]
                     output += f"{'=' * 60}\n"
-                    output += f"File: {current_file}\n"
+                    output += f"文件: {current_file}\n"
                     output += f"{'=' * 60}\n"
 
                 output += f"  {result['line']:6d}| {result['content']}\n"
@@ -193,7 +192,7 @@ Examples:
             return ToolResult(success=False, content="", error=str(e))
 
     def _iterate_files(self, directory: Path, pattern: str) -> Any:
-        """Iterate over files matching the pattern in directory."""
+        """遍历目录中匹配模式的文件。"""
         import os
 
         if directory.is_file():
@@ -201,7 +200,7 @@ Examples:
             return
 
         for root, dirs, files in os.walk(directory):
-            # Skip hidden directories and common non-source directories
+            # 跳过隐藏目录和常见的非源代码目录
             dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("__pycache__", "node_modules", ".git")]
 
             for filename in files:
@@ -210,13 +209,13 @@ Examples:
 
 
 class FindTool(Tool):
-    """Find files by name pattern."""
+    """按名称模式查找文件。"""
 
     def __init__(self, workspace_dir: str = "."):
-        """Initialize FindTool with workspace directory.
+        """使用工作区目录初始化FindTool。
 
-        Args:
-            workspace_dir: Base directory for resolving relative paths
+        参数:
+            workspace_dir: 用于解析相对路径的基础目录
         """
         self.workspace_dir = Path(workspace_dir).absolute()
 
@@ -226,20 +225,20 @@ class FindTool(Tool):
 
     @property
     def description(self) -> str:
-        return """Find files by name pattern (similar to find command).
+        return """按名称模式查找文件（类似于find命令）。
 
-Supports glob patterns and case-sensitive/insensitive search.
+支持Glob模式和大小写敏感/不敏感搜索。
 
-Parameters:
-  - pattern: Glob pattern for file names (e.g., "*.py", "test_*.txt")
-  - path: Directory to search in (default: workspace root)
-  - case_sensitive: Whether pattern matching is case-sensitive (default: true)
-  - max_results: Maximum number of results (default: 100)
+参数:
+  - pattern: 文件名的Glob模式（例如："*.py", "test_*.txt"）
+  - path: 要搜索的目录（默认: 工作区根目录）
+  - case_sensitive: 模式匹配是否区分大小写（默认: true）
+  - max_results: 最大结果数量（默认: 100）
 
-Examples:
-  - Find all Python files: pattern="*.py"
-  - Find all test files: pattern="test_*.py"
-  - Find configuration files: pattern="*.json"
+示例:
+  - 查找所有Python文件: pattern="*.py"
+  - 查找所有测试文件: pattern="test_*.py"
+  - 查找配置文件: pattern="*.json"
 """
 
     @property
@@ -249,21 +248,21 @@ Examples:
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern for file names (e.g., '*.py', 'test_*.txt')",
+                    "description": "文件名的Glob模式（例如：'*.py', 'test_*.txt'）",
                 },
                 "path": {
                     "type": "string",
-                    "description": "Directory to search in (default: workspace root)",
+                    "description": "要搜索的目录（默认: 工作区根目录）",
                     "default": ".",
                 },
                 "case_sensitive": {
                     "type": "boolean",
-                    "description": "Whether pattern matching is case-sensitive (default: true)",
+                    "description": "模式匹配是否区分大小写（默认: true）",
                     "default": True,
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results (default: 100)",
+                    "description": "最大结果数量（默认: 100）",
                     "default": 100,
                 },
             },
@@ -277,9 +276,9 @@ Examples:
         case_sensitive: bool = True,
         max_results: int = 100,
     ) -> ToolResult:
-        """Execute find search."""
+        """执行查找搜索。"""
         try:
-            # Normalize path
+            # 规范化路径
             search_path = normalize_path_separators(path)
             search_dir = Path(search_path)
             if not search_dir.is_absolute():
@@ -289,17 +288,17 @@ Examples:
                 return ToolResult(
                     success=False,
                     content="",
-                    error=f"Path not found: {path}",
+                    error=f"路径未找到: {path}",
                 )
 
-            # Find files
+            # 查找文件
             results = []
             search_pattern = pattern if case_sensitive else pattern.lower()
 
             import os
 
             for root, dirs, files in os.walk(search_dir):
-                # Skip hidden directories
+                # 跳过隐藏目录
                 dirs[:] = [d for d in dirs if not d.startswith(".")]
 
                 for filename in files:
@@ -320,19 +319,19 @@ Examples:
                 if len(results) >= max_results:
                     break
 
-            # Format results
+            # 格式化结果
             if not results:
                 return ToolResult(
                     success=True,
-                    content=f"No files found matching pattern: {pattern}",
+                    content=f"未找到匹配模式: {pattern} 的文件",
                 )
 
-            output = f"Found {len(results)} files matching '{pattern}':\n\n"
+            output = f"找到 {len(results)} 个匹配 '{pattern}' 的文件:\n\n"
             for file_path in sorted(results):
                 output += f"  - {file_path}\n"
 
             if len(results) >= max_results:
-                output += f"\n  ... (showing first {max_results} results)"
+                output += f"\n  ... (显示前 {max_results} 个结果)"
 
             return ToolResult(success=True, content=output)
 
@@ -341,13 +340,13 @@ Examples:
 
 
 class TreeTool(Tool):
-    """Display directory tree structure."""
+    """显示目录树结构。"""
 
     def __init__(self, workspace_dir: str = "."):
-        """Initialize TreeTool with workspace directory.
+        """使用工作区目录初始化TreeTool。
 
-        Args:
-            workspace_dir: Base directory for resolving relative paths
+        参数:
+            workspace_dir: 用于解析相对路径的基础目录
         """
         self.workspace_dir = Path(workspace_dir).absolute()
 
@@ -357,18 +356,18 @@ class TreeTool(Tool):
 
     @property
     def description(self) -> str:
-        return """Display directory tree structure.
+        return """显示目录树结构。
 
-Shows the file and directory hierarchy starting from a given path.
+显示从给定路径开始的文件和目录层次结构。
 
-Parameters:
-  - path: Directory path to display (default: workspace root)
-  - max_depth: Maximum depth to display (default: 3)
-  - include_hidden: Whether to include hidden files/directories (default: false)
+参数:
+  - path: 要显示的目录路径（默认: 工作区根目录）
+  - max_depth: 显示的最大深度（默认: 3）
+  - include_hidden: 是否包含隐藏文件/目录（默认: false）
 
-Examples:
-  - Show entire workspace tree
-  - Show project structure with max_depth=2
+示例:
+  - 显示整个工作区树
+  - 显示深度为2的项目结构
 """
 
     @property
@@ -378,17 +377,17 @@ Examples:
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Directory path to display (default: workspace root)",
+                    "description": "要显示的目录路径（默认: 工作区根目录）",
                     "default": ".",
                 },
                 "max_depth": {
                     "type": "integer",
-                    "description": "Maximum depth to display (default: 3)",
+                    "description": "显示的最大深度（默认: 3）",
                     "default": 3,
                 },
                 "include_hidden": {
                     "type": "boolean",
-                    "description": "Whether to include hidden files/directories (default: false)",
+                    "description": "是否包含隐藏文件/目录（默认: false）",
                     "default": False,
                 },
             },
@@ -400,9 +399,9 @@ Examples:
         max_depth: int = 3,
         include_hidden: bool = False,
     ) -> ToolResult:
-        """Execute tree display."""
+        """执行树状显示。"""
         try:
-            # Normalize path
+            # 规范化路径
             tree_path = normalize_path_separators(path)
             root_dir = Path(tree_path)
             if not root_dir.is_absolute():
@@ -412,21 +411,21 @@ Examples:
                 return ToolResult(
                     success=False,
                     content="",
-                    error=f"Path not found: {path}",
+                    error=f"路径未找到: {path}",
                 )
 
             if not root_dir.is_dir():
                 return ToolResult(
                     success=False,
                     content="",
-                    error=f"Not a directory: {path}",
+                    error=f"不是目录: {path}",
                 )
 
-            # Build tree
+            # 构建树
             lines: list[str] = []
             self._build_tree(root_dir, "", lines, max_depth, 0, include_hidden)
 
-            output = f"Directory tree: {root_dir.name}\n"
+            output = f"目录树: {root_dir.name}\n"
             output += "=" * 60 + "\n"
             output += "\n".join(lines)
 
@@ -444,12 +443,12 @@ Examples:
         current_depth: int,
         include_hidden: bool,
     ) -> None:
-        """Recursively build tree lines."""
+        """递归构建树状线条。"""
         try:
             entries = sorted(directory.iterdir(), key=lambda x: (not x.is_dir(), x.name))
 
             for i, entry in enumerate(entries):
-                # Skip hidden files if not including them
+                # 如果不包含隐藏文件则跳过隐藏文件
                 if not include_hidden and entry.name.startswith("."):
                     continue
 
@@ -474,10 +473,10 @@ Examples:
                     lines.append(f"{prefix}{connector}{entry.name} ({size_str})")
 
         except PermissionError:
-            lines.append(f"{prefix}[Permission Denied]")
+            lines.append(f"{prefix}[权限被拒绝]")
 
     def _format_size(self, size: int) -> str:
-        """Format file size in human-readable format."""
+        """格式化文件大小为人类可读格式。"""
         if size < 1024:
             return f"{size}B"
         elif size < 1024 * 1024:

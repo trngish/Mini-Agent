@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Start one or more servers, wait for them to be ready, run a command, then clean up.
+启动一个或多个服务器，等待其就绪，运行命令，然后清理。
 
-Usage:
-    # Single server
+用法：
+    # 单服务器
     python scripts/with_server.py --server "npm run dev" --port 5173 -- python automation.py
     python scripts/with_server.py --server "npm start" --port 3000 -- python test.py
 
-    # Multiple servers
+    # 多服务器
     python scripts/with_server.py \
       --server "cd backend && python server.py" --port 3000 \
       --server "cd frontend && npm run dev" --port 5173 \
@@ -22,7 +22,7 @@ import time
 
 
 def is_server_ready(port, timeout=30):
-    """Wait for server to be ready by polling the port."""
+    """通过轮询端口等待服务器就绪。"""
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
@@ -34,9 +34,9 @@ def is_server_ready(port, timeout=30):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run command with one or more servers")
+    parser = argparse.ArgumentParser(description="运行带有服务器启动和清理的命令")
     parser.add_argument(
-        "--server", action="append", dest="servers", required=True, help="Server command (can be repeated)"
+        "--server", action="append", dest="servers", required=True, help="服务器命令（可重复）"
     )
     parser.add_argument(
         "--port",
@@ -44,24 +44,24 @@ def main():
         dest="ports",
         type=int,
         required=True,
-        help="Port for each server (must match --server count)",
+        help="每个服务器对应的端口（必须与 --server 数量匹配）",
     )
-    parser.add_argument("--timeout", type=int, default=30, help="Timeout in seconds per server (default: 30)")
-    parser.add_argument("command", nargs=argparse.REMAINDER, help="Command to run after server(s) ready")
+    parser.add_argument("--timeout", type=int, default=30, help="每个服务器的超时时间（秒），默认 30")
+    parser.add_argument("command", nargs=argparse.REMAINDER, help="服务器就绪后运行的命令")
 
     args = parser.parse_args()
 
-    # Remove the '--' separator if present
+    # 如果存在 '--' 分隔符，则移除它
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
 
     if not args.command:
-        print("Error: No command specified to run")
+        print("错误：未指定要运行的命令")
         sys.exit(1)
 
-    # Parse server configurations
+    # 解析服务器配置
     if len(args.servers) != len(args.ports):
-        print("Error: Number of --server and --port arguments must match")
+        print("错误：--server 和 --port 参数的数量必须匹配")
         sys.exit(1)
 
     servers = []
@@ -71,31 +71,31 @@ def main():
     server_processes = []
 
     try:
-        # Start all servers
+        # 启动所有服务器
         for i, server in enumerate(servers):
             print(f"Starting server {i + 1}/{len(servers)}: {server['cmd']}")
 
-            # Use shell=True to support commands with cd and &&
+            # 使用 shell=True 以支持包含 cd 和 && 的命令
             process = subprocess.Popen(server["cmd"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             server_processes.append(process)
 
-            # Wait for this server to be ready
-            print(f"Waiting for server on port {server['port']}...")
+            # 等待此服务器就绪
+            print(f"正在等待端口 {server['port']} 上的服务器...")
             if not is_server_ready(server["port"], timeout=args.timeout):
-                raise RuntimeError(f"Server failed to start on port {server['port']} within {args.timeout}s")
+                raise RuntimeError(f"服务器在端口 {server['port']} 上启动失败，超时 {args.timeout} 秒")
 
-            print(f"Server ready on port {server['port']}")
+            print(f"服务器在端口 {server['port']} 上已就绪")
 
         print(f"\nAll {len(servers)} server(s) ready")
 
-        # Run the command
-        print(f"Running: {' '.join(args.command)}\n")
+        # 运行命令
+        print(f"正在运行：{' '.join(args.command)}\n")
         result = subprocess.run(args.command)
         sys.exit(result.returncode)
 
     finally:
-        # Clean up all servers
-        print(f"\nStopping {len(server_processes)} server(s)...")
+        # 清理所有服务器
+        print(f"\n正在停止 {len(server_processes)} 个服务器...")
         for i, process in enumerate(server_processes):
             try:
                 process.terminate()
@@ -103,7 +103,7 @@ def main():
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-            print(f"Server {i + 1} stopped")
+            print(f"服务器 {i + 1} 已停止")
         print("All servers stopped")
 
 

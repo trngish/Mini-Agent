@@ -1,7 +1,7 @@
 """
-MD Converter Tool - Convert Markdown files to PDF or DOCX
+MD转换工具 - 将Markdown文件转换为PDF或DOCX
 
-This tool provides direct conversion functionality for Mini Agent.
+此工具为Mini Agent提供直接的转换功能。
 """
 
 import importlib
@@ -14,20 +14,20 @@ from .base import Tool, ToolResult
 
 
 def _load_converter(module_name: str, func_name: str) -> Callable[..., Any]:
-    """Dynamically load a converter function from the skills directory.
+    """动态从skills目录加载转换器函数。
 
-    The converter modules live under mini_agent/skills/md-converter/scripts/
-    and are not part of the tools package, so they must be loaded at runtime.
+    转换器模块位于 mini_agent/skills/md-converter/scripts/ 下，
+    不属于tools包，因此必须在运行时动态加载。
 
     Args:
-        module_name: Module name to import (e.g. "md_to_pdf")
-        func_name: Function name to retrieve (e.g. "convert_md_to_pdf")
+        module_name: 要导入的模块名（例如 "md_to_pdf"）
+        func_name: 要获取的函数名（例如 "convert_md_to_pdf"）
 
     Returns:
-        The converter function
+        转换器函数
 
     Raises:
-        ImportError: If the module cannot be found
+        ImportError: 如果找不到模块
     """
     try:
         func = getattr(importlib.import_module(f".{module_name}", __package__), func_name)
@@ -42,7 +42,7 @@ def _load_converter(module_name: str, func_name: str) -> Callable[..., Any]:
 
 
 class MDToPDFTool(Tool):
-    """Convert Markdown to PDF."""
+    """将Markdown转换为PDF。"""
 
     name = "md_to_pdf"
     description = (
@@ -90,7 +90,7 @@ class MDToPDFTool(Tool):
         page_size: str = "A4",
     ) -> ToolResult:
         try:
-            # Resolve paths
+            # 解析路径
             input_file = Path(input_path)
             if not input_file.is_absolute():
                 input_file = self.workspace_dir / input_file
@@ -113,7 +113,7 @@ class MDToPDFTool(Tool):
 
 
 class MDToDOCXTool(Tool):
-    """Convert Markdown to DOCX."""
+    """将Markdown转换为DOCX。"""
 
     name = "md_to_docx"
     description = (
@@ -155,7 +155,7 @@ class MDToDOCXTool(Tool):
         author: str | None = None,
     ) -> ToolResult:
         try:
-            # Resolve paths
+            # 解析路径
             input_file = Path(input_path)
             if not input_file.is_absolute():
                 input_file = self.workspace_dir / input_file

@@ -4,13 +4,13 @@ import sys
 from extract_form_field_info import get_field_info
 from pypdf import PdfReader, PdfWriter
 
-# Fills fillable form fields in a PDF. See forms.md.
+# 填写 PDF 中的可填写表单字段。参见 forms.md。
 
 
 def fill_pdf_fields(input_pdf_path: str, fields_json_path: str, output_pdf_path: str):
     with open(fields_json_path) as f:
         fields = json.load(f)
-    # Group by page number.
+    # 按页码分组。
     fields_by_page = {}
     for field in fields:
         if "value" in field:
@@ -48,8 +48,8 @@ def fill_pdf_fields(input_pdf_path: str, fields_json_path: str, output_pdf_path:
     for page, field_values in fields_by_page.items():
         writer.update_page_form_field_values(writer.pages[page - 1], field_values, auto_regenerate=False)
 
-    # This seems to be necessary for many PDF viewers to format the form values correctly.
-    # It may cause the viewer to show a "save changes" dialog even if the user doesn't make any changes.
+    # 这对于许多 PDF 查看器正确格式化表单值似乎是必要的。
+    # 它可能导致查看器显示"保存更改"对话框，即使用户没有做任何更改。
     writer.set_need_appearances_writer(True)
 
     with open(output_pdf_path, "wb") as f:
@@ -77,18 +77,18 @@ def validation_error_for_field_value(field_info, field_value):
     return None
 
 
-# pypdf (at least version 5.7.0) has a bug when setting the value for a selection list field.
-# In _writer.py around line 966:
+# pypdf（至少 5.7.0 版本）在设置选择列表字段的值时存在 bug。
+# 在 _writer.py 第 966 行左右：
 #
 # if field.get(FA.FT, "/Tx") == "/Ch" and field_flags & FA.FfBits.Combo == 0:
 #     txt = "\n".join(annotation.get_inherited(FA.Opt, []))
 #
-# The problem is that for selection lists, `get_inherited` returns a list of two-element lists like
+# 问题是对于选择列表，`get_inherited` 返回一个包含两个元素列表的列表，如
 # [["value1", "Text 1"], ["value2", "Text 2"], ...]
-# This causes `join` to throw a TypeError because it expects an iterable of strings.
-# The horrible workaround is to patch `get_inherited` to return a list of the value strings.
-# We call the original method and adjust the return value only if the argument to `get_inherited`
-# is `FA.Opt` and if the return value is a list of two-element lists.
+# 这导致 `join` 抛出 TypeError，因为它期望的是一个字符串的可迭代对象。
+# 这个糟糕的解决方案是修补 `get_inherited` 方法，使其返回值字符串的列表。
+# 我们调用原始方法，只有当 `get_inherited` 的参数是 `FA.Opt` 且返回值是双元素列表时，
+# 才调整返回值。
 def monkeypatch_pydpf_method():
     from pypdf.constants import FieldDictionaryAttributes
     from pypdf.generic import DictionaryObject

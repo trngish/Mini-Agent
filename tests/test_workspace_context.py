@@ -79,8 +79,8 @@ class TestWorkspaceContextToolExecute:
     async def test_execute_default(self, mock_tree, mock_git, mock_token_limit, mock_truncate, mock_compress, tool):
         result = await tool.execute()
         assert result.success is True
-        assert "Directory Tree" in result.content
-        assert "Git Status" in result.content
+        assert "目录树" in result.content or "Directory Tree" in result.content
+        assert "Git 状态" in result.content or "Git Status" in result.content
         assert "Key Config Files Found" in result.content
         mock_tree.assert_called_once_with(tool.workspace_dir, 3, show_sizes=False, max_files_per_dir=20)
         mock_git.assert_called_once_with(tool.workspace_dir, max_status_lines=30, max_commits=5)
@@ -107,7 +107,7 @@ class TestWorkspaceContextToolExecute:
     async def test_execute_without_git(self, mock_tree, mock_git, mock_token_limit, mock_truncate, mock_compress, tool):
         result = await tool.execute(include_git=False)
         assert result.success is True
-        assert "Git Status" not in result.content
+        assert "Git 状态" not in result.content or "Git Status" not in result.content
         mock_git.assert_not_called()
 
     @patch("mini_agent.tools.workspace_context.should_compress_result", return_value=False)
@@ -133,7 +133,7 @@ class TestWorkspaceContextToolExecute:
     ):
         result = await tool.execute(include_git=False, include_config_files=False)
         assert result.success is True
-        assert "Git Status" not in result.content
+        assert "Git 状态" not in result.content or "Git Status" not in result.content
         assert "Key Config Files Found" not in result.content
         assert "Directory Tree" in result.content
 

@@ -296,7 +296,7 @@ class TestAgentBehavior:
         )
         agent.add_user_message("Keep going")
         result = await agent.run()
-        assert "couldn't be completed" in result or "steps" in result
+        assert "未完成" in result or "步" in result or "couldn't be completed" in result or "steps" in result
 
 
 @pytest.mark.mock

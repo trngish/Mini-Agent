@@ -1,6 +1,6 @@
-"""Rate limiter for tool execution to prevent resource exhaustion.
+"""工具执行速率限制器，防止资源耗尽。
 
-Provides per-tool and global rate limiting with configurable thresholds.
+提供按工具和全局的速率限制，支持可配置的阈值。
 """
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ from threading import Lock
 
 
 class RateLimiter:
-    """Thread-safe rate limiter for tool execution.
+    """线程安全的工具执行速率限制器。
 
-    Supports both per-tool and global rate limits using a sliding window
-    algorithm. When a limit is exceeded, the caller receives a clear
-    error message indicating which limit was hit and when to retry.
+    支持按工具和全局的速率限制，使用滑动窗口算法。当超过限制时，
+    调用方会收到明确的错误消息，说明触发了哪个限制以及何时重试。
     """
 
     DEFAULT_GLOBAL_LIMIT = 100
@@ -42,14 +41,14 @@ class RateLimiter:
         self._lock = Lock()
 
     def check_rate(self, tool_name: str) -> tuple[bool, str]:
-        """Check if a tool call is within rate limits.
+        """检查工具调用是否在速率限制范围内。
 
         Args:
-            tool_name: Name of the tool being called
+            tool_name: 被调用工具的名称
 
         Returns:
-            Tuple of (allowed, message). If allowed is False, message
-            contains the reason and retry-after hint.
+            元组 (allowed, message)。如果 allowed 为 False，message
+            包含原因和重试时间提示。
         """
         now = time.monotonic()
 
@@ -83,15 +82,15 @@ class RateLimiter:
         return True, ""
 
     def validate_input_length(self, tool_name: str, arguments: dict[str, object]) -> tuple[bool, str]:
-        """Validate that tool call arguments don't exceed size limits.
+        """验证工具调用参数是否超过大小限制。
 
         Args:
-            tool_name: Name of the tool
-            arguments: Tool call arguments
+            tool_name: 工具名称
+            arguments: 工具调用参数
 
         Returns:
-            Tuple of (valid, message). If valid is False, message
-            contains which argument exceeded the limit.
+            元组 (valid, message)。如果 valid 为 False，message
+            包含哪个参数超过了限制。
         """
         for key, value in arguments.items():
             if isinstance(value, str) and len(value) > self._input_max_length:
@@ -102,7 +101,7 @@ class RateLimiter:
         return True, ""
 
     def reset(self) -> None:
-        """Reset all rate limit counters."""
+        """重置所有速率限制计数器。"""
         with self._lock:
             self._global_timestamps.clear()
             self._tool_timestamps.clear()

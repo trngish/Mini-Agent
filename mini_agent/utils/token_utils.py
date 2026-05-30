@@ -1,7 +1,7 @@
-"""Token encoding utilities with caching for performance optimization.
+"""令牌编码工具，带缓存以优化性能。
 
-This module provides cached access to tiktoken encoders to avoid
-repeated initialization overhead.
+本模块提供 tiktoken 编码器的缓存访问，避免
+重复初始化开销。
 """
 
 from functools import lru_cache
@@ -9,23 +9,23 @@ from typing import Any
 
 import tiktoken
 
-# Global encoder cache
+# 全局编码器缓存
 _encoders_cache: dict[str, tiktoken.Encoding] = {}
 
 
 def get_encoder(encoding_name: str = "cl100k_base") -> tiktoken.Encoding:
-    """Get or create a cached tiktoken encoder.
+    """获取或创建缓存的 tiktoken 编码器。
 
-    Encoders are cached to avoid repeated initialization overhead,
-    which can be significant when tokenizing many texts.
+    编码器会被缓存以避免重复初始化开销，
+    这在 token 化大量文本时可能非常显著。
 
     Args:
-        encoding_name: Name of the encoding (default: "cl100k_base" for GPT-4/Claude/M2)
+        encoding_name: 编码名称（默认为 "cl100k_base"，用于 GPT-4/Claude/M2）
 
     Returns:
-        Cached tiktoken Encoding instance
+        缓存的 tiktoken Encoding 实例
 
-    Examples:
+    示例:
         >>> encoder = get_encoder()
         >>> tokens = encoder.encode("Hello, world!")
         >>> len(tokens)
@@ -37,56 +37,56 @@ def get_encoder(encoding_name: str = "cl100k_base") -> tiktoken.Encoding:
 
 
 def encode_text(text: str, encoding_name: str = "cl100k_base") -> list[int]:
-    """Encode text to token IDs using cached encoder.
+    """使用缓存的编码器将文本编码为 token ID。
 
     Args:
-        text: Text to encode
-        encoding_name: Name of the encoding to use
+        text: 要编码的文本
+        encoding_name: 要使用的编码名称
 
     Returns:
-        List of token IDs
+        token ID 列表
     """
     encoder = get_encoder(encoding_name)
     return encoder.encode(text)
 
 
 def count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
-    """Count the number of tokens in text.
+    """计算文本中的 token 数量。
 
     Args:
-        text: Text to count tokens for
-        encoding_name: Name of the encoding to use
+        text: 要计算 token 的文本
+        encoding_name: 要使用的编码名称
 
     Returns:
-        Number of tokens in the text
+        文本中的 token 数量
     """
     encoder = get_encoder(encoding_name)
     return len(encoder.encode(text))
 
 
 def decode_tokens(token_ids: list[int], encoding_name: str = "cl100k_base") -> str:
-    """Decode token IDs back to text.
+    """将 token ID 解码回文本。
 
     Args:
-        token_ids: List of token IDs
-        encoding_name: Name of the encoding to use
+        token_ids: token ID 列表
+        encoding_name: 要使用的编码名称
 
     Returns:
-        Decoded text string
+        解码后的文本字符串
     """
     encoder = get_encoder(encoding_name)
     return encoder.decode(token_ids)
 
 
 def get_tokens_info(text: str, encoding_name: str = "cl100k_base") -> dict[str, Any]:
-    """Get detailed token information for text.
+    """获取文本的详细 token 信息。
 
     Args:
-        text: Text to analyze
-        encoding_name: Name of the encoding to use
+        text: 要分析的文本
+        encoding_name: 要使用的编码名称
 
     Returns:
-        Dictionary with token count and token IDs
+        包含 token 数量和 token ID 的字典
     """
     encoder = get_encoder(encoding_name)
     token_ids = encoder.encode(text)
@@ -99,54 +99,54 @@ def get_tokens_info(text: str, encoding_name: str = "cl100k_base") -> dict[str, 
 
 
 def clear_encoder_cache() -> None:
-    """Clear the encoder cache to free memory.
+    """清除编码器缓存以释放内存。
 
-    Use this when you've finished tokenizing large amounts of text
-    and want to free up memory.
+    当你完成大量文本的 token 化后调用此函数
+    可以释放内存。
     """
     global _encoders_cache
     _encoders_cache.clear()
 
 
 def get_cache_size() -> int:
-    """Get the number of cached encoders.
+    """获取缓存的编码器数量。
 
     Returns:
-        Number of encoders currently in cache
+        当前缓存中的编码器数量
     """
     return len(_encoders_cache)
 
 
-# Pre-load common encoders for faster first use
+# 预加载常用编码器以加快首次使用速度
 @lru_cache(maxsize=1)
 def get_cl100k_base() -> tiktoken.Encoding:
-    """Get cl100k_base encoder (GPT-4/Claude/M2 compatible).
+    """获取 cl100k_base 编码器（兼容 GPT-4/Claude/M2）。
 
-    This is the most commonly used encoder and is pre-cached
-    for faster access.
+    这是最常用的编码器，已被预缓存
+    以加快访问速度。
 
     Returns:
-        tiktoken Encoding for cl100k_base
+        cl100k_base 的 tiktoken Encoding
     """
     return get_encoder("cl100k_base")
 
 
 @lru_cache(maxsize=1)
 def get_o200k_base() -> tiktoken.Encoding:
-    """Get o200k_base encoder (GPT-4o compatible).
+    """获取 o200k_base 编码器（兼容 GPT-4o）。
 
     Returns:
-        tiktoken Encoding for o200k_base
+        o200k_base 的 tiktoken Encoding
     """
     return get_encoder("o200k_base")
 
 
-# Lazy initialization function for background pre-loading
+# 后台预加载的延迟初始化函数
 def preload_encoders() -> None:
-    """Pre-load common encoders in the background.
+    """在后台预加载常用编码器。
 
-    Call this during application startup to ensure encoders
-    are ready when first needed, avoiding first-call latency.
+    在应用程序启动时调用此函数以确保编码器
+    在首次需要时已准备就绪，避免首次调用延迟。
     """
-    # Pre-load cl100k_base (most common)
+    # 预加载 cl100k_base（最常用）
     get_cl100k_base()

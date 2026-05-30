@@ -29,7 +29,7 @@ class BashOutputResult(ToolResult):
             output += f"\n[stderr]:\n{self.stderr}"
         if self.bash_id:
             output += f"\n[bash_id]:\n{self.bash_id}"
-        if self.exit_code:
+        if self.exit_code is not None:
             output += f"\n[exit_code]:\n{self.exit_code}"
 
         if not output:

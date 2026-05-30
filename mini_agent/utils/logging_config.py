@@ -1,7 +1,6 @@
-"""Structured logging module for the agent.
+"""智能体的结构化日志模块。
 
-Provides consistent logging across the application with support for
-multiple output handlers and log levels.
+提供跨应用程序的一致日志记录，支持多种输出处理器和日志级别。
 """
 
 from __future__ import annotations
@@ -14,10 +13,10 @@ from typing import Any
 
 
 class AgentLoggerAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
-    """Custom logger adapter with additional context."""
+    """带有额外上下文信息的自定义日志适配器。"""
 
     def process(self, msg: str, kwargs: Any) -> tuple[str, Any]:
-        """Add extra context to log messages."""
+        """为日志消息添加额外上下文。"""
         if self.extra:
             context_str = " | ".join(f"{k}={v}" for k, v in self.extra.items())
             msg = f"[{context_str}] {msg}"
@@ -25,7 +24,7 @@ class AgentLoggerAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
 
 
 class StructuredFormatter(logging.Formatter):
-    """Formatter that outputs structured log entries."""
+    """输出结构化日志条目的格式化器。"""
 
     def __init__(self, include_timestamp: bool = True, include_level: bool = True):
         super().__init__()
@@ -33,7 +32,7 @@ class StructuredFormatter(logging.Formatter):
         self.include_level = include_level
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format log record with structure."""
+        """格式化日志记录。"""
         parts = []
 
         if self.include_timestamp:
@@ -52,7 +51,7 @@ class StructuredFormatter(logging.Formatter):
 
 
 class AgentLoggingConfig:
-    """Logging configuration for the agent."""
+    """智能体的日志配置。"""
 
     _instance: AgentLoggingConfig | None = None
 
@@ -65,27 +64,27 @@ class AgentLoggingConfig:
 
     @classmethod
     def get_instance(cls) -> AgentLoggingConfig:
-        """Get singleton instance."""
+        """获取单例实例。"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     def configure(self) -> None:
-        """Configure logging for the entire application."""
+        """为整个应用程序配置日志。"""
         if self._configured:
             return
 
-        # Root logger configuration
+        # 根日志器配置
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.DEBUG)
 
-        # Console handler (INFO level)
+        # 控制台处理器（INFO 级别）
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(self.console_level)
         console_handler.setFormatter(StructuredFormatter(include_timestamp=False, include_level=True))
         root_logger.addHandler(console_handler)
 
-        # File handler (DEBUG level)
+        # 文件处理器（DEBUG 级别）
         timestamp = datetime.now().strftime("%Y%m%d")
         log_file = self.log_dir / f"mini-agent_{timestamp}.log"
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
@@ -100,14 +99,14 @@ class AgentLoggingConfig:
         name: str,
         extra: dict[str, Any] | None = None,
     ) -> AgentLoggerAdapter:
-        """Get a logger with the given name.
+        """获取具有给定名称的日志器。
 
         Args:
-            name: Logger name (typically __name__)
-            extra: Extra context to add to all log messages
+            name: 日志器名称（通常为 __name__）
+            extra: 要添加到所有日志消息的额外上下文
 
         Returns:
-            Configured logger adapter
+            配置好的日志适配器
         """
         if not self._configured:
             self.configure()
@@ -116,23 +115,23 @@ class AgentLoggingConfig:
         return AgentLoggerAdapter(logger, extra or {})
 
     def get_agent_logger(self) -> AgentLoggerAdapter:
-        """Get logger for agent module."""
+        """获取智能体模块的日志器。"""
         return self.get_logger("mini_agent.agent")
 
     def get_llm_logger(self) -> AgentLoggerAdapter:
-        """Get logger for LLM module."""
+        """获取 LLM 模块的日志器。"""
         return self.get_logger("mini_agent.llm")
 
     def get_tool_logger(self) -> AgentLoggerAdapter:
-        """Get logger for tools module."""
+        """获取工具模块的日志器。"""
         return self.get_logger("mini_agent.tools")
 
 
-# Convenience function
+# 便捷函数
 def get_logger(name: str, **kwargs: Any) -> AgentLoggerAdapter:
-    """Get a logger for the given module.
+    """获取给定模块的日志器。
 
-    Usage:
+    用法:
         logger = get_logger(__name__)
         logger.info("Message")
     """

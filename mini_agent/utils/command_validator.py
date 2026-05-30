@@ -1,6 +1,6 @@
-"""Command injection prevention utilities.
+"""命令注入防护工具。
 
-Provides input validation and sanitization for shell command execution.
+提供 shell 命令执行的输入验证和清理功能。
 """
 
 import re
@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 class DangerLevel(Enum):
-    """Danger level for command patterns."""
+    """命令危险等级。"""
 
     SAFE = "safe"
     CAUTION = "caution"
@@ -17,42 +17,42 @@ class DangerLevel(Enum):
     BLOCKED = "blocked"
 
 
-# Patterns that should be blocked entirely
+# 应完全阻止的模式
 BLOCKED_PATTERNS = [
-    re.compile(r"\brm\s+(-rf?|--force)\s+(/\s*$|/\*|~)", re.IGNORECASE),  # rm -rf / or rm -rf ~
+    re.compile(r"\brm\s+(-rf?|--force)\s+(/\s*$|/\*|~)", re.IGNORECASE),  # rm -rf / 或 rm -rf ~
     re.compile(r"\bdel\s+/[fqs]", re.IGNORECASE),  # Windows del /f
-    re.compile(r"\bformat\s+", re.IGNORECASE),  # format command
-    re.compile(r"\bmkfs\.", re.IGNORECASE),  # filesystem formatting
-    re.compile(r"\bdd\s+if=/dev/zero", re.IGNORECASE),  # disk zeroing
-    re.compile(r">\s*/dev/sd", re.IGNORECASE),  # disk device writing
-    re.compile(r"\bshutdown\s+(-h|-r)", re.IGNORECASE),  # shutdown/reboot
-    re.compile(r"\bsystemctl\s+(reboot|poweroff|halt)", re.IGNORECASE),  # system control
-    re.compile(r":\(\)\{\s*:\|:\s*&\s*\}\s*;", re.IGNORECASE),  # fork bomb
+    re.compile(r"\bformat\s+", re.IGNORECASE),  # format 命令
+    re.compile(r"\bmkfs\.", re.IGNORECASE),  # 文件系统格式化
+    re.compile(r"\bdd\s+if=/dev/zero", re.IGNORECASE),  # 磁盘清零
+    re.compile(r">\s*/dev/sd", re.IGNORECASE),  # 磁盘设备写入
+    re.compile(r"\bshutdown\s+(-h|-r)", re.IGNORECASE),  # 关机/重启
+    re.compile(r"\bsystemctl\s+(reboot|poweroff|halt)", re.IGNORECASE),  # 系统控制
+    re.compile(r":\(\)\{\s*:\|:\s*&\s*\}\s*;", re.IGNORECASE),  # fork 炸弹
 ]
 
-# Patterns that require caution
+# 需要谨慎使用的模式
 CAUTION_PATTERNS = [
-    re.compile(r"\brm\s+(-r|-R)"),  # recursive deletion
-    re.compile(r"\bsudo\s+", re.IGNORECASE),  # sudo usage
-    re.compile(r"\bchmod\s+[0-7]{3,4}\s+", re.IGNORECASE),  # permission changes
-    re.compile(r"\bchown\s+", re.IGNORECASE),  # ownership changes
-    re.compile(r"\bnetsh\s+", re.IGNORECASE),  # Windows network config
-    re.compile(r"\breg\s+(add|delete|set)", re.IGNORECASE),  # Windows registry
-    re.compile(r"\bcurl\s+.*\|\s*(bash|sh)", re.IGNORECASE),  # pipe curl to shell
-    re.compile(r"\bwget\s+.*\|\s*(bash|sh)", re.IGNORECASE),  # pipe wget to shell
-    # Command injection via environment variables (blocked for safety)
-    re.compile(r"\$\{[^}]+\}"),  # ${VAR} - braced variable expansion
-    re.compile(r"\$\w+"),  # $VAR - simple variable expansion
-    re.compile(r"%[^%]+%"),  # %VAR% - Windows variable expansion
-    # Obfuscation patterns (blocked for safety)
-    re.compile(r"base64\s+-d", re.IGNORECASE),  # base64 decode
-    re.compile(r"\|\s*bash\s+-c", re.IGNORECASE),  # piped shell execution
-    re.compile(r"eval\s+\$"),  # eval dynamic command
+    re.compile(r"\brm\s+(-r|-R)"),  # 递归删除
+    re.compile(r"\bsudo\s+", re.IGNORECASE),  # sudo 使用
+    re.compile(r"\bchmod\s+[0-7]{3,4}\s+", re.IGNORECASE),  # 权限修改
+    re.compile(r"\bchown\s+", re.IGNORECASE),  # 所有权修改
+    re.compile(r"\bnetsh\s+", re.IGNORECASE),  # Windows 网络配置
+    re.compile(r"\breg\s+(add|delete|set)", re.IGNORECASE),  # Windows 注册表
+    re.compile(r"\bcurl\s+.*\|\s*(bash|sh)", re.IGNORECASE),  # 将 curl 输出pipe到 shell
+    re.compile(r"\bwget\s+.*\|\s*(bash|sh)", re.IGNORECASE),  # 将 wget 输出pipe到 shell
+    # 通过环境变量的命令注入（为安全起见阻止）
+    re.compile(r"\$\{[^}]+\}"),  # ${VAR} - 大括号变量展开
+    re.compile(r"\$\w+"),  # $VAR - 简单变量展开
+    re.compile(r"%[^%]+%"),  # %VAR% - Windows 变量展开
+    # 混淆模式（为安全起见阻止）
+    re.compile(r"base64\s+-d", re.IGNORECASE),  # base64 解码
+    re.compile(r"\|\s*bash\s+-c", re.IGNORECASE),  # pipe 到 shell 执行
+    re.compile(r"eval\s+\$"),  # eval 动态命令
 ]
 
 
-# Platform-specific command patterns
-# These commands exist on one platform but NOT on the other (without WSL/compat layer)
+# 平台特定的命令模式
+# 这些命令存在于一个平台但不存在于另一个平台（除非有 WSL/兼容层）
 LINUX_SPECIFIC_PATTERNS = [
     re.compile(r"\bgrep\s+"),
     re.compile(r"\bchmod\s+"),
@@ -230,14 +230,14 @@ WINDOWS_SPECIFIC_PATTERNS = [
 
 
 def detect_platform_mismatch(command: str, is_windows: bool) -> str | None:
-    """Detect if a command is intended for the wrong platform.
+    """检测命令是否用于错误平台。
 
     Args:
-        command: The shell command to check
-        is_windows: True if running on Windows, False if running on Linux/macOS
+        command: 要检查的 shell 命令
+        is_windows: True 表示在 Windows 上运行，False 表示在 Linux/macOS 上运行
 
     Returns:
-        A warning string if mismatch detected, None if compatible
+        如果检测到不兼容则返回警告字符串，否则返回 None
     """
     if is_windows:
         for pattern in LINUX_SPECIFIC_PATTERNS:
@@ -263,25 +263,25 @@ def detect_platform_mismatch(command: str, is_windows: bool) -> str | None:
 
 
 def assess_command_danger(command: str) -> tuple[DangerLevel, str | None]:
-    """Assess the danger level of a command.
+    """评估命令的危险等级。
 
     Args:
-        command: The command to assess
+        command: 要评估的命令
 
     Returns:
-        Tuple of (danger_level, reason_if_blocked)
+        (危险等级, 如果被阻止的原因) 的元组
     """
-    # Check blocked patterns first
+    # 首先检查阻止模式
     for pattern in BLOCKED_PATTERNS:
         if pattern.search(command):
-            return DangerLevel.BLOCKED, "Command contains dangerous pattern that could harm the system"
+            return DangerLevel.BLOCKED, "命令包含可能损害系统的危险模式"
 
-    # Check caution patterns
+    # 检查需要谨慎使用的模式
     for pattern in CAUTION_PATTERNS:
         if pattern.search(command):
-            return DangerLevel.CAUTION, "Command contains potentially risky operations"
+            return DangerLevel.CAUTION, "命令包含潜在危险操作"
 
-    # Check for common safe patterns
+    # 检查常见的安全模式
     safe_prefixes = [
         "ls",
         "dir",
@@ -321,33 +321,33 @@ def assess_command_danger(command: str) -> tuple[DangerLevel, str | None]:
         if cmd_lower.startswith(prefix):
             return DangerLevel.SAFE, None
 
-    # Default to caution for unknown commands
-    return DangerLevel.CAUTION, "Unknown command - review recommended"
+    # 默认对未知命令保持谨慎
+    return DangerLevel.CAUTION, "未知命令 - 建议审查"
 
 
 def is_command_safe(command: str) -> bool:
-    """Quick check if command is safe to execute.
+    """快速检查命令是否可以安全执行。
 
     Args:
-        command: The command to check
+        command: 要检查的命令
 
     Returns:
-        True if command is safe, False otherwise
+        如果命令安全则返回 True，否则返回 False
     """
     level, _ = assess_command_danger(command)
     return level in (DangerLevel.SAFE, DangerLevel.CAUTION)
 
 
 def sanitize_file_path(path: str) -> str:
-    """Sanitize a file path to prevent directory traversal.
+    """清理文件路径以防止目录遍历攻击。
 
     Args:
-        path: Raw file path
+        path: 原始文件路径
 
     Returns:
-        Sanitized file path
+        清理后的文件路径
     """
-    # Remove null bytes
+    # 移除空字节
     path = path.replace("\x00", "")
 
     dangerous_chars = [";", "|", "&", "$", "`", "(", ")", "{", "}", "[", "]", "<", ">", "!", "\\"]
@@ -369,33 +369,33 @@ def sanitize_file_path(path: str) -> str:
 
 
 def validate_command_safety(command: str, is_windows: bool = True) -> tuple[bool, str, DangerLevel]:
-    """Comprehensive command safety validation.
+    """综合命令安全验证。
 
-    Combines danger assessment, platform check, and input validation.
+    结合危险评估、平台检查和输入验证。
 
     Args:
-        command: The command to validate
-        is_windows: True if running on Windows
+        command: 要验证的命令
+        is_windows: True 表示在 Windows 上运行
 
     Returns:
-        Tuple of (is_safe, warning_message, danger_level)
+        (是否安全, 警告消息, 危险等级) 的元组
     """
-    # Step 1: Basic input validation
+    # 步骤 1: 基本输入验证
     if not command or not command.strip():
-        return False, "Empty command", DangerLevel.BLOCKED
+        return False, "空命令", DangerLevel.BLOCKED
 
     if len(command) > 10000:
-        return False, f"Command too long ({len(command)} > 10000 chars)", DangerLevel.BLOCKED
+        return False, f"命令过长 ({len(command)} > 10000 字符)", DangerLevel.BLOCKED
 
-    # Step 2: Danger level check
+    # 步骤 2: 危险等级检查
     danger_level, reason = assess_command_danger(command)
     if danger_level == DangerLevel.BLOCKED:
-        return False, reason or "Blocked command", danger_level
+        return False, reason or "命令被阻止", danger_level
 
-    # Step 3: Platform mismatch check
+    # 步骤 3: 平台不匹配检查
     platform_warning = detect_platform_mismatch(command, is_windows)
 
-    # Step 4: Check for suspicious patterns in arguments
+    # 步骤 4: 检查参数中的可疑模式
     suspicious_args = check_suspicious_arguments(command)
 
     if suspicious_args:
@@ -499,19 +499,18 @@ POWERSHELL_TO_UNIX_MAP: dict[str, str] = {
 
 
 def translate_command_for_platform(command: str, is_windows: bool) -> tuple[str, list[str]]:
-    """Translate a command to be compatible with the target platform.
+    """将命令转换为与目标平台兼容的形式。
 
-    Attempts to translate Unix commands to PowerShell equivalents when running
-    on Windows, and PowerShell/CMD commands to Unix equivalents when running
-    on Linux/macOS.
+    当在 Windows 上运行时尝试将 Unix 命令转换为 PowerShell 等价命令，
+    当在 Linux/macOS 上运行时将 PowerShell/CMD 命令转换为 Unix 等价命令。
 
     Args:
-        command: The shell command to translate
-        is_windows: True if running on Windows, False if running on Linux/macOS
+        command: 要转换的 shell 命令
+        is_windows: True 表示在 Windows 上运行，False 表示在 Linux/macOS 上运行
 
     Returns:
-        Tuple of (translated_command, list_of_translations_made)
-        Each translation entry is a string like "head -> Select-Object -First"
+        (转换后的命令, 已执行转换的列表) 元组
+        每个转换条目是一个字符串，格式如 "head -> Select-Object -First"
     """
     translations: list[str] = []
     result = command
@@ -525,13 +524,13 @@ def translate_command_for_platform(command: str, is_windows: bool) -> tuple[str,
 
 
 def _translate_unix_to_powershell(command: str) -> tuple[str, list[str]]:
-    """Translate Unix-style commands to PowerShell equivalents.
+    """将 Unix 风格命令转换为 PowerShell 等价命令。
 
     Args:
-        command: Unix-style command string
+        command: Unix 风格命令字符串
 
     Returns:
-        Tuple of (translated_command, list_of_translations_made)
+        (转换后的命令, 已执行转换的列表) 元组
     """
     translations: list[str] = []
     result = command
@@ -689,13 +688,13 @@ def _translate_unix_to_powershell(command: str) -> tuple[str, list[str]]:
 
 
 def _translate_powershell_to_unix(command: str) -> tuple[str, list[str]]:
-    """Translate PowerShell/CMD commands to Unix equivalents.
+    """将 PowerShell/CMD 命令转换为 Unix 等价命令。
 
     Args:
-        command: PowerShell/CMD-style command string
+        command: PowerShell/CMD 风格命令字符串
 
     Returns:
-        Tuple of (translated_command, list_of_translations_made)
+        (转换后的命令, 已执行转换的列表) 元组
     """
     translations: list[str] = []
     result = command
@@ -850,14 +849,14 @@ def _translate_powershell_to_unix(command: str) -> tuple[str, list[str]]:
 
 
 def get_translation_suggestion(command: str, is_windows: bool) -> str | None:
-    """Get a human-readable translation suggestion for a platform-mismatched command.
+    """获取平台不匹配命令的可读翻译建议。
 
     Args:
-        command: The shell command
-        is_windows: True if running on Windows
+        command: shell 命令
+        is_windows: True 表示在 Windows 上运行
 
     Returns:
-        Translation suggestion string, or None if no translation available
+        翻译建议字符串，如果没有可用翻译则返回 None
     """
     _, translations = translate_command_for_platform(command, is_windows)
 
@@ -876,81 +875,81 @@ def get_translation_suggestion(command: str, is_windows: bool) -> str | None:
 
 
 def check_suspicious_arguments(command: str) -> list[str]:
-    """Check for suspicious patterns in command arguments.
+    """检查命令参数中的可疑模式。
 
     Args:
-        command: The command to check
+        command: 要检查的命令
 
     Returns:
-        List of suspicious patterns found
+        发现的可疑模式列表
     """
     suspicious = []
     lower_cmd = command.lower()
 
-    # Check for potential command injection via semicolons
+    # 检查通过分号进行命令注入的可能性
     if ";rm" in lower_cmd or "; del" in lower_cmd:
-        suspicious.append("Potential command injection (semicolon)")
+        suspicious.append("潜在命令注入（分号）")
 
-    # Check for pipe to shell (common attack pattern)
+    # 检查 pipe 到 shell（常见攻击模式）
     if "| sh" in lower_cmd or "| bash" in lower_cmd or "&& sh" in lower_cmd:
-        suspicious.append("Pipe to shell detected")
+        suspicious.append("检测到 pipe 到 shell")
 
-    # Check for download and execute patterns
+    # 检查下载并执行模式
     if ("curl" in lower_cmd or "wget" in lower_cmd) and ("| sh" in lower_cmd or "| python" in lower_cmd):
-        suspicious.append("Download and execute pattern")
+        suspicious.append("下载并执行模式")
 
-    # Check for environment variable manipulation
+    # 检查环境变量操作
     if "export " in lower_cmd and "=" in command:
-        suspicious.append("Environment variable assignment")
+        suspicious.append("环境变量赋值")
 
     return suspicious
 
 
 def sanitize_command_output(output: str, max_length: int = 50000) -> str:
-    """Sanitize command output to prevent terminal escape codes.
+    """清理命令输出以防止终端转义码。
 
     Args:
-        output: Raw command output
-        max_length: Maximum output length
+        output: 原始命令输出
+        max_length: 最大输出长度
 
     Returns:
-        Sanitized output
+        清理后的输出
     """
     if not output:
         return ""
 
-    # Remove ANSI escape codes
+    # 移除 ANSI 转义码
     ansi_pattern = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
     output = ansi_pattern.sub("", output)
 
-    # Truncate if too long
+    # 如果过长则截断
     if len(output) > max_length:
-        output = output[:max_length] + f"... [truncated {len(output) - max_length} chars]"
+        output = output[:max_length] + f"... [已截断 {len(output) - max_length} 字符]"
 
     return output
 
 
 def validate_command_input(command: str, max_length: int = 10000) -> tuple[bool, str]:
-    """Validate command input for safety.
+    """验证命令输入的安全性。
 
     Args:
-        command: The command to validate
-        max_length: Maximum allowed command length
+        command: 要验证的命令
+        max_length: 最大允许命令长度
 
     Returns:
-        Tuple of (is_valid, error_message)
+        (是否有效, 错误消息) 元组
     """
-    # Check length
+    # 检查长度
     if len(command) > max_length:
-        return False, f"Command too long ({len(command)} > {max_length} chars)"
+        return False, f"命令过长 ({len(command)} > {max_length} 字符)"
 
-    # Check for empty command
+    # 检查空命令
     if not command.strip():
-        return False, "Command is empty"
+        return False, "命令为空"
 
-    # Check danger level
+    # 检查危险等级
     level, reason = assess_command_danger(command)
     if level == DangerLevel.BLOCKED:
-        return False, reason or "Command blocked for safety"
+        return False, reason or "命令因安全原因被阻止"
 
     return True, ""

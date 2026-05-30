@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Bounce Animation Template - Creates bouncing motion for objects.
+弹跳动画模板 - 为对象创建弹跳运动。
 
-Use this to make objects bounce up and down or horizontally with realistic physics.
+使用此模板可以让对象上下弹跳或水平弹跳，具有真实的物理效果。
 """
 
 import sys
 from pathlib import Path
 
-# Add parent directory to path
+# 将父目录添加到路径
 sys.path.append(str(Path(__file__).parent.parent))
 
 from core.easing import ease_out_bounce
@@ -28,25 +28,25 @@ def create_bounce_animation(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list:
     """
-    Create frames for a bouncing animation.
+    为弹跳动画创建帧。
 
-    Args:
-        object_type: 'circle', 'emoji', or 'custom'
-        object_data: Data for the object (e.g., {'radius': 30, 'color': (255, 0, 0)})
-        num_frames: Number of frames in the animation
-        bounce_height: Maximum height of bounce
-        ground_y: Y position of ground
-        start_x: X position (or starting X if moving horizontally)
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        object_type: 'circle'（圆形）、'emoji'（表情）或'custom'（自定义）
+        object_data: 对象数据（例如 {'radius': 30, 'color': (255, 0, 0)}）
+        num_frames: 动画帧数
+        bounce_height: 弹跳最大高度
+        ground_y: 地面Y坐标
+        start_x: X坐标（如果是水平移动则为起始X坐标）
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     frames = []
 
-    # Default object data
+    # 默认对象数据
     if object_data is None:
         if object_type == "circle":
             object_data = {"radius": 30, "color": (255, 100, 100)}
@@ -54,16 +54,16 @@ def create_bounce_animation(
             object_data = {"emoji": "⚽", "size": 60}
 
     for i in range(num_frames):
-        # Create blank frame
+        # 创建空白帧
         frame = create_blank_frame(frame_width, frame_height, bg_color)
 
-        # Calculate progress (0.0 to 1.0)
+        # 计算进度（0.0到1.0）
         t = i / (num_frames - 1) if num_frames > 1 else 0
 
-        # Calculate Y position using bounce easing
+        # 使用弹跳缓动函数计算Y坐标
         y = ground_y - int(ease_out_bounce(t) * bounce_height)
 
-        # Draw object
+        # 绘制对象
         if object_type == "circle":
             draw_circle(frame, center=(start_x, y), radius=object_data["radius"], fill_color=object_data["color"])
         elif object_type == "emoji":
@@ -79,20 +79,20 @@ def create_bounce_animation(
     return frames
 
 
-# Example usage
+# 示例用法
 if __name__ == "__main__":
     print("Creating bouncing ball GIF...")
 
-    # Create GIF builder
+    # 创建GIF构建器
     builder = GIFBuilder(width=480, height=480, fps=20)
 
-    # Generate bounce animation
+    # 生成弹跳动画
     frames = create_bounce_animation(
         object_type="circle", object_data={"radius": 40, "color": (255, 100, 100)}, num_frames=40, bounce_height=200
     )
 
-    # Add frames to builder
+    # 将帧添加到构建器
     builder.add_frames(frames)
 
-    # Save GIF
+    # 保存GIF
     builder.save("bounce_test.gif", num_colors=64)

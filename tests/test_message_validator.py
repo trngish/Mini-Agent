@@ -96,7 +96,7 @@ class TestValidateMessages:
     def test_empty_messages(self):
         with pytest.raises(ValidationError) as exc_info:
             MessageValidator.validate_messages([])
-        assert "empty" in str(exc_info.value).lower()
+        assert "empty" in str(exc_info.value).lower() or "空" in str(exc_info.value)
 
     def test_first_not_system(self):
         messages = [Message(role="user", content="Hello")]

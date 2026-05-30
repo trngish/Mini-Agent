@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Wiggle Animation - Smooth, organic wobbling and jiggling motions.
+摆动动画 - 平滑、有机的摇摆和抖动动作。
 
-Creates playful, elastic movements that are smoother than shake.
+创建比摇晃更有趣、更有弹性的运动效果。
 """
 
 import math
@@ -20,7 +20,7 @@ def create_wiggle_animation(
     object_type: str = "emoji",
     object_data: dict | None = None,
     num_frames: int = 30,
-    wiggle_type: str = "jello",  # 'jello', 'wave', 'bounce', 'sway'
+    wiggle_type: str = "jello",  # 'jello', 'wave', 'bounce', 'sway' - 果冻、波、弹、摇
     intensity: float = 1.0,
     cycles: float = 2.0,
     center_pos: tuple[int, int] = (240, 240),
@@ -29,26 +29,26 @@ def create_wiggle_animation(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list[Image.Image]:
     """
-    Create wiggle/wobble animation.
+    创建摆动/晃动动画。
 
-    Args:
+    参数:
         object_type: 'emoji', 'text'
-        object_data: Object configuration
-        num_frames: Number of frames
-        wiggle_type: Type of wiggle motion
-        intensity: Wiggle intensity multiplier
-        cycles: Number of wiggle cycles
-        center_pos: Center position
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+        object_data: 对象配置
+        num_frames: 帧数
+        wiggle_type: 摆动类型
+        intensity: 摆动强度乘数
+        cycles: 摆动周期数
+        center_pos: 中心位置
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     frames = []
 
-    # Default object data
+    # 默认对象数据
     if object_data is None and object_type == "emoji":
         object_data = {"emoji": "🎈", "size": 100}
 
@@ -56,7 +56,7 @@ def create_wiggle_animation(
         t = i / (num_frames - 1) if num_frames > 1 else 0
         frame = create_blank_frame(frame_width, frame_height, bg_color)
 
-        # Calculate wiggle transformations
+        # 计算摆动变换
         offset_x = 0
         offset_y = 0
         rotation = 0
@@ -64,12 +64,12 @@ def create_wiggle_animation(
         scale_y = 1.0
 
         if wiggle_type == "jello":
-            # Jello wobble - multiple frequencies
+            # 果冻晃动 - 多个频率
             freq1 = cycles * 2 * math.pi
             freq2 = cycles * 3 * math.pi
             freq3 = cycles * 5 * math.pi
 
-            decay = 1.0 - t if cycles < 1.5 else 1.0  # Decay for single wiggles
+            decay = 1.0 - t if cycles < 1.5 else 1.0  # 单次摆动的衰减
 
             offset_x = (
                 (math.sin(freq1 * t) * 15 + math.sin(freq2 * t) * 8 + math.sin(freq3 * t) * 3) * intensity * decay
@@ -77,18 +77,18 @@ def create_wiggle_animation(
 
             rotation = (math.sin(freq1 * t) * 10 + math.cos(freq2 * t) * 5) * intensity * decay
 
-            # Squash and stretch
+            # 挤压和拉伸
             scale_y = 1.0 + math.sin(freq1 * t) * 0.1 * intensity * decay
-            scale_x = 1.0 / scale_y  # Preserve volume
+            scale_x = 1.0 / scale_y  # 保持体积
 
         elif wiggle_type == "wave":
-            # Wave motion
+            # 波浪运动
             freq = cycles * 2 * math.pi
             offset_y = math.sin(freq * t) * 20 * intensity
             rotation = math.sin(freq * t + math.pi / 4) * 8 * intensity
 
         elif wiggle_type == "bounce":
-            # Bouncy wiggle
+            # 弹跳摆动
             freq = cycles * 2 * math.pi
             bounce = abs(math.sin(freq * t))
 
@@ -97,38 +97,38 @@ def create_wiggle_animation(
             offset_y = -bounce * 10 * intensity
 
         elif wiggle_type == "sway":
-            # Gentle sway back and forth
+            # 缓慢来回摇摆
             freq = cycles * 2 * math.pi
             offset_x = math.sin(freq * t) * 25 * intensity
             rotation = math.sin(freq * t) * 12 * intensity
 
-            # Subtle scale change
+            # 微妙的缩放变化
             scale = 1.0 + math.sin(freq * t) * 0.05 * intensity
             scale_x = scale
             scale_y = scale
 
         elif wiggle_type == "tail_wag":
-            # Like a wagging tail - base stays, tip moves
+            # 像摇尾巴一样 - 底部固定，顶部移动
             freq = cycles * 2 * math.pi
             wag = math.sin(freq * t) * intensity
 
-            # Rotation focused at one end
+            # 集中在一端的旋转
             rotation = wag * 20
             offset_x = wag * 15
 
-        # Apply transformations
+        # 应用变换
         if object_type == "emoji":
             size = object_data["size"]
             int(size * scale_x)
             int(size * scale_y)
 
-            # For non-uniform scaling or rotation, we need to use PIL transforms
+            # 对于非均匀缩放或旋转，需要使用 PIL 变换
             if abs(scale_x - scale_y) > 0.01 or abs(rotation) > 0.1:
-                # Create emoji on transparent canvas
+                # 在透明画布上创建表情包
                 canvas_size = int(size * 2)
                 emoji_canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
 
-                # Draw emoji
+                # 绘制表情包
                 draw_emoji_enhanced(
                     emoji_canvas,
                     emoji=object_data["emoji"],
@@ -137,7 +137,7 @@ def create_wiggle_animation(
                     shadow=False,
                 )
 
-                # Scale
+                # 缩放
                 if abs(scale_x - scale_y) > 0.01:
                     new_size = (int(canvas_size * scale_x), int(canvas_size * scale_y))
                     emoji_canvas = emoji_canvas.resize(new_size, Image.LANCZOS)
@@ -145,11 +145,11 @@ def create_wiggle_animation(
                 else:
                     canvas_size_x = canvas_size_y = canvas_size
 
-                # Rotate
+                # 旋转
                 if abs(rotation) > 0.1:
                     emoji_canvas = emoji_canvas.rotate(rotation, resample=Image.BICUBIC, expand=False)
 
-                # Position with offset
+                # 用偏移量定位
                 paste_x = int(center_pos[0] - canvas_size_x // 2 + offset_x)
                 paste_y = int(center_pos[1] - canvas_size_y // 2 + offset_y)
 
@@ -157,7 +157,7 @@ def create_wiggle_animation(
                 frame_rgba.paste(emoji_canvas, (paste_x, paste_y), emoji_canvas)
                 frame = frame_rgba.convert("RGB")
             else:
-                # Simple case - just offset
+                # 简单情况 - 只需偏移
                 pos_x = int(center_pos[0] - size // 2 + offset_x)
                 pos_y = int(center_pos[1] - size // 2 + offset_y)
                 draw_emoji_enhanced(
@@ -171,11 +171,11 @@ def create_wiggle_animation(
         elif object_type == "text":
             from core.typography import draw_text_with_outline
 
-            # Create text on canvas for transformation
+            # 为变换在画布上创建文本
             canvas_size = max(frame_width, frame_height)
             text_canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
 
-            # Convert to RGB for drawing
+            # 转换为 RGB 以绘制
             text_canvas_rgb = text_canvas.convert("RGB")
             text_canvas_rgb.paste(bg_color, (0, 0, canvas_size, canvas_size))
 
@@ -190,7 +190,7 @@ def create_wiggle_animation(
                 centered=True,
             )
 
-            # Make transparent
+            # 使其透明
             text_canvas = text_canvas_rgb.convert("RGBA")
             data = text_canvas.getdata()
             new_data = []
@@ -201,13 +201,13 @@ def create_wiggle_animation(
                     new_data.append(item)
             text_canvas.putdata(new_data)
 
-            # Apply rotation
+            # 应用旋转
             if abs(rotation) > 0.1:
                 text_canvas = text_canvas.rotate(
                     rotation, center=(canvas_size // 2, canvas_size // 2), resample=Image.BICUBIC
                 )
 
-            # Crop to frame with offset
+            # 用偏移量裁剪到帧
             left = (canvas_size - frame_width) // 2 - int(offset_x)
             top = (canvas_size - frame_height) // 2 - int(offset_y)
             text_cropped = text_canvas.crop((left, top, left + frame_width, top + frame_height))
@@ -223,15 +223,15 @@ def create_wiggle_animation(
 
 def create_excited_wiggle(emoji: str = "🎉", num_frames: int = 20, frame_size: int = 128) -> list[Image.Image]:
     """
-    Create excited wiggle for emoji GIFs.
+    为表情包 GIF 创建兴奋的摆动动画。
 
-    Args:
-        emoji: Emoji to wiggle
-        num_frames: Number of frames
-        frame_size: Frame size (square)
+    参数:
+        emoji: 要摆动的表情
+        num_frames: 帧数
+        frame_size: 帧尺寸（正方形）
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     return create_wiggle_animation(
         object_type="emoji",
@@ -247,13 +247,13 @@ def create_excited_wiggle(emoji: str = "🎉", num_frames: int = 20, frame_size:
     )
 
 
-# Example usage
+# 示例用法
 if __name__ == "__main__":
     print("Creating wiggle animations...")
 
     builder = GIFBuilder(width=480, height=480, fps=20)
 
-    # Example 1: Jello wiggle
+    # 示例 1: 果冻摆动
     frames = create_wiggle_animation(
         object_type="emoji",
         object_data={"emoji": "🎈", "size": 100},
@@ -265,7 +265,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("wiggle_jello.gif", num_colors=128)
 
-    # Example 2: Wave
+    # 示例 2: 波浪
     builder.clear()
     frames = create_wiggle_animation(
         object_type="emoji",
@@ -278,7 +278,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("wiggle_wave.gif", num_colors=128)
 
-    # Example 3: Excited wiggle (emoji size)
+    # 示例 3: 兴奋摆动（表情包尺寸）
     builder = GIFBuilder(width=128, height=128, fps=15)
     frames = create_excited_wiggle(emoji="🎉", num_frames=20)
     builder.add_frames(frames)

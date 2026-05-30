@@ -1,20 +1,20 @@
-"""Unified tool execution error handling.
+"""统一的工具执行错误处理。
 
-Provides standardized exception types and error handling for tool execution.
+提供标准化的异常类型和错误处理用于工具执行。
 """
 
 from typing import Any
 
 
 class ToolExecutionError(Exception):
-    """Base exception for tool execution failures.
+    """工具执行失败的基类异常。
 
     Attributes:
-        tool_name: Name of the tool that failed
-        arguments: Arguments passed to the tool
-        message: Human-readable error message
-        original_exception: Original exception that was raised
-        recoverable: Whether this error can be recovered from
+        tool_name: 失败工具的名称
+        arguments: 传递给工具的参数
+        message: 人类可读的错误消息
+        original_exception: 被抛出的原始异常
+        recoverable: 此错误是否可以恢复
     """
 
     def __init__(
@@ -40,7 +40,7 @@ class ToolExecutionError(Exception):
 
 
 class ToolValidationError(ToolExecutionError):
-    """Exception for tool input validation failures."""
+    """工具输入验证失败的异常。"""
 
     def __init__(self, tool_name: str, arguments: dict[str, Any], message: str):
         super().__init__(
@@ -52,7 +52,7 @@ class ToolValidationError(ToolExecutionError):
 
 
 class ToolPermissionError(ToolExecutionError):
-    """Exception for tool permission denials."""
+    """工具权限拒绝的异常。"""
 
     def __init__(self, tool_name: str, arguments: dict[str, Any], message: str):
         super().__init__(
@@ -64,7 +64,7 @@ class ToolPermissionError(ToolExecutionError):
 
 
 class ToolResourceError(ToolExecutionError):
-    """Exception for tool resource failures (file not found, network error, etc.)."""
+    """工具资源失败的异常（如文件未找到、网络错误等）。"""
 
     def __init__(
         self,
@@ -87,15 +87,15 @@ def handle_tool_error(
     arguments: dict[str, Any],
     exception: Exception,
 ) -> ToolExecutionError:
-    """Classify and wrap an exception into appropriate ToolExecutionError.
+    """将异常分类并包装成适当的ToolExecutionError。
 
     Args:
-        tool_name: Name of the tool that failed
-        arguments: Arguments passed to the tool
-        exception: Original exception
+        tool_name: 失败工具的名称
+        arguments: 传递给工具的参数
+        exception: 原始异常
 
     Returns:
-        Classified ToolExecutionError
+        已分类的ToolExecutionError
     """
     if isinstance(exception, ToolExecutionError):
         return exception
@@ -122,7 +122,7 @@ def handle_tool_error(
             message=f"Invalid input: {exception}",
         )
 
-    # Default: generic execution error
+    # 默认：通用执行错误
     return ToolExecutionError(
         tool_name=tool_name,
         arguments=arguments,

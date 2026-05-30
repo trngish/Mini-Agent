@@ -1,13 +1,13 @@
 """
-Mini Agent - Interactive Runtime
+Mini Agent - 交互式运行时
 
-Usage:
+用法:
     mini-agent [--workspace DIR] [--task TASK]
 
-Examples:
-    mini-agent                              # Interactive mode (current directory)
-    mini-agent --workspace /path/to/dir     # Interactive mode (specific directory)
-    mini-agent --task "create a file"       # Execute a task non-interactively
+示例:
+    mini-agent                              # 交互模式（当前目录）
+    mini-agent --workspace /path/to/dir     # 交互模式（指定目录）
+    mini-agent --task "create a file"       # 非交互式执行任务
 """
 
 from __future__ import annotations
@@ -23,32 +23,32 @@ from .utils import Colors
 
 
 def on_retry(exception: Exception, attempt: int) -> None:
-    """Callback for LLM retry events."""
+    """LLM重试事件的回调函数。"""
     from .retry import RetryConfig
 
     delay = RetryConfig().calculate_delay(attempt - 1)
-    print(f"\n{Colors.YELLOW}⚠️  LLM call failed (attempt {attempt}): {exception}{Colors.RESET}")
-    print(f"{Colors.DIM}   Retrying in {delay:.1f}s...{Colors.RESET}")
+    print(f"\n{Colors.YELLOW}⚠️  LLM 调用失败（尝试 {attempt}）：{exception}{Colors.RESET}")
+    print(f"{Colors.DIM}   将在 {delay:.1f} 秒后重试...{Colors.RESET}")
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Mini Agent - AI-powered assistant")
-    parser.add_argument("--workspace", "-w", type=str, help="Workspace directory path")
-    parser.add_argument("--task", "-t", type=str, help="Execute a specific task non-interactively")
-    parser.add_argument("--api-key", type=str, help="Override API key")
-    parser.add_argument("--api-base", type=str, help="Override API base URL")
-    parser.add_argument("--model", type=str, help="Override model name")
-    parser.add_argument("--provider", type=str, choices=["anthropic", "openai"], help="Override LLM provider")
-    parser.add_argument("--max-steps", type=int, help="Override max execution steps")
-    parser.add_argument("--platform", type=str, choices=["windows", "linux", "auto"], help="Override platform mode")
-    parser.add_argument("--no-skills", action="store_true", help="Disable skills")
-    parser.add_argument("--no-mcp", action="store_true", help="Disable MCP")
-    parser.add_argument("--continue", dest="continue_session", action="store_true", help="Continue from last session")
+    """解析命令行参数。"""
+    parser = argparse.ArgumentParser(description="Mini Agent - AI 助手")
+    parser.add_argument("--workspace", "-w", type=str, help="工作区目录路径")
+    parser.add_argument("--task", "-t", type=str, help="非交互式执行指定任务")
+    parser.add_argument("--api-key", type=str, help="覆盖 API 密钥")
+    parser.add_argument("--api-base", type=str, help="覆盖 API 基础 URL")
+    parser.add_argument("--model", type=str, help="覆盖模型名称")
+    parser.add_argument("--provider", type=str, choices=["anthropic", "openai"], help="覆盖 LLM 提供商")
+    parser.add_argument("--max-steps", type=int, help="覆盖最大执行步数")
+    parser.add_argument("--platform", type=str, choices=["windows", "linux", "auto"], help="覆盖平台模式")
+    parser.add_argument("--no-skills", action="store_true", help="禁用技能")
+    parser.add_argument("--no-mcp", action="store_true", help="禁用 MCP")
+    parser.add_argument("--continue", dest="continue_session", action="store_true", help="从上一个会话继续")
 
     subparsers = parser.add_subparsers(dest="command")
-    log_parser = subparsers.add_parser("log", help="View log files")
-    log_parser.add_argument("filename", nargs="?", type=str, help="Log filename to read")
+    log_parser = subparsers.add_parser("log", help="查看日志文件")
+    log_parser.add_argument("filename", nargs="?", type=str, help="要读取的日志文件名")
 
     return parser.parse_args()
 
@@ -59,7 +59,7 @@ async def run_agent(
     cli_overrides: CLIOverrideConfig | None = None,
     continue_session: bool = False,
 ) -> None:
-    """Main agent initialization and execution."""
+    """主代理初始化和执行。"""
     from .agent import Agent
     from .bootstrap import (
         add_workspace_tools,
@@ -89,10 +89,10 @@ async def run_agent(
     system_prompt_path = Config.find_config_file(config.agent.system_prompt_path)
     if system_prompt_path and system_prompt_path.exists():
         system_prompt = system_prompt_path.read_text(encoding="utf-8")
-        print(f"{Colors.GREEN}✅ Loaded system prompt (from: {system_prompt_path}){Colors.RESET}")
+        print(f"{Colors.GREEN}✅ 已加载系统提示（来源：{system_prompt_path}）{Colors.RESET}")
     else:
         system_prompt = "You are Mini-Agent, a versatile AI assistant."
-        print(f"{Colors.DIM}⏭️  No system prompt file found, using default{Colors.RESET}")
+        print(f"{Colors.DIM}⏭️  未找到系统提示文件，使用默认提示{Colors.RESET}")
 
     m27_config = build_m27_config(config)
     if m27_config:
@@ -108,16 +108,16 @@ async def run_agent(
         mode=AgentMode.YOLO,
     )
 
-    # Continue from last session if requested
+    # 如果请求了继续，则从上一个会话继续
     if continue_session:
         latest_id = agent._session_manager.get_latest_session_id()
         if latest_id:
             if agent.load_session(latest_id):
-                print(f"{Colors.GREEN}✅ Resuming session: {latest_id}{Colors.RESET}")
+                print(f"{Colors.GREEN}✅ 正在恢复会话：{latest_id}{Colors.RESET}")
             else:
-                print(f"{Colors.YELLOW}⚠️  Failed to load session: {latest_id}{Colors.RESET}")
+                print(f"{Colors.YELLOW}⚠️  无法加载会话：{latest_id}{Colors.RESET}")
         else:
-            print(f"{Colors.YELLOW}⚠️  No previous session found{Colors.RESET}")
+            print(f"{Colors.YELLOW}⚠️  未找到上一个会话{Colors.RESET}")
 
     from .tools.team_dispatch_tool import TeamDispatchTool
 
@@ -133,13 +133,13 @@ async def run_agent(
     if task:
         print(
             f"\n{Colors.BRIGHT_BLUE}Agent{Colors.RESET} {Colors.DIM}›{Colors.RESET}"
-            f" {Colors.DIM}Executing task...{Colors.RESET}\n"
+            f" {Colors.DIM}正在执行任务...{Colors.RESET}\n"
         )
         agent.add_user_message(task)
         try:
             await agent.run()
         except Exception as e:
-            print(f"\n{Colors.RED}❌ Error: {e}{Colors.RESET}")
+            print(f"\n{Colors.RED}❌ 错误：{e}{Colors.RESET}")
         finally:
             print_stats(agent, session_start)
             await cleanup_mcp()
@@ -150,7 +150,7 @@ async def run_agent(
 
 
 def main() -> None:
-    """Main entry point for CLI."""
+    """CLI主入口点。"""
     from .config import CLIOverrideConfig
     from .ui import read_log_file, show_log_directory
 

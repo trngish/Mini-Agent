@@ -1,7 +1,7 @@
-"""Intelligent tool batch optimizer for M2.7.
+"""M2.7智能工具批量优化器。
 
-Analyzes tool call dependencies and groups them for optimal parallel execution.
-Maximizes throughput while respecting tool dependencies.
+分析工具调用依赖关系并将它们分组以实现最佳并行执行。
+在遵守工具依赖关系的同时最大化吞吐量。
 """
 
 from collections import defaultdict
@@ -12,13 +12,13 @@ from ..schema import ToolCall
 
 
 class ToolGroupOptimizer:
-    """Optimizes tool call batching based on tool types and dependencies.
+    """基于工具类型和依赖关系优化工具调用批量处理。
 
-    M2.7 supports 20+ parallel tool calls with 97% following rate.
-    This optimizer groups independent operations and sequences dependent ones.
+    M2.7支持20+并行工具调用，成功率97%。
+    此优化器将独立操作分组并对依赖操作进行排序。
     """
 
-    # Tools that are read-only and can always run in parallel
+    # 只读工具，可以始终并行运行
     READ_ONLY = frozenset(
         {
             "read_file",
@@ -34,7 +34,7 @@ class ToolGroupOptimizer:
         }
     )
 
-    # Tools that modify state - should not run in parallel with same-target operations
+    # 修改状态的工具 - 不应与同一目标操作并行运行
     WRITE_TOOLS = frozenset(
         {
             "write_file",
@@ -49,7 +49,7 @@ class ToolGroupOptimizer:
         }
     )
 
-    # Info tools - very cheap, can run anytime
+    # 信息工具 - 非常轻量，可以随时运行
     INFO_TOOLS = frozenset(
         {
             "tree",
@@ -62,41 +62,41 @@ class ToolGroupOptimizer:
 
     @classmethod
     def can_parallelize(cls, tool_calls: list[ToolCall]) -> bool:
-        """Check if all tool calls can run in parallel.
+        """检查所有工具调用是否可以并行运行。
 
         Args:
-            tool_calls: List of tool calls to check
+            tool_calls: 要检查的工具调用列表
 
         Returns:
-            True if all tools are read-only or write tools don't conflict
+            如果所有工具都是只读的或写工具不冲突则为True
         """
         if len(tool_calls) <= 1:
             return True
 
-        # Collect write operations by target
+        # 按目标收集写操作
         write_targets: dict[str, list[str]] = defaultdict(list)
 
         for tc in tool_calls:
             name = tc.function.name
 
-            # Skip read-only tools
+            # 跳过只读工具
             if name in cls.READ_ONLY or name in cls.INFO_TOOLS:
                 continue
 
-            # Check for write conflicts
+            # 检查写冲突
             if name in cls.WRITE_TOOLS:
                 args = tc.function.arguments
-                # Extract target file/dir from arguments
+                # 从参数中提取目标文件/目录
                 target = cls._extract_target(name, args)
                 if target:
                     write_targets[target].append(name)
 
-        # If any target has multiple write operations, can't fully parallelize
+        # 如果任何目标有多个写操作，则无法完全并行化
         return all(len(operations) <= 1 for target, operations in write_targets.items())
 
     @classmethod
     def _extract_target(cls, tool_name: str, arguments: dict[str, Any]) -> str | None:
-        """Extract the primary target (file/directory) from tool arguments."""
+        """从工具参数中提取主要目标（文件/目录）。"""
         if tool_name in ("write_file", "edit_file", "delete_file", "read_file", "multi_read"):
             return arguments.get("path")
         elif tool_name in ("bash", "multi_bash"):
@@ -108,20 +108,20 @@ class ToolGroupOptimizer:
 
     @classmethod
     def group_by_dependency(cls, tool_calls: list[ToolCall]) -> list[list[ToolCall]]:
-        """Group tool calls into batches that can run in parallel.
+        """将工具调用分组为可以并行运行的批次。
 
         Returns:
-            List of batches, where each batch can run in parallel.
-            Batches are ordered - later batches depend on earlier ones.
+            批次列表，每个批次可以并行运行。
+            批次是有序的 - 后续批次依赖于较早的批次。
         """
         if not tool_calls:
             return []
 
-        # Simple case: if all read-only, run in parallel
+        # 简单情况：如果全是只读工具，并行运行
         if all(tc.function.name in cls.READ_ONLY | cls.INFO_TOOLS for tc in tool_calls):
             return [tool_calls]
 
-        # Group by tool category
+        # 按工具类别分组
         batches: list[list[ToolCall]] = []
         read_batch: list[ToolCall] = []
         write_batch: list[ToolCall] = []
@@ -132,13 +132,13 @@ class ToolGroupOptimizer:
             if name in cls.READ_ONLY or name in cls.INFO_TOOLS:
                 read_batch.append(tc)
             else:
-                # If we have pending reads and encounter a write, flush reads first
+                # 如果有待处理的读操作且遇到写操作，先刷新读操作
                 if read_batch and write_batch:
                     batches.append(read_batch)
                     read_batch = []
                 write_batch.append(tc)
 
-        # Flush remaining batches
+        # 刷新剩余的批次
         if read_batch:
             batches.append(read_batch)
         if write_batch:
@@ -148,18 +148,18 @@ class ToolGroupOptimizer:
 
     @classmethod
     def deduplicate_paths(cls, paths: list[str]) -> list[str]:
-        """Remove duplicate paths from multi_read/multi_edit.
+        """从multi_read/multi_edit中移除重复的路径。
 
         Args:
-            paths: List of file paths (may contain duplicates)
+            paths: 文件路径列表（可能包含重复）
 
         Returns:
-            Deduplicated list preserving order
+            保持顺序的去重列表
         """
         seen = set()
         result = []
         for p in paths:
-            # Normalize path
+            # 标准化路径
             normalized = str(Path(p).resolve()) if Path(p).is_absolute() else p
             if normalized not in seen:
                 seen.add(normalized)

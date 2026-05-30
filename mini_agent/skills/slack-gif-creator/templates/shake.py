@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Shake Animation Template - Creates shaking/vibrating motion.
+摇晃动画模板 - 创建摇晃/震动效果。
 
-Use this for impact effects, emphasis, or nervous/excited reactions.
+适用于冲击效果、强调或紧张/兴奋的反应。
 """
 
 import math
@@ -23,32 +23,32 @@ def create_shake_animation(
     shake_intensity: int = 15,
     center_x: int = 240,
     center_y: int = 240,
-    direction: str = "horizontal",  # 'horizontal', 'vertical', or 'both'
+    direction: str = "horizontal",  # 'horizontal', 'vertical', or 'both' - 水平、垂直或两者
     frame_width: int = 480,
     frame_height: int = 480,
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list:
     """
-    Create frames for a shaking animation.
+    创建摇晃动画的帧。
 
-    Args:
-        object_type: 'circle', 'emoji', 'text', or 'custom'
-        object_data: Data for the object
-        num_frames: Number of frames
-        shake_intensity: Maximum shake displacement in pixels
-        center_x: Center X position
-        center_y: Center Y position
-        direction: 'horizontal', 'vertical', or 'both'
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        object_type: 'circle', 'emoji', 'text', 或 'custom'
+        object_data: 对象数据
+        num_frames: 帧数
+        shake_intensity: 最大摇晃位移（像素）
+        center_x: 中心X位置
+        center_y: 中心Y位置
+        direction: 'horizontal', 'vertical', 或 'both'
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     frames = []
 
-    # Default object data
+    # 默认对象数据
     if object_data is None:
         if object_type == "emoji":
             object_data = {"emoji": "😱", "size": 80}
@@ -58,14 +58,14 @@ def create_shake_animation(
     for i in range(num_frames):
         frame = create_blank_frame(frame_width, frame_height, bg_color)
 
-        # Calculate progress
+        # 计算进度
         t = i / (num_frames - 1) if num_frames > 1 else 0
 
-        # Decay shake intensity over time
+        # 随时间衰减摇晃强度
         intensity = shake_intensity * (1 - ease_out_quad(t))
 
-        # Calculate shake offset using sine wave for smooth oscillation
-        freq = 3  # Oscillation frequency
+        # 使用正弦波计算摇晃偏移以实现平滑振荡
+        freq = 3  # 振荡频率
         offset_x = 0
         offset_y = 0
 
@@ -75,11 +75,11 @@ def create_shake_animation(
         if direction in ["vertical", "both"]:
             offset_y = int(math.cos(t * freq * 2 * math.pi) * intensity)
 
-        # Apply offset
+        # 应用偏移量
         x = center_x + offset_x
         y = center_y + offset_y
 
-        # Draw object
+        # 绘制对象
         if object_type == "emoji":
             draw_emoji(
                 frame,

@@ -1,18 +1,18 @@
-"""Model utilities for unified model detection and configuration.
+"""模型工具，用于统一的模型检测和配置。
 
-Provides single source of truth for model type detection and optimization settings.
+提供模型类型检测和优化设置的单一数据源。
 """
 
 from dataclasses import dataclass
 
-# Model identifiers for M2.7
+# M2.7 的模型标识符
 M27_MODEL_IDENTIFIERS = (
     "MiniMax-M2.7",
     "MiniMax-M2",
     "MiniMax-M2.5",
 )
 
-# Model identifiers for other MiniMax models
+# 其他 MiniMax 模型的模型标识符
 MINIMAX_MODEL_IDENTIFIERS = (
     "MiniMax",
     "MiniMax-M2",
@@ -23,9 +23,9 @@ MINIMAX_MODEL_IDENTIFIERS = (
 
 @dataclass(frozen=True)
 class ModelSpecs:
-    """Model specifications container.
+    """模型规格容器。
 
-    Contains token limits and capabilities for a specific model.
+    包含特定模型的令牌限制和能力。
     """
 
     max_output_tokens: int
@@ -36,9 +36,9 @@ class ModelSpecs:
     default_thinking_budget: int
 
 
-# Default specs per model family
+# 每个模型系列的默认规格
 DEFAULT_MODEL_SPECS: dict[str, ModelSpecs] = {
-    # M2.7 specifications
+    # M2.7 规格
     "MiniMax-M2.7": ModelSpecs(
         max_output_tokens=32768,
         max_context_tokens=1_000_000,
@@ -47,7 +47,7 @@ DEFAULT_MODEL_SPECS: dict[str, ModelSpecs] = {
         supports_parallel_tools=True,
         default_thinking_budget=16384,
     ),
-    # M2.5 specifications
+    # M2.5 规格
     "MiniMax-M2.5": ModelSpecs(
         max_output_tokens=8192,
         max_context_tokens=1_000_000,
@@ -56,7 +56,7 @@ DEFAULT_MODEL_SPECS: dict[str, ModelSpecs] = {
         supports_parallel_tools=True,
         default_thinking_budget=8192,
     ),
-    # M2 specifications
+    # M2 规格
     "MiniMax-M2": ModelSpecs(
         max_output_tokens=8192,
         max_context_tokens=128_000,
@@ -65,7 +65,7 @@ DEFAULT_MODEL_SPECS: dict[str, ModelSpecs] = {
         supports_parallel_tools=True,
         default_thinking_budget=8192,
     ),
-    # Fallback for unknown models
+    # 未知模型的备用规格
     "default": ModelSpecs(
         max_output_tokens=4096,
         max_context_tokens=128_000,
@@ -78,15 +78,15 @@ DEFAULT_MODEL_SPECS: dict[str, ModelSpecs] = {
 
 
 def is_m27_model(model_name: str) -> bool:
-    """Check if the given model name is an M2.7 variant.
+    """检查给定的模型名称是否为 M2.7 变体。
 
-    Single source of truth for M2.7 detection.
+    M2.7 检测的单一数据源。
 
     Args:
-        model_name: The model name to check
+        model_name: 要检查的模型名称
 
     Returns:
-        True if the model is an M2.7 variant
+        如果是 M2.7 变体则返回 True
     """
     if not model_name:
         return False
@@ -95,13 +95,13 @@ def is_m27_model(model_name: str) -> bool:
 
 
 def is_minimax_model(model_name: str) -> bool:
-    """Check if the given model name is any MiniMax model.
+    """检查给定的模型名称是否为任何 MiniMax 模型。
 
     Args:
-        model_name: The model name to check
+        model_name: 要检查的模型名称
 
     Returns:
-        True if the model is a MiniMax variant
+        如果是 MiniMax 变体则返回 True
     """
     if not model_name:
         return False
@@ -110,25 +110,25 @@ def is_minimax_model(model_name: str) -> bool:
 
 
 def get_model_specs(model_name: str) -> ModelSpecs:
-    """Get model specifications for the given model.
+    """获取给定模型的模型规格。
 
     Args:
-        model_name: The model name
+        model_name: 模型名称
 
     Returns:
-        ModelSpecs for the model, or default specs if unknown
+        模型的 ModelSpecs，如果是未知模型则返回默认规格
     """
     if not model_name:
         return DEFAULT_MODEL_SPECS["default"]
 
     model_upper = model_name.upper()
 
-    # Check exact matches first
+    # 首先检查精确匹配
     for key in DEFAULT_MODEL_SPECS:
         if key != "default" and key.upper() in model_upper:
             return DEFAULT_MODEL_SPECS[key]
 
-    # Check partial matches
+    # 检查部分匹配
     if "M2.7" in model_upper:
         return DEFAULT_MODEL_SPECS["MiniMax-M2.7"]
     elif "M2.5" in model_upper:
@@ -140,14 +140,14 @@ def get_model_specs(model_name: str) -> ModelSpecs:
 
 
 def is_extended_thinking_enabled(model_name: str, config_enabled: bool = True) -> bool:
-    """Check if extended thinking should be enabled for the model.
+    """检查是否为模型启用扩展思考。
 
     Args:
-        model_name: The model name
-        config_enabled: Configuration setting (if False, always returns False)
+        model_name: 模型名称
+        config_enabled: 配置设置（如果为 False，始终返回 False）
 
     Returns:
-        True if extended thinking should be enabled
+        如果应启用扩展思考则返回 True
     """
     if not config_enabled:
         return False
@@ -156,14 +156,14 @@ def is_extended_thinking_enabled(model_name: str, config_enabled: bool = True) -
 
 
 def get_thinking_budget(model_name: str, requested_budget: int) -> int:
-    """Get constrained thinking budget for the model.
+    """获取模型的约束思考预算。
 
     Args:
-        model_name: The model name
-        requested_budget: The budget requested by configuration
+        model_name: 模型名称
+        requested_budget: 配置请求的预算
 
     Returns:
-        Constrained budget within model's max_thinking_budget
+        模型 max_thinking_budget 范围内的约束预算
     """
     specs = get_model_specs(model_name)
     if not specs.supports_extended_thinking:
@@ -172,35 +172,35 @@ def get_thinking_budget(model_name: str, requested_budget: int) -> int:
 
 
 def get_max_output_tokens(model_name: str) -> int:
-    """Get max output tokens for the model.
+    """获取模型的最大输出 token 数。
 
     Args:
-        model_name: The model name
+        model_name: 模型名称
 
     Returns:
-        Maximum output tokens
+        最大输出 token 数
     """
     return get_model_specs(model_name).max_output_tokens
 
 
 def get_token_limit_for_model(model_name: str, configured_limit: int | None = None) -> int:
-    """Get token limit for context management.
+    """获取用于上下文管理的 token 限制。
 
     Args:
-        model_name: The model name
-        configured_limit: Optional configured limit override
+        model_name: 模型名称
+        configured_limit: 可选的配置限制覆盖
 
     Returns:
-        Token limit to use (80% of context window as safety margin)
+        要使用的 token 限制（上下文窗口的 80% 作为安全余量）
     """
     specs = get_model_specs(model_name)
 
     if configured_limit is not None and configured_limit > 0:
         return configured_limit
 
-    # Default to 80% of context window
+    # 默认为上下文窗口的 80%
     return int(specs.max_context_tokens * 0.8)
 
 
-# Legacy alias for backwards compatibility
+# 向下兼容的旧别名
 is_m27_enabled = is_m27_model

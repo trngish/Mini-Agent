@@ -1,7 +1,6 @@
-"""LLM API error handling and classification.
+"""LLM API 错误处理与分类。
 
-Provides detailed error classification and user-friendly error messages
-for various API error types.
+提供各种 API 错误类型的详细错误分类和用户友好的错误消息。
 """
 
 from __future__ import annotations
@@ -15,38 +14,38 @@ from .display import Colors
 
 
 class LLMErrorType(str, Enum):
-    """LLM API error types."""
+    """LLM API 错误类型。"""
 
-    # Authentication & Authorization
+    # 认证与授权
     AUTHENTICATION_ERROR = "authentication_error"  # 401
     PERMISSION_DENIED = "permission_denied"  # 403
 
-    # Rate Limiting
+    # 速率限制
     RATE_LIMIT_ERROR = "rate_limit_error"  # 429
-    QUOTA_EXCEEDED = "quota_exceeded"  # 429 with specific message
+    QUOTA_EXCEEDED = "quota_exceeded"  # 429 带有特定消息
 
-    # Server Errors
+    # 服务器错误
     SERVER_ERROR = "server_error"  # 500-599
     SERVICE_UNAVAILABLE = "service_unavailable"  # 503
     GATEWAY_TIMEOUT = "gateway_timeout"  # 504
 
-    # Client Errors
+    # 客户端错误
     BAD_REQUEST = "bad_request"  # 400
-    INVALID_REQUEST = "invalid_request"  # 400 with specific message
-    CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"  # 400 with specific message
+    INVALID_REQUEST = "invalid_request"  # 400 带有特定消息
+    CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"  # 400 带有特定消息
     UNPROCESSABLE_ENTITY = "unprocessable_entity"  # 422
 
-    # Network Errors
+    # 网络错误
     NETWORK_ERROR = "network_error"
     TIMEOUT_ERROR = "timeout_error"
     CONNECTION_ERROR = "connection_error"
 
-    # Unknown
+    # 未知
     UNKNOWN_ERROR = "unknown_error"
 
 
 class LLMError(Exception):
-    """Base exception for LLM errors with error classification."""
+    """LLM 错误的基类异常，包含错误分类。"""
 
     def __init__(
         self,
@@ -60,7 +59,7 @@ class LLMError(Exception):
         self.error_type = error_type
         self.status_code = status_code
         self.details = details
-        self.retry_after = retry_after  # Seconds to wait before retry (for rate limit)
+        self.retry_after = retry_after  # 重试前等待的秒数（用于速率限制）
         super().__init__(self.message)
 
     def __str__(self) -> str:
@@ -73,7 +72,7 @@ class LLMError(Exception):
 
     @property
     def is_retryable(self) -> bool:
-        """Check if this error type should be retried."""
+        """检查此错误类型是否应该重试。"""
         retryable_types = {
             LLMErrorType.RATE_LIMIT_ERROR,
             LLMErrorType.SERVER_ERROR,
@@ -87,7 +86,7 @@ class LLMError(Exception):
 
     @property
     def user_guidance(self) -> str:
-        """Get user guidance for this error type."""
+        """获取此错误类型的用户指导。"""
         guidance = {
             LLMErrorType.AUTHENTICATION_ERROR: (
                 "Please check your API key is valid and has not expired. Verify your API key in the configuration file."
@@ -134,9 +133,9 @@ class LLMError(Exception):
 
 
 class LLMErrorClassifier:
-    """Classifies LLM API errors from exception objects or HTTP responses."""
+    """从异常对象或 HTTP 响应中对 LLM API 错误进行分类。"""
 
-    # Pattern matchers for specific error messages (compiled once for performance)
+    # 特定错误消息的模式匹配器（为性能编译一次）
     _RATE_LIMIT_PATTERNS = [
         re.compile(r"rate.?limit", re.IGNORECASE),
         re.compile(r"too.?many.?requests", re.IGNORECASE),
@@ -179,23 +178,23 @@ class LLMErrorClassifier:
         status_code: int | None = None,
         response_body: str | None = None,
     ) -> LLMError:
-        """Classify an exception and return an LLMError.
+        """对异常进行分类并返回 LLMError。
 
         Args:
-            error: The original exception
-            status_code: HTTP status code if available
-            response_body: Response body text if available
+            error: 原始异常
+            status_code: HTTP 状态码（如果有）
+            response_body: 响应正文文本（如果有）
 
         Returns:
-            LLMError with classified error type
+            带有分类错误类型的 LLMError
         """
         error_str = str(error)
         body_str = response_body or ""
 
-        # Combine for pattern matching
+        # 合并以进行模式匹配
         combined_text = f"{error_str} {body_str}"
 
-        # Classify by status code first
+        # 首先按状态码分类
         if status_code:
             error_type = cls._classify_by_status(status_code, combined_text)
             if error_type != LLMErrorType.UNKNOWN_ERROR:
@@ -208,7 +207,7 @@ class LLMErrorClassifier:
                     retry_after=retry_after,
                 )
 
-        # Classify by error message patterns
+        # 通过错误消息模式分类
         error_type = cls._classify_by_message(combined_text)
         return LLMError(
             message=error_str,
@@ -219,9 +218,9 @@ class LLMErrorClassifier:
 
     @classmethod
     def _classify_by_status(cls, status_code: int, message: str) -> LLMErrorType:
-        """Classify error by HTTP status code."""
+        """根据 HTTP 状态码对错误进行分类。"""
         if status_code == 400:
-            # Check for specific 400 errors
+            # 检查特定的 400 错误
             if cls._matches_patterns(message, cls._CONTEXT_LENGTH_PATTERNS):
                 return LLMErrorType.CONTEXT_LENGTH_EXCEEDED
             return LLMErrorType.BAD_REQUEST
@@ -251,7 +250,7 @@ class LLMErrorClassifier:
 
     @classmethod
     def _classify_by_message(cls, message: str) -> LLMErrorType:
-        """Classify error by error message patterns."""
+        """根据错误消息模式对错误进行分类。"""
         if cls._matches_patterns(message, cls._AUTH_PATTERNS):
             return LLMErrorType.AUTHENTICATION_ERROR
 
@@ -272,27 +271,27 @@ class LLMErrorClassifier:
     @classmethod
     @lru_cache(maxsize=128)
     def _matches_patterns_cached(cls, _text: str, _patterns_hash: int) -> bool:  # noqa: ARG002, ARG003
-        """Cached pattern matching helper (uses hash to store patterns)."""
-        return False  # Placeholder - actual logic uses class-level patterns
+        """缓存的模式匹配辅助函数（使用哈希存储模式）。"""
+        return False  # 占位符 - 实际逻辑使用类级模式
 
     @classmethod
     def _matches_patterns(cls, text: str, patterns: list[re.Pattern[str]]) -> bool:
-        """Check if text matches any of the patterns."""
+        """检查文本是否匹配任何模式。"""
         return any(p.search(text) for p in patterns)
 
     @classmethod
     @lru_cache(maxsize=32)
     def _extract_retry_after(cls, response_body: str) -> int | None:
-        """Extract retry-after value from response body with caching."""
+        """从响应正文中提取 retry-after 值并缓存。"""
         if not response_body:
             return None
 
-        # Try to find retry-after in JSON
+        # 尝试在 JSON 中查找 retry-after
         match = re.search(r'"retry_after"\s*:\s*(\d+)', response_body)
         if match:
             return int(match.group(1))
 
-        # Try to find retry-after in header format
+        # 尝试在 header 格式中查找 retry-after
         match = re.search(r"retry.?after[:\s]+(\d+)", response_body, re.IGNORECASE)
         if match:
             return int(match.group(1))
@@ -303,45 +302,45 @@ class LLMErrorClassifier:
 def calculate_exponential_backoff(
     attempt: int, base_delay: float = 1.0, max_delay: float = 60.0, exponential_base: float = 2.0, jitter: float = 0.5
 ) -> float:
-    """Calculate delay with exponential backoff and jitter.
+    """计算带有指数退避和抖动的延迟。
 
-    This is more effective for rate limit recovery than fixed delays.
+    这比固定延迟更有效地恢复速率限制。
 
     Args:
-        attempt: Current attempt number (0-indexed)
-        base_delay: Base delay in seconds
-        max_delay: Maximum delay cap
-        exponential_base: Multiplier for each attempt
-        jitter: Random factor (0-1) to add randomness
+        attempt: 当前尝试次数（从 0 开始）
+        base_delay: 基础延迟秒数
+        max_delay: 最大延迟上限
+        exponential_base: 每次尝试的倍数
+        jitter: 添加随机性的随机因子（0-1）
 
     Returns:
-        Delay in seconds to wait before next retry
+        下次重试前等待的延迟秒数
     """
     import random
 
-    # Calculate exponential delay
+    # 计算指数延迟
     delay = base_delay * (exponential_base**attempt)
 
-    # Cap at max delay
+    # 限制在最大延迟
     delay = min(delay, max_delay)
 
-    # Add jitter to prevent thundering herd
+    # 添加抖动以防止雷鸣般的群体效应
     jitter_range = delay * jitter
     delay += random.uniform(-jitter_range, jitter_range)
 
-    return max(0.1, delay)  # At least 100ms
+    return max(0.1, delay)  # 至少 100ms
 
 
 class RetryStrategy:
-    """Configurable retry strategy for LLM API calls.
+    """LLM API 调用的可配置重试策略。
 
-    Supports:
-    - Exponential backoff with jitter
-    - Per-error-type configuration
-    - Maximum retry limits
+    支持：
+    - 带抖动的指数退避
+    - 按错误类型配置
+    - 最大重试限制
     """
 
-    # Default retry configuration per error type
+    # 每个错误类型的默认重试配置
     DEFAULT_CONFIG = {
         "rate_limit": {"max_retries": 5, "base_delay": 2.0, "max_delay": 120.0},
         "server_error": {"max_retries": 3, "base_delay": 1.0, "max_delay": 30.0},
@@ -353,20 +352,20 @@ class RetryStrategy:
         self.config = config or self.DEFAULT_CONFIG
 
     def get_delay(self, error_type: str, attempt: int) -> float | None:
-        """Get retry delay for error type and attempt.
+        """获取错误类型和尝试次数的重试延迟。
 
         Args:
-            error_type: Type of error (from LLMErrorType)
-            attempt: Current attempt number
+            error_type: 错误类型（来自 LLMErrorType）
+            attempt: 当前尝试次数
 
         Returns:
-            Delay in seconds, or None if should not retry
+            延迟秒数，如果不应重试则返回 None
         """
-        # Normalize error type to config key
+        # 将错误类型规范化为配置键
         config_key = error_type.value.replace("_error", "") if hasattr(error_type, "value") else error_type
 
         if config_key not in self.config:
-            config_key = "network"  # Default fallback
+            config_key = "network"  # 默认回退
 
         cfg = self.config[config_key]
         if attempt >= cfg["max_retries"]:
@@ -379,27 +378,27 @@ class RetryStrategy:
         )
 
     def should_retry(self, error_type: str, attempt: int) -> bool:
-        """Check if should retry this error type.
+        """检查是否应该重试此错误类型。
 
         Args:
-            error_type: Type of error
-            attempt: Current attempt number
+            error_type: 错误类型
+            attempt: 当前尝试次数
 
         Returns:
-            True if should retry, False otherwise
+            如果应该重试则返回 True，否则返回 False
         """
         return self.get_delay(error_type, attempt) is not None
 
 
 def format_llm_error(error: Exception, status_code: int | None = None) -> str:
-    """Format an LLM error into a user-friendly message.
+    """将 LLM 错误格式化为用户友好的消息。
 
     Args:
-        error: The exception to format
-        status_code: HTTP status code if available
+        error: 要格式化的异常
+        status_code: HTTP 状态码（如果有）
 
     Returns:
-        Formatted error message with guidance
+        带指导的格式化错误消息
     """
     llm_error = LLMErrorClassifier.classify(error, status_code)
 

@@ -1,10 +1,10 @@
-"""Agent run logger with rotation and compression support.
+"""支持日志轮转和压缩的智能体运行日志记录器。
 
-Responsible for recording the complete interaction process of each agent run, including:
-- LLM requests and responses
-- Tool calls and results
-- Log rotation based on size or date
-- Compression of old logs with gzip
+负责记录每次智能体运行的完整交互过程，包括：
+- LLM 请求和响应
+- 工具调用及结果
+- 基于大小或日期的日志轮转
+- 使用 gzip 压缩旧日志
 """
 
 import asyncio
@@ -19,26 +19,26 @@ from .schema import Message, ToolCall
 
 
 class AgentLogger:
-    """Agent run logger with log rotation and compression support.
+    """支持日志轮转和压缩的智能体运行日志记录器。
 
-    Logs are stored in ~/.mini-agent/log/ directory with:
-    - Automatic rotation when file exceeds MAX_SIZE bytes
-    - Automatic cleanup of logs older than MAX_AGE days
-    - Gzip compression for rotated logs
-    - Optional async write for better performance
-    - JSON format for easy parsing
+    日志存储在 ~/.mini-agent/log/ 目录，具有以下特性：
+    - 当文件超过 MAX_SIZE 字节时自动轮转
+    - 自动清理超过 MAX_AGE 天的日志
+    - 对轮转的日志进行 gzip 压缩
+    - 可选的异步写入以提升性能
+    - JSON 格式便于解析
     """
 
-    # Log rotation settings
-    MAX_LOG_SIZE_BYTES: int = 10 * 1024 * 1024  # 10MB per file
-    MAX_LOG_AGE_DAYS: int = 7  # Keep logs for 7 days
+    # 日志轮转设置
+    MAX_LOG_SIZE_BYTES: int = 10 * 1024 * 1024  # 每个文件 10MB
+    MAX_LOG_AGE_DAYS: int = 7  # 保留 7 天的日志
     LOG_DIR: Path = Path.home() / ".mini-agent" / "log"
-    # Async write settings
+    # 异步写入设置
     ASYNC_WRITE_ENABLED: bool = True
-    MAX_WRITE_QUEUE_SIZE: int = 1000  # Max queue size to prevent memory issues
+    MAX_WRITE_QUEUE_SIZE: int = 1000  # 最大队列大小，防止内存问题
 
     def __init__(self) -> None:
-        """Initialize logger with rotation settings."""
+        """初始化日志记录器，设置轮转参数。"""
         self.log_dir = self.LOG_DIR
         self._log_disabled = False
         try:
@@ -49,24 +49,24 @@ class AgentLogger:
         self.log_index = 0
         self._current_size = 0
         self._rotation_check_done = False
-        # Initialize async write queue with max size for better performance
+        # 初始化异步写入队列，设置最大大小以提升性能
         self._write_queue: asyncio.Queue[str] | None = None
         self._writer_task: asyncio.Task[None] | None = None
         self._shutdown_event = False
         self._max_queue_size = self.MAX_WRITE_QUEUE_SIZE
 
     def _should_rotate(self) -> bool:
-        """Check if log rotation is needed."""
+        """检查是否需要日志轮转。"""
         if self.log_file is None:
             return False
         return self._current_size >= self.MAX_LOG_SIZE_BYTES
 
     def _rotate_log(self) -> None:
-        """Rotate log file if size limit exceeded, with optional compression."""
+        """如果文件大小超出限制则轮转日志，可选择压缩。"""
         if self.log_file is None:
             return
 
-        # Check file size
+        # 检查文件大小
         if self.log_file.exists():
             self._current_size = self.log_file.stat().st_size
         else:
@@ -75,17 +75,17 @@ class AgentLogger:
         if self._current_size < self.MAX_LOG_SIZE_BYTES:
             return
 
-        # Rename current log with timestamp
+        # 使用时间戳重命名当前日志
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         rotated_name = f"{self.log_file.stem}_{timestamp}.rotated"
         rotated_path = self.log_dir / rotated_name
 
         try:
             self.log_file.rename(rotated_path)
-            # Compress the rotated log in background
+            # 在后台压缩轮转的日志
             self._compress_log_async(rotated_path)
         except OSError:
-            # If rename fails, just delete and start fresh
+            # 如果重命名失败，删除并重新开始
             self.log_file.unlink(missing_ok=True)
 
         self.log_file = None
@@ -93,24 +93,24 @@ class AgentLogger:
         self._current_size = 0
 
     def _compress_log_async(self, log_path: Path) -> None:
-        """Compress a log file using gzip in a background thread.
+        """使用 gzip 在后台线程中压缩日志文件。
 
         Args:
-            log_path: Path to the log file to compress
+            log_path: 要压缩的日志文件路径
         """
         try:
             compressed_path = log_path.with_suffix(".log.gz")
             with open(log_path, "rb") as f_in:
                 with gzip.open(compressed_path, "wb") as f_out:
                     f_out.write(f_in.read())
-            # Remove original after successful compression
+            # 压缩成功后删除原文件
             log_path.unlink(missing_ok=True)
         except Exception:
-            # Compression failed, keep original
+            # 压缩失败，保留原文件
             pass
 
     def _cleanup_old_logs(self) -> None:
-        """Remove log files older than MAX_LOG_AGE_DAYS."""
+        """删除超过 MAX_LOG_AGE_DAYS 的日志文件。"""
         if not self.log_dir.exists():
             return
 
@@ -124,7 +124,7 @@ class AgentLogger:
             except OSError:
                 continue
 
-        # Also clean up rotated files
+        # 同时清理轮转文件
         for path in self.log_dir.glob("*.rotated"):
             try:
                 mtime = datetime.fromtimestamp(path.stat().st_mtime)
@@ -134,14 +134,14 @@ class AgentLogger:
                 continue
 
     def _ensure_log_file(self) -> None:
-        """Ensure log file exists and is ready for writing."""
+        """确保日志文件存在并可写入。"""
         if self._log_disabled:
             return
 
         if self._rotation_check_done and self.log_file is not None:
             return
 
-        # Run cleanup on first log access
+        # 首次访问日志时运行清理
         if not self._rotation_check_done:
             self._cleanup_old_logs()
             self._rotation_check_done = True
@@ -150,11 +150,11 @@ class AgentLogger:
             self.start_new_run()
 
     def start_new_run(self) -> None:
-        """Start new run, create new log file."""
+        """开始新的运行，创建新的日志文件。"""
         if self._log_disabled:
             return
 
-        # Check rotation before creating new file
+        # 创建新文件前检查轮转
         if self.log_file is not None:
             self._rotate_log()
 
@@ -167,7 +167,7 @@ class AgentLogger:
         try:
             with open(self.log_file, "w", encoding="utf-8") as f:
                 f.write("=" * 80 + "\n")
-                f.write(f"Agent Run Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"智能体运行日志 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write("=" * 80 + "\n\n")
             self._current_size = self.log_file.stat().st_size
         except PermissionError:
@@ -175,22 +175,22 @@ class AgentLogger:
             self.log_file = None
 
     def log_request(self, messages: list[Message], tools: list[Any] | None = None) -> None:
-        """Log LLM request.
+        """记录 LLM 请求。
 
         Args:
-            messages: Message list
-            tools: Tool list (optional)
+            messages: 消息列表
+            tools: 工具列表（可选）
         """
         self._ensure_log_file()
         self.log_index += 1
 
-        # Build complete request data structure
+        # 构建完整的请求数据结构
         request_data: dict[str, Any] = {
             "messages": [],
             "tools": [],
         }
 
-        # Convert messages to JSON serializable format
+        # 将消息转换为 JSON 可序列化格式
         for msg in messages:
             msg_dict: dict[str, Any] = {
                 "id": msg.id,
@@ -210,12 +210,12 @@ class AgentLogger:
 
             request_data["messages"].append(msg_dict)
 
-        # Only record tool names
+        # 只记录工具名称
         if tools:
             request_data["tools"] = [tool.name for tool in tools]
 
-        # Format as JSON
-        content = "LLM Request:\n\n"
+        # 格式化为 JSON
+        content = "LLM 请求:\n\n"
         content += json.dumps(request_data, indent=2, ensure_ascii=False)
 
         self._write_log("REQUEST", content)
@@ -227,18 +227,18 @@ class AgentLogger:
         tool_calls: list[ToolCall] | None = None,
         finish_reason: str | None = None,
     ) -> None:
-        """Log LLM response.
+        """记录 LLM 响应。
 
         Args:
-            content: Response content
-            thinking: Thinking content (optional)
-            tool_calls: Tool call list (optional)
-            finish_reason: Finish reason (optional)
+            content: 响应内容
+            thinking: 思考内容（可选）
+            tool_calls: 工具调用列表（可选）
+            finish_reason: 结束原因（可选）
         """
         self._ensure_log_file()
         self.log_index += 1
 
-        # Build complete response data structure
+        # 构建完整的响应数据结构
         response_data: dict[str, Any] = {
             "content": content,
         }
@@ -252,8 +252,8 @@ class AgentLogger:
         if finish_reason:
             response_data["finish_reason"] = finish_reason
 
-        # Format as JSON
-        log_content = "LLM Response:\n\n"
+        # 格式化为 JSON
+        log_content = "LLM 响应:\n\n"
         log_content += json.dumps(response_data, indent=2, ensure_ascii=False)
 
         self._write_log("RESPONSE", log_content)
@@ -266,19 +266,19 @@ class AgentLogger:
         result_content: str | None = None,
         result_error: str | None = None,
     ) -> None:
-        """Log tool execution result.
+        """记录工具执行结果。
 
         Args:
-            tool_name: Tool name
-            arguments: Tool arguments
-            result_success: Whether successful
-            result_content: Result content (on success)
-            result_error: Error message (on failure)
+            tool_name: 工具名称
+            arguments: 工具参数
+            result_success: 是否成功
+            result_content: 结果内容（成功时）
+            result_error: 错误信息（失败时）
         """
         self._ensure_log_file()
         self.log_index += 1
 
-        # Build complete tool execution result data structure
+        # 构建完整的工具执行结果数据结构
         tool_result_data: dict[str, Any] = {
             "tool_name": tool_name,
             "arguments": arguments,
@@ -290,18 +290,18 @@ class AgentLogger:
         else:
             tool_result_data["error"] = result_error
 
-        # Format as JSON
-        content = "Tool Execution:\n\n"
+        # 格式化为 JSON
+        content = "工具执行:\n\n"
         content += json.dumps(tool_result_data, indent=2, ensure_ascii=False)
 
         self._write_log("TOOL_RESULT", content)
 
     def _write_log(self, log_type: str, content: str) -> None:
-        """Write log entry.
+        """写入日志条目。
 
         Args:
-            log_type: Log type (REQUEST, RESPONSE, TOOL_RESULT)
-            content: Log content
+            log_type: 日志类型（REQUEST、RESPONSE、TOOL_RESULT）
+            content: 日志内容
         """
         if self.log_file is None:
             return
@@ -312,23 +312,23 @@ class AgentLogger:
         entry += "-" * 80 + "\n"
         entry += content + "\n"
 
-        # A3 FIX: Removed dead async queue path.
-        # ASYNC_WRITE_ENABLED was always True but _write_queue was never
-        # initialized, making this entire block unreachable dead code.
-        # Replaced with unconditional sync write which is sufficient for
-        # log durability (OS-level write caching already provides batching).
+        # A3 修复：移除无用的异步队列路径。
+        # ASYNC_WRITE_ENABLED 始终为 True，但 _write_queue 从未
+        # 被初始化，导致整个代码块是无法到达的死代码。
+        # 替换为无条件同步写入，这对于日志持久化已足够
+        #（操作系统级写缓存已提供批处理）。
         self._write_log_sync(entry)
 
     def _write_log_sync(self, entry: str) -> None:
-        """Synchronously write log entry to file.
+        """同步将日志条目写入文件。
 
         Args:
-            entry: Log entry string
+            entry: 日志条目字符串
         """
         if self._log_disabled or self.log_file is None:
             return
 
-        # Handle surrogates (invalid Unicode) that can't be encoded to UTF-8
+        # 处理无法编码为 UTF-8 的代理字符（无效的 Unicode）
         encoded = entry.encode("utf-8", errors="replace")
         self._current_size += len(encoded)
         try:
@@ -339,11 +339,11 @@ class AgentLogger:
             self.log_file = None
 
     def get_log_file_path(self) -> Path:
-        """Get current log file path."""
+        """获取当前日志文件路径。"""
         return self.log_file or self.LOG_DIR / "placeholder.log"
 
     def flush(self) -> None:
-        """Flush any pending writes to disk (P3 FIX: removed dead queue code)."""
+        """将所有待写入内容刷新到磁盘（P3 修复：移除无用队列代码）。"""
         if self.log_file is not None:
             with open(self.log_file, "a", encoding="utf-8"):
                 pass
@@ -352,10 +352,10 @@ class AgentLogger:
         logging.getLogger(__name__).debug(message)
 
     def get_log_stats(self) -> dict[str, Any]:
-        """Get statistics about logs.
+        """获取日志统计信息。
 
         Returns:
-            Dict with log statistics
+            包含日志统计信息的字典
         """
         if not self.log_dir.exists():
             return {"total_logs": 0, "total_size": 0, "oldest_log": None, "newest_log": None}

@@ -9,7 +9,7 @@ import asyncio
 
 from .bash_result import BashOutputResult
 
-# Constants
+# 常量
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 600
 FALLBACK_ENCODINGS = ("utf-8", "gbk", "cp1252")
@@ -93,11 +93,11 @@ class ForegroundExecutor:
                 exit_code=-1,
             )
 
-        # Decode output with fallback encodings
+        # 使用备用编码解码输出
         stdout_text = self._decode_output(stdout)
         stderr_text = self._decode_output(stderr)
 
-        # Create result
+        # 创建结果
         is_success = process.returncode == 0
         result_error: str | None = None
         if not is_success:

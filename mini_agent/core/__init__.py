@@ -1,11 +1,11 @@
-"""Core agent components.
+"""核心智能体组件。
 
-This package contains modular components extracted from agent.py:
-- thinking_budget: Adaptive thinking budget management for M2.7
-- health_check: Self-health checks and diagnostics
-- metrics: Performance metrics tracking
-- error_recovery: Error pattern learning and recovery strategies
-- tool_execution: Tool timeout and compression utilities
+该包包含从 agent.py 提取的模块化组件：
+- thinking_budget: M2.7 自适应思考预算管理
+- health_check: 自我健康检查和诊断
+- metrics: 性能指标跟踪
+- error_recovery: 错误模式学习和恢复策略
+- tool_execution: 工具超时和压缩工具
 """
 
 from .error_recovery import ErrorRecoveryManager

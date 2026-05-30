@@ -1,4 +1,4 @@
-"""Agent Team - Multi-agent collaboration with role boundaries and adversarial reasoning."""
+"""Agent 团队 - 多智能体协作，包含角色边界和对抗性推理。"""
 
 from .agent_team import AgentMember, AgentTeam, TeamResult
 from .message_bus import MessageBus, MessagePriority, MessageType, TeamMessage

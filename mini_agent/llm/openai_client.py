@@ -1,4 +1,4 @@
-"""OpenAI LLM client implementation."""
+"""OpenAI LLM 客户端实现。"""
 
 import json
 import logging
@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIClient(LLMClientBase):
-    """LLM client using OpenAI's protocol.
+    """使用 OpenAI 协议的 LLM 客户端。
 
-    This client uses the official OpenAI SDK and supports:
-    - Reasoning content (via reasoning_split=True)
-    - Tool calling
-    - Retry logic
+    该客户端使用官方 OpenAI SDK，支持：
+    - 推理内容（通过 reasoning_split=True）
+    - 工具调用
+    - 重试逻辑
     """
 
     def __init__(
@@ -30,45 +30,44 @@ class OpenAIClient(LLMClientBase):
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
     ):
-        """Initialize OpenAI client.
+        """初始化 OpenAI 客户端。
 
         Args:
-            api_key: API key for authentication
-            api_base: Base URL for the API (default: MiniMax OpenAI endpoint)
-            model: Model name to use (default: MiniMax-M2.5)
-            retry_config: Optional retry configuration
+            api_key: 用于认证的 API 密钥
+            api_base: API 基础 URL（默认：MiniMax OpenAI 端点）
+            model: 使用的模型名称（默认：MiniMax-M2.5）
+            retry_config: 可选的重试配置
         """
         super().__init__(api_key, api_base, model, retry_config)
 
-        # Initialize OpenAI client
+        # 初始化 OpenAI 客户端
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=api_base,
         )
 
-        # M2.7 configuration attributes
+        # M2.7 配置属性
         self._enable_extended_thinking = True
-        self._thinking_budget_tokens = 8192  # Default, can be updated via configure_m27 or configure_thinking_budget
+        self._thinking_budget_tokens = 8192  # 默认值，可通过 configure_m27 或 configure_thinking_budget 更新
 
     def configure_thinking_budget(self, budget: int) -> None:
-        """Configure thinking budget dynamically.
+        """动态配置思考预算。
 
-        This is the official API for adjusting thinking budget at runtime
-        based on task complexity analysis.
+        这是用于根据任务复杂度分析在运行时调整思考预算的官方 API。
 
         Args:
-            budget: Thinking budget in tokens (0 to disable)
+            budget: 以 token 为单位的思考预算（0 表示禁用）
         """
         self._thinking_budget_tokens = max(0, min(budget, 32768))
 
     def configure_m27(self, config: dict[str, Any]) -> None:
-        """Configure M2.7 specific settings.
+        """配置 M2.7 特定设置。
 
         Args:
-            config: M2.7 configuration dict from Config.m27
+            config: 来自 Config.m27 的 M2.7 配置字典
         """
         self._enable_extended_thinking = config.get("enable_extended_thinking", True)
-        # Use configured budget or default to 16K
+        # 使用配置的 budget 或默认为 16K
         configured_budget = config.get("thinking_budget_tokens", 16384)
         self._thinking_budget_tokens = min(configured_budget, 32768)
 
@@ -79,16 +78,16 @@ class OpenAIClient(LLMClientBase):
         on_text: Any = None,
         on_thinking: Any = None,
     ) -> Any:
-        """Execute streaming API request with callback support (A1 FIX).
+        """执行带回调支持的流式 API 请求（A1 修复）。
 
         Args:
-            api_messages: List of messages in OpenAI format
-            tools: Optional list of tools
-            on_text: Callback for text deltas
-            on_thinking: Callback for thinking/reasoning deltas
+            api_messages: OpenAI 格式的消息列表
+            tools: 可选的工具列表
+            on_text: 文本增量回调
+            on_thinking: 思考/推理增量回调
 
         Returns:
-            Accumulated response data dict with text, thinking, tool_calls, usage
+            累积的响应数据字典，包含 text、thinking、tool_calls、usage
         """
         params = {
             "model": self.model,
@@ -117,14 +116,14 @@ class OpenAIClient(LLMClientBase):
                     continue
                 delta = chunk.choices[0].delta
 
-                # Text content
+                # 文本内容
                 if delta.content and on_text:
                     on_text(delta.content)
                     accumulated["text"] += delta.content
                 elif delta.content:
                     accumulated["text"] += delta.content
 
-                # Reasoning/thinking content
+                # 推理/思考内容
                 if hasattr(delta, "reasoning_details") and delta.reasoning_details:
                     for detail in delta.reasoning_details:
                         if hasattr(detail, "text") and detail.text:
@@ -132,7 +131,7 @@ class OpenAIClient(LLMClientBase):
                                 on_thinking(detail.text)
                             accumulated["thinking"] += detail.text
 
-                # Tool calls (accumulated across chunks)
+                # 工具调用（跨分块累积）
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         idx = tc.index
@@ -151,11 +150,11 @@ class OpenAIClient(LLMClientBase):
                             if tc.function.arguments:
                                 entry["function"]["arguments"] += tc.function.arguments
 
-                # Finish reason
+                # 结束原因
                 if chunk.choices[0].finish_reason:
                     accumulated["finish_reason"] = chunk.choices[0].finish_reason
 
-                # Usage (sent at end with stream_options)
+                # 使用量（在末尾通过 stream_options 发送）
                 if hasattr(chunk, "usage") and chunk.usage:
                     accumulated["usage"] = chunk.usage
 
@@ -170,22 +169,22 @@ class OpenAIClient(LLMClientBase):
         api_messages: list[dict[str, Any]],
         tools: list[Any] | None = None,
     ) -> Any:
-        """Execute API request (core method that can be retried).
+        """执行 API 请求（可重试的核心方法）。
 
         Args:
-            api_messages: List of messages in OpenAI format
-            tools: Optional list of tools
+            api_messages: OpenAI 格式的消息列表
+            tools: 可选的工具列表
 
         Returns:
-            OpenAI ChatCompletion response (full response including usage)
+            OpenAI ChatCompletion 响应（包含 usage 的完整响应）
 
         Raises:
-            Exception: API call failed
+            Exception: API 调用失败
         """
         params = {
             "model": self.model,
             "messages": api_messages,
-            # Enable reasoning_split to separate thinking content
+            # 启用 reasoning_split 以分离思考内容
             "extra_body": {"reasoning_split": True},
             "max_tokens": get_max_output_tokens(self.model),
         }
@@ -193,28 +192,28 @@ class OpenAIClient(LLMClientBase):
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        # Use OpenAI SDK's chat.completions.create
+        # 使用 OpenAI SDK 的 chat.completions.create
         response = await self.client.chat.completions.create(**params)  # type: ignore[call-overload]
-        # Return full response to access usage info
+        # 返回完整响应以便访问 usage 信息
         return response
 
     def _convert_tools(self, tools: list[Any]) -> list[dict[str, Any]]:
-        """Convert tools to OpenAI format.
+        """将工具转换为 OpenAI 格式。
 
         Args:
-            tools: List of Tool objects or dicts
+            tools: Tool 对象或字典的列表
 
         Returns:
-            List of tools in OpenAI dict format
+            OpenAI 字典格式的工具列表
         """
         result = []
         for tool in tools:
             if isinstance(tool, dict):
-                # If already a dict, check if it's in OpenAI format
+                # 如果已经是字典，检查是否是 OpenAI 格式
                 if "type" in tool and tool["type"] == "function":
                     result.append(tool)
                 else:
-                    # Assume it's in Anthropic format, convert to OpenAI
+                    # 假设是 Anthropic 格式，转换为 OpenAI
                     result.append(
                         {
                             "type": "function",
@@ -226,43 +225,43 @@ class OpenAIClient(LLMClientBase):
                         }
                     )
             elif hasattr(tool, "to_openai_schema"):
-                # Tool object with to_openai_schema method
+                # 具有 to_openai_schema 方法的 Tool 对象
                 result.append(tool.to_openai_schema())
             else:
                 raise TypeError(f"Unsupported tool type: {type(tool)}")
         return result
 
     def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
-        """Convert internal messages to OpenAI format.
+        """将内部消息转换为 OpenAI 格式。
 
         Args:
-            messages: List of internal Message objects
+            messages: 内部 Message 对象的列表
 
         Returns:
-            Tuple of (system_message, api_messages)
-            Note: OpenAI includes system message in the messages array
+            (system_message, api_messages) 元组
+            注意：OpenAI 在 messages 数组中包含系统消息
         """
         api_messages = []
 
         for msg in messages:
             if msg.role == "system":
-                # OpenAI includes system message in messages array
+                # OpenAI 在 messages 数组中包含系统消息
                 api_messages.append({"role": "system", "content": msg.content})
                 continue
 
-            # For user messages
+            # 用户消息
             if msg.role == "user":
                 api_messages.append({"role": "user", "content": msg.content})
 
-            # For assistant messages
+            # 助手消息
             elif msg.role == "assistant":
                 assistant_msg: dict[str, Any] = {"role": "assistant"}
 
-                # Add content if present
+                # 如果有内容则添加
                 if msg.content:
                     assistant_msg["content"] = msg.content
 
-                # Add tool calls if present
+                # 如果有工具调用则添加
                 if msg.tool_calls:
                     tool_calls_list = []
                     for tool_call in msg.tool_calls:
@@ -278,17 +277,17 @@ class OpenAIClient(LLMClientBase):
                         )
                     assistant_msg["tool_calls"] = tool_calls_list
 
-                # IMPORTANT: Add reasoning_details if thinking is present
-                # This is CRITICAL for Interleaved Thinking to work properly!
-                # The complete response_message (including reasoning_details) must be
-                # preserved in Message History and passed back to the model in the next turn.
-                # This ensures the model's chain of thought is not interrupted.
+                # 重要：如果存在思考内容，添加 reasoning_details
+                # 这对于交错思考（Interleaved Thinking）正常工作至关重要！
+                # 完整的 response_message（包括 reasoning_details）必须
+                # 保存在消息历史中，并在下一轮传递回模型。
+                # 这确保了模型的思维链不会中断。
                 if msg.thinking:
                     assistant_msg["reasoning_details"] = [{"text": msg.thinking}]
 
                 api_messages.append(assistant_msg)
 
-            # For tool result messages
+            # 工具结果消息
             elif msg.role == "tool":
                 api_messages.append(
                     {
@@ -305,14 +304,14 @@ class OpenAIClient(LLMClientBase):
         messages: list[Message],
         tools: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """Prepare the request for OpenAI API.
+        """准备 OpenAI API 请求。
 
         Args:
-            messages: List of conversation messages
-            tools: Optional list of available tools
+            messages: 对话消息列表
+            tools: 可用的工具列表
 
         Returns:
-            Dictionary containing request parameters
+            包含请求参数的字典
         """
         _, api_messages = self._convert_messages(messages)
 
@@ -322,11 +321,11 @@ class OpenAIClient(LLMClientBase):
         }
 
     def _parse_streamed_response(self, accumulated: dict[str, Any]) -> LLMResponse:
-        """Parse accumulated streaming response into LLMResponse (A1 FIX)."""
+        """将累积的流式响应解析为 LLMResponse（A1 修复）。"""
         text = accumulated.get("text", "")
         thinking = accumulated.get("thinking", "") or None
 
-        # Parse tool calls from accumulated dict
+        # 从累积字典解析工具调用
         tool_calls = []
         for idx in sorted(accumulated.get("tool_calls", {}).keys()):
             tc_data = accumulated["tool_calls"][idx]
@@ -345,7 +344,7 @@ class OpenAIClient(LLMClientBase):
                 )
             )
 
-        # Parse usage
+        # 解析使用量
         usage = None
         if accumulated.get("usage"):
             u = accumulated["usage"]
@@ -364,34 +363,37 @@ class OpenAIClient(LLMClientBase):
         )
 
     def _parse_response(self, response: Any) -> LLMResponse:
-        """Parse OpenAI response into LLMResponse.
+        """将 OpenAI 响应解析为 LLMResponse。
 
         Args:
-            response: OpenAI ChatCompletion response (full response object)
+            response: OpenAI ChatCompletion 响应（完整响应对象）
 
         Returns:
-            LLMResponse object
+            LLMResponse 对象
         """
-        # Get message from response
+        # 从响应中获取消息
         message = response.choices[0].message
 
-        # Extract text content
+        # 提取文本内容
         text_content = message.content or ""
 
-        # Extract thinking content from reasoning_details
+        # 从 reasoning_details 提取思考内容
         thinking_content = ""
         if hasattr(message, "reasoning_details") and message.reasoning_details:
-            # reasoning_details is a list of reasoning blocks
+            # reasoning_details 是一个推理块列表
             for detail in message.reasoning_details:
                 if hasattr(detail, "text"):
                     thinking_content += detail.text
 
-        # Extract tool calls
+        # 提取工具调用
         tool_calls = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
-                # Parse arguments from JSON string
-                arguments = json.loads(tool_call.function.arguments)
+                # 从 JSON 字符串解析参数
+                try:
+                    arguments = json.loads(tool_call.function.arguments)
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    arguments = {}
 
                 tool_calls.append(
                     ToolCall(
@@ -404,7 +406,7 @@ class OpenAIClient(LLMClientBase):
                     )
                 )
 
-        # Extract token usage from response
+        # 从响应中提取 token 使用量
         usage = None
         if hasattr(response, "usage") and response.usage:
             usage = TokenUsage(
@@ -431,20 +433,20 @@ class OpenAIClient(LLMClientBase):
         on_thinking: Any = None,
         **_kwargs: Any,
     ) -> LLMResponse:
-        """Generate response from OpenAI LLM (A1 FIX: added streaming support).
+        """从 OpenAI LLM 生成响应（A1 修复：添加了流式支持）。
 
         Args:
-            messages: List of conversation messages
-            tools: Optional list of available tools
-            on_text: Optional callback for streaming text content
-            on_thinking: Optional callback for streaming thinking/reasoning content
+            messages: 对话消息列表
+            tools: 可用的工具列表
+            on_text: 用于流式文本内容的可选回调
+            on_thinking: 用于流式思考/推理内容的可选回调
 
         Returns:
-            LLMResponse containing the generated content
+            包含生成内容的 LLMResponse
         """
         request_params = self._prepare_request(messages, tools)
 
-        # A1 FIX: Use streaming when callbacks are provided
+        # A1 修复：当提供回调时使用流式处理
         if on_text or on_thinking:
             accumulated = await self._make_streaming_request(
                 request_params["api_messages"],
@@ -454,7 +456,7 @@ class OpenAIClient(LLMClientBase):
             )
             return self._parse_streamed_response(accumulated)
 
-        # Fallback: non-streaming for retry or no-callback scenarios
+        # 后备方案：用于重试或无回调场景的非流式处理
         if self.retry_config.enabled:
             retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
             api_call = retry_decorator(self._make_api_request)

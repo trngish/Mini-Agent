@@ -23,7 +23,7 @@ def create_explode_animation(
     object_type: str = "emoji",
     object_data: dict | None = None,
     num_frames: int = 30,
-    explode_type: str = "burst",  # 'burst', 'shatter', 'dissolve', 'implode'
+    explode_type: str = "burst",  # 'burst': 爆炸, 'shatter': 碎裂, 'dissolve': 溶解, 'implode': 向内爆炸
     num_pieces: int = 20,
     explosion_speed: float = 5.0,
     center_pos: tuple[int, int] = (240, 240),
@@ -32,30 +32,30 @@ def create_explode_animation(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list[Image.Image]:
     """
-    Create explosion animation.
+    创建爆炸动画。
 
-    Args:
-        object_type: 'emoji', 'circle', 'text'
-        object_data: Object configuration
-        num_frames: Number of frames
-        explode_type: Type of explosion
-        num_pieces: Number of pieces/particles
-        explosion_speed: Speed of explosion
-        center_pos: Center position
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        object_type: 物体类型，可选 'emoji'、'circle'、'text'
+        object_data: 物体配置
+        num_frames: 帧数
+        explode_type: 爆炸类型
+        num_pieces: 碎片/粒子数量
+        explosion_speed: 爆炸速度
+        center_pos: 中心位置
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     frames = []
 
-    # Default object data
+    # 默认物体数据
     if object_data is None and object_type == "emoji":
         object_data = {"emoji": "💣", "size": 100}
 
-    # Generate pieces/particles
+    # 生成碎片/粒子
     pieces = []
     for _ in range(num_pieces):
         angle = random.uniform(0, 2 * math.pi)
@@ -76,9 +76,9 @@ def create_explode_animation(
         draw = ImageDraw.Draw(frame)
 
         if explode_type == "burst":
-            # Show object at start, then explode
+            # 初始显示物体，然后爆炸
             if t < 0.2:
-                # Object still intact
+                # 物体保持完整
                 scale = interpolate(1.0, 1.2, t / 0.2, "ease_out")
                 if object_type == "emoji":
                     size = int(object_data["size"] * scale)
@@ -90,14 +90,14 @@ def create_explode_animation(
                         shadow=False,
                     )
             else:
-                # Exploded - draw pieces
+                # 已爆炸 - 绘制碎片
                 explosion_t = (t - 0.2) / 0.8
                 for piece in pieces:
-                    # Update position
+                    # 更新位置
                     x = center_pos[0] + piece["vx"] * explosion_t * 50
-                    y = center_pos[1] + piece["vy"] * explosion_t * 50 + 0.5 * 300 * explosion_t**2  # Gravity
+                    y = center_pos[1] + piece["vy"] * explosion_t * 50 + 0.5 * 300 * explosion_t**2  # 重力效果
 
-                    # Fade out
+                    # 淡出效果
                     alpha = 1.0 - explosion_t
                     if alpha > 0:
                         color = tuple(int(c * alpha) for c in piece["color"])
@@ -106,9 +106,9 @@ def create_explode_animation(
                         draw.ellipse([x - size, y - size, x + size, y + size], fill=color)
 
         elif explode_type == "shatter":
-            # Break into geometric pieces
+            # 碎裂成几何碎片
             if t < 0.15:
-                # Object intact
+                # 物体保持完整
                 if object_type == "emoji":
                     draw_emoji_enhanced(
                         frame,
@@ -118,18 +118,18 @@ def create_explode_animation(
                         shadow=False,
                     )
             else:
-                # Shattered
+                # 已碎裂
                 shatter_t = (t - 0.15) / 0.85
 
-                # Draw triangular shards
+                # 绘制三角形碎片
                 for piece in pieces[: min(10, len(pieces))]:
                     x = center_pos[0] + piece["vx"] * shatter_t * 30
                     y = center_pos[1] + piece["vy"] * shatter_t * 30 + 0.5 * 200 * shatter_t**2
 
-                    # Update rotation
+                    # 更新旋转角度
                     rotation = piece["rotation_speed"] * shatter_t * 100
 
-                    # Draw triangle shard
+                    # 绘制三角形碎片
                     shard_size = piece["size"] * 2
                     points = []
                     for j in range(3):
@@ -144,11 +144,11 @@ def create_explode_animation(
                         draw.polygon(points, fill=color)
 
         elif explode_type == "dissolve":
-            # Dissolve into particles
+            # 溶解成粒子
             dissolve_scale = interpolate(1.0, 0.0, t, "ease_in")
 
             if dissolve_scale > 0.1:
-                # Draw fading object
+                # 绘制淡化的物体
                 if object_type == "emoji":
                     size = int(object_data["size"] * dissolve_scale)
                     size = max(12, size)
@@ -162,7 +162,7 @@ def create_explode_animation(
                         shadow=False,
                     )
 
-                    # Apply opacity
+                    # 应用不透明度
                     from templates.fade import apply_opacity
 
                     emoji_canvas = apply_opacity(emoji_canvas, dissolve_scale)
@@ -172,7 +172,7 @@ def create_explode_animation(
                     frame = frame.convert("RGB")
                     draw = ImageDraw.Draw(frame)
 
-            # Draw outward-moving particles
+            # 绘制向外移动的粒子
             for piece in pieces:
                 x = center_pos[0] + piece["vx"] * t * 40
                 y = center_pos[1] + piece["vy"] * t * 40
@@ -184,9 +184,9 @@ def create_explode_animation(
                     draw.ellipse([x - size, y - size, x + size, y + size], fill=color)
 
         elif explode_type == "implode":
-            # Reverse explosion - pieces fly inward
+            # 反向爆炸 - 碎片向内飞
             if t < 0.7:
-                # Pieces converging
+                # 碎片聚合中
                 implode_t = 1.0 - (t / 0.7)
                 for piece in pieces:
                     x = center_pos[0] + piece["vx"] * implode_t * 50
@@ -198,7 +198,7 @@ def create_explode_animation(
 
                     draw.ellipse([x - size, y - size, x + size, y + size], fill=color)
             else:
-                # Object reforms
+                # 物体重新凝聚
                 reform_t = (t - 0.7) / 0.3
                 scale = interpolate(0.5, 1.0, reform_t, "elastic_out")
 
@@ -227,23 +227,23 @@ def create_particle_burst(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list[Image.Image]:
     """
-    Create simple particle burst effect.
+    创建简单的粒子爆发效果。
 
-    Args:
-        num_frames: Number of frames
-        particle_count: Number of particles
-        center_pos: Burst center
-        colors: Particle colors (None for random)
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        num_frames: 帧数
+        particle_count: 粒子数量
+        center_pos: 爆发中心点
+        colors: 粒子颜色（None 表示随机）
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     particles = ParticleSystem()
 
-    # Emit particles
+    # 发射粒子
     if colors is None:
         from core.color_palettes import get_palette
 
@@ -275,13 +275,13 @@ def create_particle_burst(
     return frames
 
 
-# Example usage
+# 示例用法
 if __name__ == "__main__":
-    print("Creating explode animations...")
+    print("正在创建爆炸动画...")
 
     builder = GIFBuilder(width=480, height=480, fps=20)
 
-    # Example 1: Burst
+    # 示例 1: 爆发效果
     frames = create_explode_animation(
         object_type="emoji",
         object_data={"emoji": "💣", "size": 100},
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("explode_burst.gif", num_colors=128)
 
-    # Example 2: Shatter
+    # 示例 2: 碎裂效果
     builder.clear()
     frames = create_explode_animation(
         object_type="emoji",
@@ -304,10 +304,10 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("explode_shatter.gif", num_colors=128)
 
-    # Example 3: Particle burst
+    # 示例 3: 粒子爆发
     builder.clear()
     frames = create_particle_burst(num_frames=25, particle_count=40)
     builder.add_frames(frames)
     builder.save("explode_particles.gif", num_colors=128)
 
-    print("Created explode animations!")
+    print("爆炸动画创建完成!")

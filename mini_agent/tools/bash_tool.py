@@ -1,12 +1,12 @@
-"""Shell command execution tool with background process management.
+"""Shell命令执行工具，支持后台进程管理。
 
-Supports both bash (Unix/Linux/macOS) and PowerShell (Windows).
-Platform mode can be configured via platform_mode parameter or auto-detected.
+支持bash（Unix/Linux/macOS）和PowerShell（Windows）。
+平台模式可通过platform_mode参数配置或自动检测。
 
-Modules:
-- bash_shared: Platform-specific shell configuration utilities
-- bash_result: BashOutputResult result type
-- bash_background: BackgroundShell and BackgroundShellManager
+模块说明：
+- bash_shared: 平台特定的shell配置工具
+- bash_result: BashOutputResult结果类型
+- bash_background: BackgroundShell和BackgroundShellManager
 - bash_foreground: ForegroundExecutor
 """
 
@@ -30,31 +30,31 @@ from .bash_shared import get_platform_shell_args, get_subprocess_env
 
 
 class BashTool(Tool):
-    """Execute shell commands in foreground or background.
+    """在前台或后台执行shell命令。
 
-    Automatically uses appropriate shell based on platform_mode:
-    - Windows mode: PowerShell
-    - Linux mode: bash
+    根据platform_mode自动使用合适的shell：
+    - Windows模式：PowerShell
+    - Linux模式：bash
     """
 
     def __init__(self, workspace_dir: str | None = None, platform_mode: str = "auto", default_timeout: int = 120):
-        """Initialize BashTool with platform-specific shell.
+        """初始化BashTool，使用平台特定的shell。
 
-        Args:
-            workspace_dir: Working directory for command execution.
-                           If provided, all commands run in this directory.
-                           If None, commands run in the process's cwd.
-            platform_mode: Platform mode - "windows", "linux", or "auto" (auto-detect from OS)
-            default_timeout: Default timeout in seconds for foreground commands (default: 120)
+        参数说明:
+            workspace_dir: 命令执行的工作目录。
+                         如果提供，所有命令将在此目录中运行。
+                         如果为None，命令将在进程的当前工作目录中运行。
+            platform_mode: 平台模式 - "windows"、"linux"或"auto"（自动检测操作系统）
+            default_timeout: 前台命令的默认超时时间（秒）（默认：120）
         """
         self.workspace_dir = workspace_dir
         self.default_timeout = default_timeout
 
-        # Use unified PlatformUtils for platform detection
+        # 使用统一的PlatformUtils进行平台检测
         self.is_windows = PlatformUtils.is_windows(platform_mode)
         self.shell_name = "PowerShell" if self.is_windows else "bash"
 
-        # Delegate foreground execution to specialized module
+        # 将前台执行委托给专用模块
         self._foreground_executor = ForegroundExecutor(
             workspace_dir=workspace_dir,
             is_windows=self.is_windows,
@@ -145,38 +145,38 @@ Examples:
         timeout: int = 120,
         run_in_background: bool = False,
     ) -> BashOutputResult:
-        """Execute shell command with optional background execution.
+        """执行shell命令，支持可选的后台执行。
 
-        Args:
-            command: The shell command to execute
-            timeout: Timeout in seconds (default: 120, max: 600)
-            run_in_background: Set true to run command in background
+        参数说明:
+            command: 要执行的shell命令
+            timeout: 超时时间（秒）（默认：120，最大：600）
+            run_in_background: 设置为true可在后台运行命令
 
-        Returns:
-            BashOutputResult with command output and status
+        返回值:
+            包含命令输出和状态的BashOutputResult
         """
         try:
-            # Security: Check for dangerous commands
+            # 安全检查：检测危险命令
             danger_level, danger_reason = assess_command_danger(command)
             if danger_level == DangerLevel.BLOCKED:
                 return BashOutputResult(
                     success=False,
-                    error=f"Command blocked for safety: {danger_reason}",
+                    error=f"命令因安全原因被阻止：{danger_reason}",
                     stdout="",
-                    stderr=danger_reason or "Blocked command",
+                    stderr=danger_reason or "被阻止的命令",
                     exit_code=-1,
                 )
 
-            # Platform compatibility check
+            # 平台兼容性检查
             platform_warning = detect_platform_mismatch(command, self.is_windows)
 
-            # Get shell configuration based on platform mode
+            # 根据平台模式获取shell配置
             shell_exe, shell_args, shell_name = get_platform_shell_args("windows" if self.is_windows else "linux")
 
-            # Get platform-appropriate environment
+            # 获取平台适当的环境变量
             env = get_subprocess_env()
 
-            # Prepare shell command
+            # 准备shell命令
             shell_cmd = self._build_shell_command(shell_exe, shell_args, command)
 
             if run_in_background:
@@ -184,7 +184,7 @@ Examples:
             else:
                 result = await self._foreground_executor.execute(shell_cmd, command, env, timeout)
 
-            # Prepend platform warning if mismatch detected
+            # 检测到平台不匹配时添加警告
             if platform_warning:
                 warning_section = f"\n[{result.exit_code}]" if result.exit_code else ""
                 result.stdout = (
@@ -208,17 +208,17 @@ Examples:
         original_command: str,
         env: dict[str, str],
     ) -> BashOutputResult:
-        """Execute command in background mode.
+        """以后台模式执行命令。
 
-        Delegates to BackgroundShellManager for process lifecycle management.
+        委托给BackgroundShellManager进行进程生命周期管理。
 
-        Args:
-            shell_cmd: Platform-specific shell command
-            original_command: Original command string
-            env: Environment variables for subprocess
+        参数说明:
+            shell_cmd: 平台特定的shell命令
+            original_command: 原始命令字符串
+            env: 子进程的环境变量
 
-        Returns:
-            BashOutputResult indicating background command started
+        返回值:
+            表示后台命令已启动的BashOutputResult
         """
         bash_id = uuid.uuid4().hex[:12]
 
@@ -239,7 +239,7 @@ Examples:
                 env=env,
             )
 
-        # Create shell data container
+        # 创建shell数据容器
         shell = BackgroundShell(
             bash_id=bash_id,
             command=original_command,
@@ -247,13 +247,13 @@ Examples:
             start_time=time.time(),
         )
 
-        # Register with manager and start monitoring
+        # 注册到管理器并开始监控
         BackgroundShellManager.add(shell)
         BackgroundShellManager.start_monitor(bash_id)  # type: ignore[unused-coroutine]
 
         return BashOutputResult(
             success=True,
-            stdout=f"Background command started with ID: {bash_id}",
+            stdout=f"后台命令已启动，ID：{bash_id}",
             stderr="",
             bash_id=bash_id,
             exit_code=0,
@@ -265,34 +265,33 @@ Examples:
         shell_args: list[str],
         command: str,
     ) -> list[str] | str:
-        """Build platform-specific shell command.
+        """构建平台特定的shell命令。
 
-        Args:
-            shell_exe: Shell executable path
-            shell_args: Shell arguments
-            command: Command to execute
+        参数说明:
+            shell_exe: Shell可执行文件路径
+            shell_args: Shell参数
+            command: 要执行的命令
 
-        Returns:
-            Platform-appropriate command structure
+        返回值:
+            平台适当的命令结构
         """
         if self.is_windows:
-            # Convert bash-style && to PowerShell-style ;
+            # 将bash风格的&&转换为PowerShell风格的;
             normalized = self._normalize_command(command)
             return [shell_exe] + shell_args + [normalized]
         else:
             return command
 
     def _normalize_command(self, command: str) -> str:
-        """Normalize command for Windows PowerShell.
+        """规范化Windows PowerShell命令。
 
-        Converts bash-style syntax to PowerShell-compatible syntax using
-        the comprehensive translation system from command_validator.
+        使用command_validator中的综合转换系统将bash风格语法转换为PowerShell兼容语法。
 
-        Args:
-            command: Original bash-style command
+        参数说明:
+            command: 原始bash风格命令
 
-        Returns:
-            PowerShell-compatible command
+        返回值:
+            PowerShell兼容命令
         """
         translated, _ = translate_command_for_platform(command, is_windows=True)
 
@@ -314,7 +313,7 @@ Examples:
 
 
 class BashOutputTool(Tool):
-    """Retrieve output from background bash shells."""
+    """从后台bash shell获取输出"""
 
     @property
     def name(self) -> str:
@@ -322,23 +321,23 @@ class BashOutputTool(Tool):
 
     @property
     def description(self) -> str:
-        return """Retrieves output from a running or completed background bash shell.
+        return """从运行中或已完成的后台bash shell获取输出。
 
-        - Takes a bash_id parameter identifying the shell
-        - Always returns only new output since the last check
-        - Returns stdout and stderr output along with shell status
-        - Supports optional regex filtering to show only lines matching a pattern
-        - Use this tool when you need to monitor or check the output of a long-running shell
-        - Shell IDs can be found using the bash tool with run_in_background=true
+- 通过bash_id参数指定shell
+- 仅返回自上次检查以来的新输出
+- 返回stdout和stderr输出以及shell状态
+- 支持可选的正则表达式过滤，仅显示匹配的行
+- 当需要监控或检查长时间运行的shell输出时使用此工具
+- Shell ID可通过带有run_in_background=true参数的bash工具获取
 
-        Process status values:
-          - "running": Still executing
-          - "completed": Finished successfully
-          - "failed": Finished with error
-          - "terminated": Was terminated
-          - "error": Error occurred
+进程状态值：
+  - "running"：仍在执行
+  - "completed"：成功完成
+  - "failed"：出错完成
+  - "terminated"：已被终止
+  - "error"：发生错误
 
-        Example: bash_output(bash_id="abc12345")"""
+示例：bash_output(bash_id="abc12345")"""
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -348,16 +347,16 @@ class BashOutputTool(Tool):
                 "bash_id": {
                     "type": "string",
                     "description": (
-                        "The ID of the background shell to retrieve output from."
-                        " Shell IDs are returned when starting a command with run_in_background=true."
+                        "要获取输出的后台shell的ID。"
+                        " 当使用run_in_background=true启动命令时返回shell ID。"
                     ),
                 },
                 "filter_str": {
                     "type": "string",
                     "description": (
-                        "Optional regular expression to filter the output lines."
-                        " Only lines matching this regex will be included in the result."
-                        " Any lines that do not match will no longer be available to read."
+                        "可选的正则表达式，用于过滤输出行。"
+                        " 只有匹配此正则表达式的行才会包含在结果中。"
+                        " 不匹配的行将无法再读取。"
                     ),
                 },
             },
@@ -369,36 +368,36 @@ class BashOutputTool(Tool):
         bash_id: str,
         filter_str: str | None = None,
     ) -> BashOutputResult:
-        """Retrieve output from background shell.
+        """从后台shell获取输出。
 
-        Args:
-            bash_id: The unique identifier of the background shell
-            filter_str: Optional regex pattern to filter output lines
+        参数说明:
+            bash_id: 后台shell的唯一标识符
+            filter_str: 可选的正则表达式模式，用于过滤输出行
 
-        Returns:
-            BashOutputResult with shell output including stdout, stderr, status, and success flag
+        返回值:
+            包含shell输出的BashOutputResult，包括stdout、stderr、状态和成功标志
         """
         try:
-            # Get background shell from manager
+            # 从管理器获取后台shell
             bg_shell = BackgroundShellManager.get(bash_id)
             if not bg_shell:
                 available_ids = BackgroundShellManager.get_available_ids()
                 return BashOutputResult(
                     success=False,
-                    error=f"Shell not found: {bash_id}. Available: {available_ids or 'none'}",
+                    error=f"未找到 shell：{bash_id}。可用 ID：{available_ids or '无'}",
                     stdout="",
                     stderr="",
                     exit_code=-1,
                 )
 
-            # Get new output
+            # 获取新输出
             new_lines = bg_shell.get_new_output(filter_pattern=filter_str)
             stdout = "\n".join(new_lines) if new_lines else ""
 
             return BashOutputResult(
                 success=True,
                 stdout=stdout,
-                stderr="",  # Background shells combine stdout/stderr
+                stderr="",  # 后台shell合并stdout/stderr
                 exit_code=bg_shell.exit_code if bg_shell.exit_code is not None else 0,
                 bash_id=bash_id,
             )
@@ -406,7 +405,7 @@ class BashOutputTool(Tool):
         except Exception as e:
             return BashOutputResult(
                 success=False,
-                error=f"Failed to get bash output: {str(e)}",
+                error=f"获取 bash 输出失败：{str(e)}",
                 stdout="",
                 stderr=str(e),
                 exit_code=-1,
@@ -414,7 +413,7 @@ class BashOutputTool(Tool):
 
 
 class BashKillTool(Tool):
-    """Terminate a running background bash shell."""
+    """终止运行中的后台bash shell"""
 
     @property
     def name(self) -> str:
@@ -422,16 +421,16 @@ class BashKillTool(Tool):
 
     @property
     def description(self) -> str:
-        return """Kills a running background bash shell by its ID.
+        return """根据ID终止运行中的后台bash shell。
 
-        - Takes a bash_id parameter identifying the shell to kill
-        - Attempts graceful termination (SIGTERM) first, then forces (SIGKILL) if needed
-        - Returns the final status and any remaining output before termination
-        - Cleans up all resources associated with the shell
-        - Use this tool when you need to terminate a long-running shell
-        - Shell IDs can be found using the bash tool with run_in_background=true
+- 通过bash_id参数指定要终止的shell
+- 首先尝试优雅终止（SIGTERM），必要时强制终止（SIGKILL）
+- 返回终止前的最终状态和剩余输出
+- 清理与shell相关的所有资源
+- 当需要终止长时间运行的shell时使用此工具
+- Shell ID可通过带有run_in_background=true参数的bash工具获取
 
-        Example: bash_kill(bash_id="abc12345")"""
+示例：bash_kill(bash_id="abc12345")"""
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -441,8 +440,8 @@ class BashKillTool(Tool):
                 "bash_id": {
                     "type": "string",
                     "description": (
-                        "The ID of the background shell to terminate."
-                        " Shell IDs are returned when starting a command with run_in_background=true."
+                        "要终止的后台shell的ID。"
+                        " 当使用run_in_background=true启动命令时返回shell ID。"
                     ),
                 },
             },
@@ -450,23 +449,23 @@ class BashKillTool(Tool):
         }
 
     async def execute(self, bash_id: str) -> BashOutputResult:
-        """Terminate a background shell process.
+        """终止后台shell进程。
 
-        Args:
-            bash_id: The unique identifier of the background shell to terminate
+        参数说明:
+            bash_id: 要终止的后台shell的唯一标识符
 
-        Returns:
-            BashOutputResult with termination status and remaining output
+        返回值:
+            包含终止状态和剩余输出的BashOutputResult
         """
         try:
-            # Get remaining output before termination
+            # 终止前获取剩余输出
             bg_shell = BackgroundShellManager.get(bash_id)
             remaining_lines = bg_shell.get_new_output() if bg_shell else []
 
-            # Terminate through manager (handles all cleanup)
+            # 通过管理器终止（处理所有清理工作）
             bg_shell = await BackgroundShellManager.terminate(bash_id)
 
-            # Get remaining output
+            # 获取剩余输出
             stdout = "\n".join(remaining_lines) if remaining_lines else ""
 
             return BashOutputResult(
@@ -478,11 +477,11 @@ class BashKillTool(Tool):
             )
 
         except ValueError as e:
-            # Shell not found
+            # Shell未找到
             available_ids = BackgroundShellManager.get_available_ids()
             return BashOutputResult(
                 success=False,
-                error=f"{str(e)}. Available: {available_ids or 'none'}",
+                error=f"{str(e)}。可用 ID：{available_ids or '无'}",
                 stdout="",
                 stderr=str(e),
                 exit_code=-1,
@@ -490,7 +489,7 @@ class BashKillTool(Tool):
         except Exception as e:
             return BashOutputResult(
                 success=False,
-                error=f"Failed to terminate bash shell: {str(e)}",
+                error=f"终止 bash shell 失败：{str(e)}",
                 stdout="",
                 stderr=str(e),
                 exit_code=-1,

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Markdown to DOCX Converter
+Markdown 转 DOCX 转换器
 
-Dependencies:
+依赖项:
     pip install python-docx markdown
 
-Usage:
+用法:
     from md_to_docx import convert_md_to_docx
     convert_md_to_docx("input.md", "output.docx")
 """
@@ -30,8 +30,8 @@ except ImportError as e:
 
 
 def add_inline_formatting(run, text):
-    """Add inline formatting (bold, italic, code) to a run."""
-    # Code spans (process first to avoid conflict)
+    """为 run 添加内联格式（粗体、斜体、代码）。"""
+    # 代码片段（优先处理以避免冲突）
     code_pattern = r"`([^`]+)`"
     parts = re.split(code_pattern, text)
 
@@ -40,7 +40,7 @@ def add_inline_formatting(run, text):
             continue
 
         if re.match(code_pattern, f"`{part}`"):
-            # Code
+            # 代码
             run = run
             run.font.name = "Courier New"
             run.font.color.rgb = RGBColor(0x2E, 0x7D, 0x32)
@@ -48,7 +48,7 @@ def add_inline_formatting(run, text):
             run.text = part
             run = run.insert_before()
         else:
-            # Check for bold/italic
+            # 检查粗体/斜体
             if part.startswith("**") and part.endswith("**") or part.startswith("__") and part.endswith("__"):
                 run.text = part[2:-2]
                 run.bold = True
@@ -60,27 +60,27 @@ def add_inline_formatting(run, text):
 
 
 def parse_heading(paragraph, level):
-    """Apply heading style based on level."""
+    """根据级别应用标题样式。"""
     style_name = f"Heading {level}" if level <= 6 else "Heading 2"
     paragraph.style = style_name
 
 
 def parse_markdown_to_docx(doc, md_content):
-    """Parse markdown content and add elements to docx document."""
+    """解析 markdown 内容并将元素添加到 docx 文档。"""
     lines = md_content.split("\n")
 
     i = 0
     while i < len(lines):
         line = lines[i]
 
-        # Skip empty lines
+        # 跳过空行
         if not line.strip():
             i += 1
             continue
 
-        # Headings
+        # 标题
         if line.startswith("#######"):
-            # H7 - treat as body
+            # H7 - 作为正文处理
             p = doc.add_paragraph(line[7:].strip())
         elif line.startswith("######"):
             p = doc.add_heading(line[6:].strip(), level=6)
@@ -95,19 +95,19 @@ def parse_markdown_to_docx(doc, md_content):
         elif line.startswith("#"):
             p = doc.add_heading(line[1:].strip(), level=1)
 
-        # Horizontal rule
+        # 水平线
         elif line.strip() in ["---", "***", "___"]:
             p = doc.add_paragraph()
             p.add_run("─" * 50)
 
-        # Blockquote
+        # 块引用
         elif line.startswith(">"):
             text = line[1:].strip()
             p = doc.add_paragraph()
             run = p.add_run(text)
             run.italic = True
 
-        # Unordered list
+        # 无序列表
         elif line.strip().startswith(("- ", "* ", "+ ")):
             while i < len(lines) and lines[i].strip().startswith(("- ", "* ", "+ ")):
                 text = lines[i].strip()[2:].strip()
@@ -115,7 +115,7 @@ def parse_markdown_to_docx(doc, md_content):
                 i += 1
             continue
 
-        # Ordered list
+        # 有序列表
         elif re.match(r"^\d+\.\s", line):
             while i < len(lines) and re.match(r"^\d+\.\s", lines[i]):
                 text = re.sub(r"^\d+\.\s", "", lines[i]).strip()
@@ -123,12 +123,12 @@ def parse_markdown_to_docx(doc, md_content):
                 i += 1
             continue
 
-        # Table
+        # 表格
         elif line.startswith("|"):
             table_data = []
             col_aligns = []
 
-            # Parse table rows
+            # 解析表格行
             while i < len(lines) and lines[i].strip().startswith("|"):
                 row_text = lines[i].strip().strip("|")
                 if row_text and not all(c in "-: " for c in row_text):
@@ -149,18 +149,18 @@ def parse_markdown_to_docx(doc, md_content):
                 headers = table_data[0]
                 rows = table_data[1:]
 
-                # Create table
+                # 创建表格
                 table = doc.add_table(rows=len(rows) + 1, cols=len(headers))
                 table.style = "Table Grid"
 
-                # Header row
+                # 表头行
                 for col_idx, header_text in enumerate(headers):
                     cell = table.rows[0].cells[col_idx]
                     cell.text = header_text
                     run = cell.paragraphs[0].runs[0]
                     run.bold = True
 
-                # Data rows
+                # 数据行
                 for row_idx, row_data in enumerate(rows):
                     for col_idx, cell_text in enumerate(row_data):
                         cell = table.rows[row_idx + 1].cells[col_idx]
@@ -169,7 +169,7 @@ def parse_markdown_to_docx(doc, md_content):
                 doc.add_paragraph()  # Space after table
             continue
 
-        # Code block
+        # 代码块
         elif line.strip().startswith("```"):
             code_lines = []
             i += 1
@@ -185,14 +185,14 @@ def parse_markdown_to_docx(doc, md_content):
             i += 1
             continue
 
-        # Regular paragraph with inline formatting
+        # 带内联格式的普通段落
         else:
             p = doc.add_paragraph()
 
-            # Process inline formatting
+            # 处理内联格式
             remaining = line
 
-            # Process patterns in order
+            # 按顺序处理模式
             patterns = [
                 (r"\*\*([^*]+)\*\*", "bold"),
                 (r"__([^_]+)__", "bold"),
@@ -202,7 +202,7 @@ def parse_markdown_to_docx(doc, md_content):
                 (r"\[([^\]]+)\]\([^\)]+\)", "link"),
             ]
 
-            # Split text by patterns
+            # 按模式分割文本
             parts = []
             last_end = 0
 
@@ -242,46 +242,46 @@ def parse_markdown_to_docx(doc, md_content):
 
 def convert_md_to_docx(input_path: str, output_path: str, title: str = None, author: str = None, styles: bool = True):
     """
-    Convert a Markdown file to DOCX.
+    将 Markdown 文件转换为 DOCX。
 
-    Args:
-        input_path: Path to input .md file
-        output_path: Path to output .docx file
-        title: Document title (default: filename)
-        author: Document author (default: "MD Converter")
-        styles: Apply professional styles (default: True)
+    参数:
+        input_path: 输入 .md 文件路径
+        output_path: 输出 .docx 文件路径
+        title: 文档标题（默认：文件名）
+        author: 文档作者（默认："MD Converter"）
+        styles: 应用专业样式（默认：True）
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
 
     if not input_path.exists():
-        raise FileNotFoundError(f"Input file not found: {input_path}")
+        raise FileNotFoundError(f"输入文件未找到: {input_path}")
 
-    # Read markdown content
+    # 读取 markdown 内容
     md_content = input_path.read_text(encoding="utf-8")
 
-    # Set defaults
+    # 设置默认值
     if title is None:
         title = input_path.stem
     if author is None:
         author = "MD Converter"
 
-    # Create document
+    # 创建文档
     doc = Document()
 
-    # Set document properties
+    # 设置文档属性
     doc.core_properties.title = title
     doc.core_properties.author = author
     doc.core_properties.created = datetime.now()
 
-    # Add title if not already in markdown
+    # 如果 markdown 不以 # 开头，则添加标题
     if not md_content.startswith("#"):
         doc.add_heading(title, 0)
 
-    # Parse markdown
+    # 解析 markdown
     parse_markdown_to_docx(doc, md_content)
 
-    # Save
+    # 保存
     doc.save(str(output_path))
 
     print(f"✅ DOCX created: {output_path}")
@@ -291,12 +291,12 @@ def convert_md_to_docx(input_path: str, output_path: str, title: str = None, aut
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Convert Markdown to DOCX")
-    parser.add_argument("input", help="Input markdown file")
-    parser.add_argument("output", help="Output DOCX file")
-    parser.add_argument("--title", help="Document title")
-    parser.add_argument("--author", help="Document author")
-    parser.add_argument("--no-styles", action="store_true", help="Don't apply styles")
+    parser = argparse.ArgumentParser(description="将 Markdown 转换为 DOCX")
+    parser.add_argument("input", help="输入 markdown 文件")
+    parser.add_argument("output", help="输出 DOCX 文件")
+    parser.add_argument("--title", help="文档标题")
+    parser.add_argument("--author", help="文档作者")
+    parser.add_argument("--no-styles", action="store_true", help="不应用样式")
 
     args = parser.parse_args()
     convert_md_to_docx(args.input, args.output, args.title, args.author, not args.no_styles)

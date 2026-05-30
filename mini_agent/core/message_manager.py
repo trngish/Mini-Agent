@@ -1,4 +1,4 @@
-"""Core message handling and summarization logic."""
+"""核心消息处理与摘要逻辑。"""
 
 from __future__ import annotations
 
@@ -14,10 +14,9 @@ _logger = logging.getLogger(__name__)
 
 
 class MessageManager:
-    """Manages message history and summarization.
+    """管理消息历史和摘要。
 
-    Handles message history, token estimation, and automatic summarization
-    when token limits are approached.
+    处理消息历史、token估算，并在接近token限制时自动进行摘要。
     """
 
     def __init__(self, token_limit: int):
@@ -29,22 +28,22 @@ class MessageManager:
         self._last_summary_quality = 1.0
 
     def initialize(self, system_prompt: str) -> None:
-        """Initialize with system prompt."""
+        """使用系统提示词初始化。"""
         self.messages = [Message(role="system", content=system_prompt)]
 
     def add_message(self, message: Message) -> None:
-        """Add a message to history."""
+        """向历史记录添加消息。"""
         self.messages.append(message)
 
     def estimate_tokens(self) -> int:
-        """Estimate total tokens for message history."""
+        """估算消息历史的总token数。"""
         return self._token_tracker.estimate_tokens(self.messages)
 
     def should_summarize(self, api_total_tokens: int) -> tuple[bool, str]:
-        """Check if summarization is needed.
+        """检查是否需要进行摘要。
 
-        Returns:
-            Tuple of (should_summarize, reason)
+        返回:
+            (是否需要摘要, 原因) 元组
         """
         if self._skip_next_token_check:
             self._skip_next_token_check = False
@@ -57,17 +56,17 @@ class MessageManager:
         return should_summarize, reason
 
     def mark_skip_next_check(self, quality: float = 1.0) -> None:
-        """Mark to skip next token check after summary."""
+        """标记跳过下次token检查（在摘要之后）。"""
         self._skip_next_token_check = True
         if self._summary_manager.should_skip_next_check(quality):
             self._skip_next_token_check = True
 
     def get_messages(self) -> list[Message]:
-        """Get current message list."""
+        """获取当前消息列表。"""
         return self.messages
 
     def replace_messages(self, messages: list[Message]) -> None:
-        """Replace entire message list."""
+        """替换整个消息列表。"""
         self.messages = messages
 
     async def summarize_messages(
@@ -77,22 +76,22 @@ class MessageManager:
         logger: Any,
         _max_truncation: int = 2000,
     ) -> list[Message]:
-        """Summarize message history when tokens exceed limit.
+        """当token超出限制时对消息历史进行摘要。
 
-        Strategy:
-        - Keep all user messages (these are user intents)
-        - Summarize content between each user-user pair (agent execution process)
-        - If last round is still executing, also summarize
-        - Structure: system -> user1 -> summary1 -> user2 -> summary2 -> ...
+        策略:
+        - 保留所有用户消息（这些代表用户意图）
+        - 对每对用户-用户之间的内容进行摘要（智能体执行过程）
+        - 如果最后一轮仍在执行中，同样进行摘要
+        - 结构: system -> user1 -> summary1 -> user2 -> summary2 -> ...
 
-        Args:
-            messages: Current message list (will be modified in place)
-            api_total_tokens: Token count reported by last API response
-            logger: Logger instance for warnings
-            max_truncation: Maximum truncation length for summary content
+        参数:
+            messages: 当前消息列表（将在原地修改）
+            api_total_tokens: 上次API响应报告的token计数
+            logger: 用于警告的日志记录器实例
+            max_truncation: 摘要内容的最大截断长度
 
-        Returns:
-            New message list after summarization (same list if no summarization needed)
+        返回:
+            摘要后的新消息列表（如果不需要摘要则返回相同列表）
         """
         if self._skip_next_token_check:
             self._skip_next_token_check = False
@@ -117,8 +116,8 @@ class MessageManager:
             print(f"{Colors.BRIGHT_YELLOW}⚠️  Insufficient messages, cannot summarize{Colors.RESET}")
             return messages
 
-        # D12 FIX: Detect summary generation depth to prevent cascading degeneration.
-        # Each time a summary is summarized again, we need higher preservation.
+        # D12 修复: 检测摘要生成深度，防止级联退化。
+        # 每次对摘要再次进行摘要时，需要更高的保留度。
         summary_generation = self._detect_summary_generation(messages)
         if summary_generation > 0:
             print(
@@ -129,10 +128,10 @@ class MessageManager:
         new_messages = [messages[0]]
         summary_count = 0
 
-        # D12 FIX: Anti-degeneration minimum preservation ratios
-        # Generation 0 (fresh): normal ratios
-        # Generation 1: +20% boost
-        # Generation 2+: +35% boost with golden fact preservation
+        # D12 修复: 反退化最小保留比例
+        # 世代 0（全新）: 正常比例
+        # 世代 1: +20% 提升
+        # 世代 2+: +35% 提升并保留关键事实
         gen_boost = min(0.35, summary_generation * 0.15)
 
         for i, user_idx in enumerate(user_indices):
@@ -153,32 +152,31 @@ class MessageManager:
             if execution_messages:
                 is_last_round = (i == len(user_indices) - 1)
 
-                # CRITICAL FIX: For the most recent round, preserve assistant messages
-                # verbatim instead of summarizing them. The user's follow-up instruction
-                # almost always references the AI's most recent output. Summarizing it
-                # away causes the "AI forgets what it just said" problem.
+                # 关键修复: 对于最近的轮次，原样保留助手消息而非进行摘要。
+                # 因为用户的后续指令几乎总是引用AI最近的输出。对其进行摘要会导致
+                # "AI忘记自己刚说过的话"的问题。
                 if is_last_round and self._should_preserve_last_round(execution_messages):
                     for msg in execution_messages:
                         if msg.role in ("assistant", "tool"):
                             new_messages.append(msg)
-                    summary_count += 1  # Count as "handled" even though preserved
+                    summary_count += 1  # 算作"已处理"，尽管是保留而非摘要
                     continue
 
                 tier = "medium"
                 if ":" in reason and "tier=" in reason:
-                    # D12 FIX: Parse tier from reason, handle degen_w suffix
+                    # D12 修复: 从原因中解析tier，处理 degen_w 后缀
                     tier_part = reason.split("tier=")[1]
-                    tier = tier_part.split(":")[0]  # Strip :degen_w{N} suffix
+                    tier = tier_part.split(":")[0]  # 去掉 :degen_w{N} 后缀
                 elif reason.startswith("early_trigger"):
                     tier = "low"
 
                 summary_config = self._summary_manager.get_summary_config(tier)
-                # D12 FIX: Apply anti-degeneration boost
-                # Higher generation → higher preservation to prevent cascading loss
+                # D12 修复: 应用反退化提升
+                # 世代越高 → 保留度越高，防止级联丢失
                 boosted_ratio = min(1.0, summary_config["preserve_ratio"] + gen_boost)
                 boosted_truncation = summary_config["max_truncation"]
                 if summary_generation > 0:
-                    # Don't truncate as aggressively when re-summarizing
+                    # 重新摘要时不进行过度截断
                     boosted_truncation = min(summary_config["max_truncation"] * 2, 3000)
                 summary_text = self._create_local_summary(
                     execution_messages,
@@ -222,14 +220,14 @@ class MessageManager:
 
     @staticmethod
     def _detect_summary_generation(messages: list[Message]) -> int:
-        """D12 FIX: Detect how many generations of summarization have occurred.
+        """D12 修复: 检测已发生摘要的代数。
 
-        Scans for [Execution Summary] markers in user messages to determine
-        the depth of the summary chain. Each layer of summarization adds
-        another generation.
+        扫描用户消息中的 [Execution Summary] 标记以确定
+        摘要链的深度。每增加一层摘要
+        就增加一代。
 
-        Returns:
-            Summary generation depth (0 = fresh, 1+ = re-summarized).
+        返回:
+            摘要世代深度（0 = 全新，1+ = 重新摘要）。
         """
         max_gen = 0
         for msg in messages:
@@ -247,15 +245,14 @@ class MessageManager:
 
     @staticmethod
     def _should_preserve_last_round(execution_messages: list[Message]) -> bool:
-        """Determine if the last round's assistant messages should be preserved verbatim.
+        """判断是否应原样保留上一轮助手的消息。
 
-        When the AI has just provided analysis/suggestions that the user will
-        reference in their next message, summarizing those messages causes
-        the AI to "forget" what it just said.
+        当AI刚刚提供了用户下一条消息会引用的分析/建议时，
+        对这些消息进行摘要会导致AI"忘记"自己刚说的话。
 
-        We preserve the last round if any assistant message has substantial
-        text content (more than 100 chars) — this indicates meaningful output
-        the user is likely to follow up on.
+        如果任何助手消息有实质性文本内容（超过100个字符），
+        我们就保留最后一轮——这表明是有意义的输出，
+        用户可能会跟进。
         """
         for msg in execution_messages:
             if msg.role == "assistant":
@@ -271,18 +268,18 @@ class MessageManager:
         preserve_ratio: float = 0.6,
         max_truncation: int = 1000,
     ) -> str:
-        """Create summary locally without LLM call (saves tokens).
+        """在本地创建摘要而不调用LLM（节省token）。
 
-        Preserves more detail to reduce redundant LLM calls.
+        保留更多细节以减少冗余的LLM调用。
 
-        Args:
-            messages: List of messages to summarize
-            round_num: Round number
-            preserve_ratio: How much content to preserve (0-1)
-            max_truncation: Maximum characters to truncate to
+        参数:
+            messages: 要摘要的消息列表
+            round_num: 轮次编号
+            preserve_ratio: 保留多少内容 (0-1)
+            max_truncation: 最大截断字符数
 
-        Returns:
-            Summary text
+        返回:
+            摘要文本
         """
         if not messages:
             return ""
@@ -317,11 +314,11 @@ class MessageManager:
                     result = result[:result_max] + "..."
                 lines.append(f"  Result: {result}")
 
-        # CRITICAL FIX: Include assistant's analysis responses in summary
-        # Previously, assistant_responses were collected but only output when NO tool_calls existed.
-        # In analysis scenarios, the AI reads files (tool_calls) AND gives suggestions (assistant content).
-        # The suggestions were being silently discarded, causing the AI to "forget" what it just said
-        # and re-analyze the same files repeatedly.
+        # 关键修复: 在摘要中包含助手的分析回复
+        # 之前，assistant_responses 被收集，但仅在没有 tool_calls 时输出。
+        # 在分析场景中，AI读取文件（tool_calls）同时给出建议（assistant content）。
+        # 建议被静默丢弃，导致AI"忘记"自己刚说的话
+        # 并重复分析相同的文件。
         if assistant_responses:
             for resp in assistant_responses:
                 # Truncate long assistant responses proportionally

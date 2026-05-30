@@ -1,4 +1,4 @@
-"""Utility modules for Mini-Agent."""
+"""Mini-Agent 的工具模块。"""
 
 from .config_validator import ConfigValidationError, ConfigValidator
 from .context_cache import ContextCache, get_cache_hit_rate, get_context_cache, record_cache_access

@@ -7,11 +7,14 @@ This tool allows the agent to:
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .base import Tool, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 class SessionNoteTool(Tool):
@@ -79,7 +82,8 @@ class SessionNoteTool(Tool):
         try:
             # Use utf-8-sig to handle BOM and ensure consistent encoding
             return json.loads(self.memory_file.read_text(encoding="utf-8-sig"))  # type: ignore[no-any-return]
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to load notes: {e}")
             return []
 
     def _save_to_file(self, notes: list[Any]) -> None:

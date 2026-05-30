@@ -9,7 +9,7 @@ import subprocess  # nosec B404
 from collections.abc import Sequence
 from pathlib import Path
 
-# Directories to skip when walking the file tree
+# 遍历目录树时跳过的目录
 DEFAULT_SKIP_DIRS = frozenset(
     {
         "node_modules",
@@ -48,7 +48,7 @@ def get_git_status_sync(
     """
     lines: list[str] = []
     try:
-        # Check if in a git repo
+        # 检查是否在git仓库中
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
             capture_output=True,
@@ -61,7 +61,7 @@ def get_git_status_sync(
         if result.returncode != 0:
             return "Not a git repository"
 
-        # Get branch
+        # 获取分支
         result = subprocess.run(
             ["git", "branch", "--show-current"],
             capture_output=True,
@@ -74,7 +74,7 @@ def get_git_status_sync(
         branch = result.stdout.strip()
         lines.append(f"Branch: {branch}")
 
-        # Get short status
+        # 获取简短状态
         result = subprocess.run(
             ["git", "status", "--short"],
             capture_output=True,
@@ -95,7 +95,7 @@ def get_git_status_sync(
         else:
             lines.append("Working tree clean")
 
-        # Get recent commits
+        # 获取最近提交
         result = subprocess.run(
             ["git", "log", "--oneline", f"-{max_commits}"],
             capture_output=True,
@@ -142,7 +142,7 @@ def get_tree_sync(
 
     try:
         for root, dirs, files in os.walk(workspace_dir):
-            # Skip hidden and common non-essential directories
+            # 跳过隐藏的和常见的不必要目录
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in all_skip)
 
             rel_root = Path(root).relative_to(workspace_dir)
@@ -161,7 +161,7 @@ def get_tree_sync(
             else:
                 lines.append(f"{indent}{folder_name}/")
 
-            # List files
+            # 列出文件
             file_count = 0
             for f in sorted(files):
                 if f.startswith("."):

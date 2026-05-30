@@ -1,4 +1,4 @@
-"""Background shell process management with thread-safe access."""
+"""后台Shell进程管理，支持线程安全访问。"""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from typing import Any
 
 
 class BackgroundShell:
-    """Background shell data container.
+    """后台Shell数据容器。
 
-    Pure data class that only stores state and output.
-    IO operations are managed externally by BackgroundShellManager.
+    纯数据类，仅存储状态和输出。
+    IO操作由BackgroundShellManager外部管理。
     """
 
     def __init__(self, bash_id: str, command: str, process: asyncio.subprocess.Process, start_time: float):
@@ -25,28 +25,31 @@ class BackgroundShell:
         self.last_read_index = 0
         self.status = "running"
         self.exit_code: int | None = None
+        self._output_lock = ThreadLock()  # 保护 output_lines 的并发访问
 
     def add_output(self, line: str) -> None:
-        """Add new output line."""
-        self.output_lines.append(line)
+        """添加新的输出行（线程安全）。"""
+        with self._output_lock:
+            self.output_lines.append(line)
 
     def get_new_output(self, filter_pattern: str | None = None) -> list[str]:
-        """Get new output since last check, optionally filtered by regex."""
-        new_lines = self.output_lines[self.last_read_index :]
-        self.last_read_index = len(self.output_lines)
+        """获取自上次检查以来的新输出，可选择按正则表达式过滤（线程安全）。"""
+        with self._output_lock:
+            new_lines = self.output_lines[self.last_read_index :]
+            self.last_read_index = len(self.output_lines)
 
-        if filter_pattern:
-            try:
-                pattern = re.compile(filter_pattern)
-                new_lines = [line for line in new_lines if pattern.search(line)]
-            except re.error:
-                # Invalid regex, return all lines
-                pass
+            if filter_pattern:
+                try:
+                    pattern = re.compile(filter_pattern)
+                    new_lines = [line for line in new_lines if pattern.search(line)]
+                except re.error:
+                    # 无效的正则表达式，返回所有行
+                    pass
 
-        return new_lines
+            return new_lines
 
     def update_status(self, is_alive: bool, exit_code: int | None = None) -> None:
-        """Update process status."""
+        """更新进程状态。"""
         if not is_alive:
             self.status = "completed" if exit_code == 0 else "failed"
             self.exit_code = exit_code
@@ -54,7 +57,7 @@ class BackgroundShell:
             self.status = "running"
 
     async def terminate(self) -> None:
-        """Terminate the background process."""
+        """终止后台进程。"""
         if self.process.returncode is None:
             self.process.terminate()
             try:
@@ -66,13 +69,12 @@ class BackgroundShell:
 
 
 class BackgroundShellManager:
-    """Thread-safe manager for all background shell processes.
+    """所有后台Shell进程的线程安全管理器。
 
-    Uses class-level storage with agent_id prefixes to avoid cross-agent pollution.
-    Each agent should use a unique agent_id when adding shells.
+    使用类级别存储和agent_id前缀以避免跨agent污染。
+    每个agent在添加shell时应使用唯一的agent_id。
 
-    Thread-safe: uses Lock for concurrent access protection on all class methods
-    that access shared state (_shells, _monitor_tasks).
+    线程安全：在所有访问共享状态（_shells、_monitor_tasks）的方法上使用Lock进行并发访问保护。
     """
 
     _lock = ThreadLock()
@@ -81,16 +83,16 @@ class BackgroundShellManager:
 
     @classmethod
     def _prefix_key(cls, agent_id: str, bash_id: str) -> str:
-        """Generate prefixed key for shell storage."""
+        """生成用于Shell存储的前缀键。"""
         return f"{agent_id}:{bash_id}"
 
     @classmethod
     def add(cls, shell: BackgroundShell, agent_id: str = "default") -> None:
-        """Add a background shell to management (thread-safe).
+        """添加后台Shell到管理器（线程安全）。
 
         Args:
-            shell: The BackgroundShell to add
-            agent_id: Unique identifier for the agent (to isolate storage)
+            shell: 要添加的BackgroundShell
+            agent_id: agent的唯一标识符（用于隔离存储）
         """
         with cls._lock:
             key = cls._prefix_key(agent_id, shell.bash_id)
@@ -98,11 +100,11 @@ class BackgroundShellManager:
 
     @classmethod
     def get(cls, bash_id: str, agent_id: str = "default") -> BackgroundShell | None:
-        """Get a background shell by ID (thread-safe).
+        """根据ID获取后台Shell（线程安全）。
 
         Args:
-            bash_id: The shell ID
-            agent_id: Agent identifier used when adding the shell
+            bash_id: Shell ID
+            agent_id: 添加shell时使用的agent标识符
         """
         with cls._lock:
             key = cls._prefix_key(agent_id, bash_id)
@@ -110,10 +112,10 @@ class BackgroundShellManager:
 
     @classmethod
     def get_available_ids(cls, agent_id: str = "default") -> list[str]:
-        """Get all available bash IDs for an agent (thread-safe).
+        """获取某个agent的所有可用bash ID（线程安全）。
 
         Args:
-            agent_id: Agent identifier to filter shells
+            agent_id: 用于过滤shell的agent标识符
         """
         with cls._lock:
             prefix = f"{agent_id}:"
@@ -121,7 +123,7 @@ class BackgroundShellManager:
 
     @classmethod
     def _remove(cls, bash_id: str, agent_id: str = "default") -> None:
-        """Remove a background shell from management (internal use only, thread-safe)."""
+        """从管理器中移除后台Shell（仅供内部使用，线程安全）。"""
         with cls._lock:
             key = cls._prefix_key(agent_id, bash_id)
             if key in cls._shells:
@@ -129,7 +131,7 @@ class BackgroundShellManager:
 
     @classmethod
     async def start_monitor(cls, bash_id: str, agent_id: str = "default") -> None:
-        """Start monitoring a background shell's output."""
+        """开始监控后台Shell的输出。"""
         shell = cls.get(bash_id, agent_id)
         if not shell:
             return
@@ -137,7 +139,7 @@ class BackgroundShellManager:
         async def monitor() -> None:
             try:
                 process = shell.process
-                # Continuously read output until process ends
+                # 持续读取输出直到进程结束
                 while process.returncode is None:
                     try:
                         if process.stdout:
@@ -154,7 +156,7 @@ class BackgroundShellManager:
                         await asyncio.sleep(0.1)
                         continue
 
-                # Process ended, wait for exit code
+                # 进程已结束，等待退出码
                 try:
                     returncode = await process.wait()
                 except Exception:
@@ -181,7 +183,7 @@ class BackgroundShellManager:
 
     @classmethod
     def _cancel_monitor(cls, bash_id: str, agent_id: str = "default") -> None:
-        """Cancel and remove a monitoring task (internal use only, thread-safe)."""
+        """取消并移除监控任务（仅供内部使用，线程安全）。"""
         monitor_key = f"{agent_id}:monitor:{bash_id}"
         with cls._lock:
             if monitor_key in cls._monitor_tasks:
@@ -191,26 +193,26 @@ class BackgroundShellManager:
 
     @classmethod
     async def terminate(cls, bash_id: str, agent_id: str = "default") -> BackgroundShell:
-        """Terminate a background shell and clean up all resources (thread-safe).
+        """终止后台Shell并清理所有资源（线程安全）。
 
         Args:
-            bash_id: The unique identifier of the background shell
-            agent_id: Agent identifier used when adding the shell
+            bash_id: 后台Shell的唯一标识符
+            agent_id: 添加shell时使用的agent标识符
 
         Returns:
-            The terminated BackgroundShell object
+            已终止的BackgroundShell对象
 
         Raises:
-            ValueError: If shell not found
+            ValueError: 如果shell未找到
         """
         shell = cls.get(bash_id, agent_id)
         if not shell:
             raise ValueError(f"Shell not found: {bash_id}")
 
-        # Terminate the process
+        # 终止进程
         await shell.terminate()
 
-        # Clean up monitoring and remove from manager
+        # 清理监控并从管理器中移除
         cls._cancel_monitor(bash_id, agent_id)
         cls._remove(bash_id, agent_id)
 
@@ -218,17 +220,17 @@ class BackgroundShellManager:
 
     @classmethod
     async def cleanup_all(cls, agent_id: str = "default") -> list[str]:
-        """Clean up all background shells for an agent (thread-safe).
+        """清理某个agent的所有后台Shell（线程安全）。
 
         Args:
-            agent_id: Agent identifier to clean up shells for
+            agent_id: 要清理shell的agent标识符
 
         Returns:
-            List of terminated shell IDs
+            已终止的shell ID列表
         """
         terminated_ids = cls.get_available_ids(agent_id)
 
-        # Terminate all shells for this agent
+        # 终止该agent的所有shell
         for bash_id in terminated_ids:
             with contextlib.suppress(Exception):
                 await cls.terminate(bash_id, agent_id)
@@ -237,13 +239,13 @@ class BackgroundShellManager:
 
     @classmethod
     def get_stats(cls, agent_id: str = "default") -> dict[str, Any]:
-        """Get statistics about managed shells for an agent (thread-safe).
+        """获取某个agent管理的Shell统计数据（线程安全）。
 
         Args:
-            agent_id: Agent identifier to get stats for
+            agent_id: 要获取统计数据的agent标识符
 
         Returns:
-            Dictionary with shell counts and status
+            包含Shell数量和状态的字典
         """
         with cls._lock:
             prefix = f"{agent_id}:"
@@ -265,7 +267,7 @@ class BackgroundShellManager:
 
     @classmethod
     def clear_all(cls) -> None:
-        """Clear all shells and monitors (thread-safe). Used for testing."""
+        """清除所有shell和监控（线程安全）。用于测试。"""
         with cls._lock:
             cls._shells.clear()
             for task in cls._monitor_tasks.values():

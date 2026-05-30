@@ -110,7 +110,7 @@ class TestValidateCommandInput:
     def test_empty_command(self):
         is_valid, error = validate_command_input("")
         assert is_valid is False
-        assert "empty" in error.lower()
+        assert "empty" in error.lower() or "空" in error
 
     def test_whitespace_only_command(self):
         is_valid, error = validate_command_input("   ")
@@ -119,7 +119,7 @@ class TestValidateCommandInput:
     def test_too_long_command(self):
         is_valid, error = validate_command_input("a" * 10001, max_length=10000)
         assert is_valid is False
-        assert "too long" in error.lower()
+        assert "too long" in error.lower() or "字符" in error
 
     def test_blocked_command(self):
         is_valid, error = validate_command_input("rm -rf /")

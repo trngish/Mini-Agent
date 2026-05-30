@@ -1,4 +1,4 @@
-"""Workspace context tool for getting comprehensive project overview in one call."""
+"""工作空间上下文工具，用于一次调用获取全面的项目概览。"""
 
 from pathlib import Path
 from typing import Any
@@ -10,9 +10,9 @@ from .file_tools import get_file_token_limit, truncate_text_by_tokens
 
 
 class WorkspaceContextTool(Tool):
-    """Get comprehensive workspace context in a single call.
+    """一次调用获取全面的工作空间上下文。
 
-    Per-call billing optimization: get project structure, git status, and key file list in one call.
+    每次调用计费优化：一次调用获取项目结构、git 状态和关键文件列表。
     """
 
     def __init__(self, workspace_dir: str = "."):
@@ -58,29 +58,29 @@ class WorkspaceContextTool(Tool):
         include_git: bool = True,
         include_config_files: bool = True,
     ) -> ToolResult:
-        """Get comprehensive workspace context."""
+        """获取全面的工作空间上下文。"""
         sections = []
 
-        # 1. Directory tree
-        sections.append(f"Directory Tree (depth={max_depth})")
+        # 1. 目录树
+        sections.append(f"目录树 (depth={max_depth})")
         sections.append("=" * 50)
         sections.append(get_tree_sync(self.workspace_dir, max_depth, show_sizes=False, max_files_per_dir=20))
 
-        # 2. Git status
+        # 2. Git 状态
         if include_git:
-            sections.append("\nGit Status")
+            sections.append("\nGit 状态")
             sections.append("=" * 50)
             sections.append(get_git_status_sync(self.workspace_dir, max_status_lines=30, max_commits=5))
 
-        # 3. Key config files content
+        # 3. 关键配置文件内容
         if include_config_files:
-            sections.append("\nKey Config Files Found")
+            sections.append("\n找到的关键配置文件")
             sections.append("=" * 50)
             sections.append(self._find_config_files())
 
             config_content = self._read_config_files_content()
             if config_content:
-                sections.append("\nConfig Files Content")
+                sections.append("\n配置文件内容")
                 sections.append("=" * 50)
                 sections.append(config_content)
 
@@ -95,7 +95,7 @@ class WorkspaceContextTool(Tool):
         return ToolResult(success=True, content=combined)
 
     def _find_config_files(self) -> str:
-        """Find key configuration files."""
+        """查找关键配置文件。"""
         config_patterns = [
             "package.json",
             "tsconfig.json",
@@ -140,7 +140,7 @@ class WorkspaceContextTool(Tool):
         return "\n".join(found) if found else "No config files found"
 
     def _read_config_files_content(self) -> str:
-        """Read content of key config files."""
+        """读取关键配置文件的内容。"""
         config_patterns = [
             "pyproject.toml",
             "package.json",

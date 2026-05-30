@@ -2,7 +2,7 @@ import sys
 
 from pypdf import PdfReader
 
-# Script for Claude to run to determine whether a PDF has fillable form fields. See forms.md.
+# 用于让 Claude 运行以确定 PDF 是否具有可填写的表单字段的脚本。参见 forms.md。
 
 
 reader = PdfReader(sys.argv[1])

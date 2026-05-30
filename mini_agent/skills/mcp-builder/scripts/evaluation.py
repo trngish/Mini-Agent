@@ -1,6 +1,6 @@
-"""MCP Server Evaluation Harness
+"""MCP 服务器评估工具
 
-This script evaluates MCP servers by running test questions against them using Claude.
+此脚本通过运行测试问题来评估 MCP 服务器。
 """
 
 import argparse
@@ -53,7 +53,7 @@ Response Requirements:
 
 
 def parse_evaluation_file(file_path: Path) -> list[dict[str, Any]]:
-    """Parse XML evaluation file with qa_pair elements."""
+    """解析包含 qa_pair 元素的 XML 评估文件。"""
     try:
         tree = ET.parse(file_path)
         root = tree.getroot()
@@ -78,7 +78,7 @@ def parse_evaluation_file(file_path: Path) -> list[dict[str, Any]]:
 
 
 def extract_xml_content(text: str, tag: str) -> str | None:
-    """Extract content from XML tags."""
+    """从 XML 标签中提取内容。"""
     pattern = rf"<{tag}>(.*?)</{tag}>"
     matches = re.findall(pattern, text, re.DOTALL)
     return matches[-1].strip() if matches else None
@@ -91,7 +91,7 @@ async def agent_loop(
     tools: list[dict[str, Any]],
     connection: Any,
 ) -> tuple[str, dict[str, Any]]:
-    """Run the agent loop with MCP tools."""
+    """使用 MCP 工具运行代理循环。"""
     messages = [{"role": "user", "content": question}]
 
     response = await asyncio.to_thread(
@@ -164,7 +164,7 @@ async def evaluate_single_task(
     connection: Any,
     task_index: int,
 ) -> dict[str, Any]:
-    """Evaluate a single QA pair with the given tools."""
+    """使用给定工具评估单个问答对。"""
     start_time = time.time()
 
     print(f"Task {task_index + 1}: Running task with question: {qa_pair['question']}")
@@ -227,7 +227,7 @@ async def run_evaluation(
     connection: Any,
     model: str = "claude-3-7-sonnet-20250219",
 ) -> str:
-    """Run evaluation with MCP server tools."""
+    """使用 MCP 服务器工具运行评估。"""
     print("🚀 Starting Evaluation")
 
     client = Anthropic()
@@ -280,7 +280,7 @@ async def run_evaluation(
 
 
 def parse_headers(header_list: list[str]) -> dict[str, str]:
-    """Parse header strings in format 'Key: Value' into a dictionary."""
+    """将格式为 'Key: Value' 的 header 字符串解析为字典。"""
     headers = {}
     if not header_list:
         return headers
@@ -295,7 +295,7 @@ def parse_headers(header_list: list[str]) -> dict[str, str]:
 
 
 def parse_env_vars(env_list: list[str]) -> dict[str, str]:
-    """Parse environment variable strings in format 'KEY=VALUE' into a dictionary."""
+    """将格式为 'KEY=VALUE' 的环境变量字符串解析为字典。"""
     env = {}
     if not env_list:
         return env
@@ -311,17 +311,17 @@ def parse_env_vars(env_list: list[str]) -> dict[str, str]:
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate MCP servers using test questions",
+        description="使用测试问题评估 MCP 服务器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Evaluate a local stdio MCP server
+示例:
+  # 评估本地 stdio MCP 服务器
   python evaluation.py -t stdio -c python -a my_server.py eval.xml
 
-  # Evaluate an SSE MCP server
+  # 评估 SSE MCP 服务器
   python evaluation.py -t sse -u https://example.com/mcp -H "Authorization: Bearer token" eval.xml
 
-  # Evaluate an HTTP MCP server with custom model
+  # 使用自定义模型评估 HTTP MCP 服务器
   python evaluation.py -t http -u https://example.com/mcp -m claude-3-5-sonnet-20241022 eval.xml
         """,
     )

@@ -1,4 +1,4 @@
-"""Mini Agent - Minimal single agent with basic tools and MCP support."""
+"""Mini Agent - 轻量级单一智能体，支持基础工具和 MCP。"""
 
 from .agent import Agent
 from .config import RetryConfig

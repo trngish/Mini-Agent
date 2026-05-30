@@ -484,7 +484,7 @@ def create_cache_for_workspace(workspace_dir: str | Path) -> ContextCache:
     workspaces never share cached file content.
     """
     import hashlib
-    ws_hash = hashlib.md5(str(workspace_dir).encode()).hexdigest()[:12]
+    ws_hash = hashlib.sha256(str(workspace_dir).encode()).hexdigest()[:12]
     return get_context_cache(f"ws:{ws_hash}")
 
 

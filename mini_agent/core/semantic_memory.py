@@ -14,8 +14,11 @@ Categories:
 
 from __future__ import annotations
 
+import json
+import logging
 import hashlib
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -23,10 +26,12 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class MemoryEntry:
-    """A single extracted semantic memory."""
+    """单个提取的语义记忆。"""
 
     id: str
     category: str
@@ -39,14 +44,14 @@ class MemoryEntry:
     _last_access: float = 0.0
 
     def access(self) -> None:
-        """Mark as accessed (updates relevance)."""
+        """标记为已访问（更新相关性）。"""
         import time
         self.access_count += 1
         self._last_access = time.time()
 
     def decay(self, days_since_creation: float) -> None:
-        """Apply time-based relevance decay."""
-        # Half-life of 30 days
+        """应用基于时间的相关性衰减。"""
+        # 半衰期为30天
         self.relevance_score = max(0.1, self.relevance_score * (0.5 ** (days_since_creation / 30)))
 
 
@@ -96,13 +101,13 @@ class SemanticMemory:
         ],
     }
 
-    # Minimum content length to consider for extraction
+    # 每个类别最少内容长度
     MIN_CONTENT_LENGTH = 50
 
-    # Maximum memories per category
+    # 每个类别最多记忆条数
     MAX_MEMORIES_PER_CATEGORY = 50
 
-    # Path for persistent storage
+    # 持久化存储路径
     DEFAULT_MEMORY_DIR = Path.home() / ".mini-agent" / "memory"
 
     def __init__(self, workspace_dir: Path | None = None, memory_dir: Path | None = None):
@@ -119,7 +124,7 @@ class SemanticMemory:
         if memory_dir:
             self._memory_dir = memory_dir
         elif workspace_dir:
-            ws_hash = hashlib.md5(str(workspace_dir.absolute()).encode()).hexdigest()[:12]
+            ws_hash = hashlib.sha256(str(workspace_dir.absolute()).encode()).hexdigest()[:12]
             self._memory_dir = self.DEFAULT_MEMORY_DIR / ws_hash
         else:
             self._memory_dir = self.DEFAULT_MEMORY_DIR / "__global__"
@@ -127,7 +132,7 @@ class SemanticMemory:
         self._memory_dir.mkdir(parents=True, exist_ok=True)
         self._memory_file = self._memory_dir / "memories.json"
 
-    # --- Extraction ---
+    # --- 提取 ---
 
     def extract_from_message(self, content: str, session_id: str = "", step: int = 0) -> list[MemoryEntry]:
         """Extract semantic memories from an assistant message.
@@ -153,11 +158,11 @@ class SemanticMemory:
         for category, patterns in self.EXTRACTION_PATTERNS.items():
             category_entries = 0
             for pattern, base_score in patterns:
-                if category_entries >= 10:  # Max 10 per category per message
+                if category_entries >= 10:  # 每个消息每个类别最多10条
                     break
                 for match in re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE):
                     extracted = match.group(1).strip()
-                    # Deduplicate and filter noise
+                    # 去重并过滤噪音
                     if len(extracted) < 8 or len(extracted) > 500:
                         continue
                     normalized = extracted.lower().strip(".,;:!?。，；：！？")  # noqa: RUF001
@@ -202,10 +207,10 @@ class SemanticMemory:
 
         return all_entries
 
-    # --- Persistence ---
+    # --- 持久化 ---
 
     def _load(self) -> None:
-        """Load memories from disk."""
+        """从磁盘加载记忆。"""
         if self._loaded:
             return
         with self._lock:
@@ -218,12 +223,12 @@ class SemanticMemory:
                     for entry_data in data.get("entries", []):
                         entry = MemoryEntry(**entry_data)
                         self._entries[entry.id] = entry
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load semantic memory: {e}")
             self._loaded = True
 
     def _save(self) -> None:
-        """Save memories to disk atomically."""
+        """原子化保存记忆到磁盘。"""
         try:
             import json
             data = {
@@ -246,8 +251,8 @@ class SemanticMemory:
             tmp_path = self._memory_file.with_suffix(".tmp")
             tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp_path.replace(self._memory_file)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to save semantic memory: {e}")
 
     def add_entries(self, entries: list[MemoryEntry]) -> int:
         """Add extracted memories to the store.
@@ -262,7 +267,7 @@ class SemanticMemory:
         added = 0
         with self._lock:
             for entry in entries:
-                # Deduplicate by normalized content
+                # 通过规范化内容去重
                 normalized = entry.content.lower().strip()
                 is_duplicate = any(
                     e.content.lower().strip() == normalized
@@ -278,20 +283,20 @@ class SemanticMemory:
         return added
 
     def _prune_by_category(self) -> None:
-        """Remove oldest/lowest-relevance memories when per-category limit exceeded."""
+        """当超过每类别限制时，移除最旧/最低相关性的记忆。"""
         by_category: dict[str, list[MemoryEntry]] = {}
         for entry in self._entries.values():
             by_category.setdefault(entry.category, []).append(entry)
 
         for category, entries in by_category.items():
             if len(entries) > self.MAX_MEMORIES_PER_CATEGORY:
-                # Sort by relevance (ascending) and remove lowest
+                # 按相关性升序排序并移除最低的
                 entries.sort(key=lambda e: e.relevance_score)
                 to_remove = entries[: len(entries) - self.MAX_MEMORIES_PER_CATEGORY]
                 for e in to_remove:
                     del self._entries[e.id]
 
-    # --- Query ---
+    # --- 查询 ---
 
     def get_context_for_injection(self, max_entries: int = 8) -> str:
         """Get top memories formatted for system prompt injection.
@@ -315,8 +320,13 @@ class SemanticMemory:
             now = time.time()
             scored = []
             for entry in self._entries.values():
-                # Boost recently accessed + high initial relevance
-                recency_boost = min(2.0, 1.0 + (entry._last_access / max(now, 1)) if entry._last_access else 1.0)
+                # 提升近期访问的 + 高初始相关性
+                # 基于30天半衰期计算 recency boost
+                if entry._last_access > 0:
+                    days_since_access = (now - entry._last_access) / 86400  # 转换为天数
+                    recency_boost = min(2.0, 1.0 + max(0, 1.0 - days_since_access / 30))
+                else:
+                    recency_boost = 1.0  # 从未访问，无 boost
                 score = entry.relevance_score * recency_boost
                 scored.append((score, entry))
 
@@ -369,7 +379,7 @@ class SemanticMemory:
                 if category and entry.category != category:
                     continue
                 content_lower = entry.content.lower()
-                # Simple overlap score
+                # 简单的重叠得分
                 query_terms = query_lower.split()
                 matches = sum(1 for t in query_terms if t in content_lower)
                 if matches > 0:

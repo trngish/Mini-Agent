@@ -1202,7 +1202,7 @@ class TestPrintToolResult:
 
     def test_print_long_success_result_truncated(self, capsys):
         engine = _make_engine()
-        long_content = "x" * 400
+        long_content = "x" * 900
         result = ToolResult(success=True, content=long_content)
         engine._print_tool_result(result)
         captured = capsys.readouterr()

@@ -1,4 +1,4 @@
-"""Anthropic LLM client implementation."""
+"""Anthropic LLM 客户端实现。"""
 
 import asyncio
 import json
@@ -20,7 +20,7 @@ from ..utils.model_utils import (
 )
 from .base import LLMClientBase
 
-# Constants - avoid magic numbers
+# 常量 - 避免使用魔法数字
 STREAM_BUFFER_SIZE = int(os.environ.get("MINI_AGENT_STREAM_BUFFER_SIZE", "8"))
 DEFAULT_TIMEOUT_SECONDS = 300
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StreamedResponse:
-    """Accumulated data from streaming response."""
+    """流式响应的累积数据。"""
 
     text: str = ""
     thinking: str = ""
@@ -42,12 +42,12 @@ class StreamedResponse:
 
 
 class AnthropicClient(LLMClientBase):
-    """LLM client using Anthropic's protocol.
+    """使用 Anthropic 协议的 LLM 客户端。
 
-    This client uses the official Anthropic SDK and supports:
-    - Extended thinking content
-    - Tool calling
-    - Retry logic
+    该客户端使用官方 Anthropic SDK，支持：
+    - 扩展思考内容
+    - 工具调用
+    - 重试逻辑
     """
 
     def __init__(
@@ -57,45 +57,44 @@ class AnthropicClient(LLMClientBase):
         model: str = "MiniMax-M2.5",
         retry_config: RetryConfig | None = None,
     ):
-        """Initialize Anthropic client.
+        """初始化 Anthropic 客户端。
 
         Args:
-            api_key: API key for authentication
-            api_base: Base URL for the API (default: MiniMax Anthropic endpoint)
-            model: Model name to use (default: MiniMax-M2.5)
-            retry_config: Optional retry configuration
+            api_key: 用于认证的 API 密钥
+            api_base: API 基础 URL（默认：MiniMax Anthropic 端点）
+            model: 使用的模型名称（默认：MiniMax-M2.5）
+            retry_config: 可选的重试配置
         """
         super().__init__(api_key, api_base, model, retry_config)
 
-        # Initialize Anthropic async client
+        # 初始化 Anthropic 异步客户端
         self.client = anthropic.AsyncAnthropic(
             base_url=api_base,
             api_key=api_key,
         )
 
-        # M2.7 configuration attributes
+        # M2.7 配置属性
         self._enable_extended_thinking = True
-        self._thinking_budget_tokens = 8192  # Default, can be updated via configure_m27 or configure_thinking_budget
+        self._thinking_budget_tokens = 8192  # 默认值，可通过 configure_m27 或 configure_thinking_budget 更新
 
     def configure_thinking_budget(self, budget: int) -> None:
-        """Configure thinking budget dynamically.
+        """动态配置思考预算。
 
-        This is the official API for adjusting thinking budget at runtime
-        based on task complexity analysis.
+        这是用于根据任务复杂度分析在运行时调整思考预算的官方 API。
 
         Args:
-            budget: Thinking budget in tokens (0 to disable)
+            budget: 以 token 为单位的思考预算（0 表示禁用）
         """
         self._thinking_budget_tokens = max(0, min(budget, 32768))
 
     def configure_m27(self, config: dict[str, Any]) -> None:
-        """Configure M2.7 specific settings.
+        """配置 M2.7 特定设置。
 
         Args:
-            config: M2.7 configuration dict from Config.m27
+            config: 来自 Config.m27 的 M2.7 配置字典
         """
         self._enable_extended_thinking = config.get("enable_extended_thinking", True)
-        # Use configured budget or default to 16K
+        # 使用配置的 budget 或默认为 16K
         configured_budget = config.get("thinking_budget_tokens", 16384)
         self._thinking_budget_tokens = min(configured_budget, 32768)
 
@@ -107,20 +106,20 @@ class AnthropicClient(LLMClientBase):
         on_text: Callable[[str], None] | None = None,
         on_thinking: Callable[[str], None] | None = None,
     ) -> StreamedResponse:
-        """Execute API request with streaming (core method that can be retried).
+        """执行带流式处理的 API 请求（可重试的核心方法）。
 
         Args:
-            system_message: Optional system message
-            api_messages: List of messages in Anthropic format
-            tools: Optional list of tools
-            on_text: Optional callback for incremental text content
-            on_thinking: Optional callback for incremental thinking content
+            system_message: 可选的系统消息
+            api_messages: Anthropic 格式的消息列表
+            tools: 可选的工具列表
+            on_text: 用于增量文本内容的可选回调
+            on_thinking: 用于增量思考内容的可选回调
 
         Returns:
-            StreamedResponse containing accumulated response data
+            包含累积响应数据的 StreamedResponse
 
         Raises:
-            Exception: API call failed
+            Exception: API 调用失败
         """
         params = {
             "model": self.model,
@@ -130,8 +129,8 @@ class AnthropicClient(LLMClientBase):
         }
 
         if system_message:
-            # Per-call billing optimization: use prompt caching to reduce repeated processing
-            # cache_control marks let the API cache the system prompt for reuse in subsequent calls
+            # 按调用计费优化：使用提示缓存减少重复处理
+            # cache_control 标记让 API 缓存系统提示以便后续调用重用
             params["system"] = [
                 {
                     "type": "text",
@@ -154,15 +153,15 @@ class AnthropicClient(LLMClientBase):
         current_tool_id = None
         tool_call_index = 0
 
-        # Use deque for efficient buffer management with maxlen
-        buffer_size = STREAM_BUFFER_SIZE  # Configurable via MINI_AGENT_STREAM_BUFFER_SIZE
+        # 使用 deque 进行高效的缓冲区管理，设置 maxlen
+        buffer_size = STREAM_BUFFER_SIZE  # 可通过 MINI_AGENT_STREAM_BUFFER_SIZE 配置
         text_buffer: deque[str] = deque(maxlen=buffer_size)
         thinking_buffer: deque[str] = deque(maxlen=buffer_size)
 
         try:
             stream = await self.client.messages.create(**params)  # type: ignore[call-overload]
-            # Use configurable timeout from retry_config, default to 300s for backward compatibility
-            timeout = self.retry_config.max_delay if self.retry_config else 300
+            # 使用可配置的流式超时时间，默认为 300s
+            timeout = DEFAULT_TIMEOUT_SECONDS
             async with asyncio.timeout(timeout):  # type: ignore[attr-defined]
                 async for event in stream:
                     try:
@@ -214,20 +213,20 @@ class AnthropicClient(LLMClientBase):
                         logger.warning("Error processing stream event: %s", e)
                         continue
 
-            # Integrity check: ensure we received meaningful content
-            # If both text and thinking are empty but we didn't stop properly, log warning
+            # 完整性检查：确保收到有意义的内容
+            # 如果 text 和 thinking 都为空但 stop_reason 为 "stop"，则记录警告（可能是截断）
             if not result.text and not result.thinking and not result.tool_calls and result.stop_reason == "stop":
                 logger.warning("Stream completed but received no content - possible truncation")
 
-            # Flush remaining buffers
+            # 刷新剩余缓冲区
             if text_buffer and on_text:
                 on_text("".join(text_buffer))
             if thinking_buffer and on_thinking:
                 on_thinking("".join(thinking_buffer))
 
         except (TimeoutError, asyncio.TimeoutError):
-            logger.error("Stream timed out after 300s")
-            # Mark result as incomplete
+            logger.error(f"Stream timed out after {timeout}s")
+            # 将结果标记为不完整
             result.stop_reason = "timeout"
             raise
         except Exception as e:
@@ -237,22 +236,22 @@ class AnthropicClient(LLMClientBase):
         return result
 
     def _get_max_tokens(self) -> int:
-        """Get max tokens based on model type.
+        """根据模型类型获取最大 token 数。
 
-        Uses unified model utilities for consistent configuration.
+        使用统一的模型工具实现一致的配置。
         """
         return get_max_output_tokens(self.model)
 
     def _get_thinking_config(self) -> dict[str, Any] | None:
-        """Get extended thinking configuration for M2.7.
+        """获取 M2.7 的扩展思考配置。
 
-        M2.7 supports extended thinking with budget up to 32K tokens.
-        Per-call billing optimization: deeper thinking → higher accuracy → fewer total calls
+        M2.7 支持最高 32K token 的扩展思考。
+        按调用计费优化：更深入的思考 -> 更高的准确率 -> 更少的总调用次数
 
-        Reference: https://www.minimaxi.com/models/text/m27
+        参考：https://www.minimaxi.com/models/text/m27
 
         Returns:
-            Thinking configuration dict or None if disabled
+            思考配置字典，如果禁用则返回 None
         """
         if not is_m27_model(self.model):
             return None
@@ -270,9 +269,9 @@ class AnthropicClient(LLMClientBase):
         }
 
     def _convert_tools(self, tools: list[Any]) -> list[dict[str, Any]]:
-        """Convert tools to Anthropic format.
+        """将工具转换为 Anthropic 格式。
 
-        Anthropic tool format:
+        Anthropic 工具格式：
         {
             "name": "tool_name",
             "description": "Tool description",
@@ -284,10 +283,10 @@ class AnthropicClient(LLMClientBase):
         }
 
         Args:
-            tools: List of Tool objects or dicts
+            tools: Tool 对象或字典的列表
 
         Returns:
-            List of tools in Anthropic dict format
+            Anthropic 字典格式的工具列表
         """
         result = []
         for tool in tools:
@@ -300,23 +299,23 @@ class AnthropicClient(LLMClientBase):
         return result
 
     def _convert_messages(self, messages: list[Message]) -> tuple[str | None, list[dict[str, Any]]]:
-        """Convert internal messages to Anthropic format.
+        """将内部消息转换为 Anthropic 格式。
 
-        Per-call billing optimization:
-        - Enable prompt caching to reduce repeated token processing (tokens are free but caching speeds up response)
-        - Preserve complete tool results (tokens are free, more complete info = higher accuracy)
-        - Mark the last user message to improve multi-turn cache hit rate
+        按调用计费优化：
+        - 启用提示缓存以减少重复的 token 处理（token 是免费的，但缓存可加快响应速度）
+        - 保留完整的工具结果（token 是免费的，更完整的信息 = 更高的准确率）
+        - 标记最后一个用户消息以提高多轮缓存命中率
 
         Args:
-            messages: List of internal Message objects
+            messages: 内部 Message 对象的列表
 
         Returns:
-            Tuple of (system_message, api_messages)
+            (system_message, api_messages) 元组
         """
         system_message = None
         api_messages = []
 
-        # Find the index of the last user message for cache_control
+        # 查找最后一个 user 消息的索引用于 cache_control
         last_user_idx = -1
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].role == "user":
@@ -326,7 +325,7 @@ class AnthropicClient(LLMClientBase):
         msg_idx = 0
         for msg in messages:
             if msg.role == "system":
-                # Add cache control to system message for prompt caching
+                # 为系统消息添加缓存控制以实现提示缓存
                 system_message = msg.content
                 msg_idx += 1
                 continue
@@ -358,7 +357,7 @@ class AnthropicClient(LLMClientBase):
 
                     api_messages.append({"role": "assistant", "content": content_blocks})
                 else:
-                    # Add cache_control to the last user message for multi-turn cache reuse
+                    # 为最后一个用户消息添加 cache_control 以实现多轮缓存复用
                     if (
                         msg.role == "user"
                         and msg_idx == last_user_idx
@@ -400,14 +399,14 @@ class AnthropicClient(LLMClientBase):
         messages: list[Message],
         tools: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """Prepare the request for Anthropic API.
+        """准备 Anthropic API 请求。
 
         Args:
-            messages: List of conversation messages
-            tools: Optional list of available tools
+            messages: 对话消息列表
+            tools: 可用的工具列表
 
         Returns:
-            Dictionary containing request parameters
+            包含请求参数的字典
         """
         system_message, api_messages = self._convert_messages(messages)
 
@@ -418,13 +417,13 @@ class AnthropicClient(LLMClientBase):
         }
 
     def _parse_response(self, response: anthropic.types.Message | StreamedResponse) -> LLMResponse:
-        """Parse Anthropic response into LLMResponse.
+        """将 Anthropic 响应解析为 LLMResponse。
 
         Args:
-            response: StreamedResponse (from streaming) or anthropic.types.Message (legacy)
+            response: StreamedResponse（来自流式）或 anthropic.types.Message（遗留格式）
 
         Returns:
-            LLMResponse object
+            LLMResponse 对象
         """
         if isinstance(response, StreamedResponse):
             tool_calls = [
@@ -441,8 +440,8 @@ class AnthropicClient(LLMClientBase):
 
             total_input = (
                 response.input_tokens + response.cache_read_input_tokens
-                # Note: cache_creation_input_tokens intentionally excluded
-                # They represent one-time setup cost, amortized over cache hits
+                # 注意：有意的缓存创建输入 token
+                # 它们代表一次性设置成本，在缓存命中时分摊
             )
             usage = (
                 TokenUsage(
@@ -488,8 +487,8 @@ class AnthropicClient(LLMClientBase):
             input_tokens = response.usage.input_tokens or 0
             output_tokens = response.usage.output_tokens or 0
             cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            # Note: cache_creation_input_tokens intentionally excluded
-            # They represent one-time setup cost, amortized over cache hits
+            # 注意：有意的排除缓存创建输入 token
+            # 它们代表一次性设置成本，在缓存命中时分摊
             total_input_tokens = input_tokens + cache_read_tokens
             usage = TokenUsage(
                 prompt_tokens=total_input_tokens,
@@ -513,16 +512,16 @@ class AnthropicClient(LLMClientBase):
         on_thinking: Callable[[str], None] | None = None,
         **_kwargs: Any,
     ) -> LLMResponse:
-        """Generate response from Anthropic LLM.
+        """从 Anthropic LLM 生成响应。
 
         Args:
-            messages: List of conversation messages
-            tools: Optional list of available tools
-            on_text: Optional callback called incrementally with text content
-            on_thinking: Optional callback called incrementally with thinking content
+            messages: 对话消息列表
+            tools: 可用的工具列表
+            on_text: 用于增量文本内容的可选回调
+            on_thinking: 用于增量思考内容的可选回调
 
         Returns:
-            LLMResponse containing the generated content
+            包含生成内容的 LLMResponse
         """
         request_params = self._prepare_request(messages, tools)
 

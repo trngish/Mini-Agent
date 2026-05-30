@@ -223,7 +223,7 @@ async def test_bash_kill_nonexistent():
     result = await bash_kill_tool.execute(bash_id="nonexistent123")
 
     assert not result.success
-    assert "not found" in result.error.lower()
+    assert "not found" in result.error.lower() or "未找到" in result.error
     print(f"Expected error: {result.error}")
 
 
@@ -236,7 +236,7 @@ async def test_bash_output_nonexistent():
     result = await bash_output_tool.execute(bash_id="nonexistent123")
 
     assert not result.success
-    assert "not found" in result.error.lower()
+    assert "not found" in result.error.lower() or "未找到" in result.error
     print(f"Expected error: {result.error}")
 
 

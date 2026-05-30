@@ -298,6 +298,7 @@ class TestSessionManagement:
                 Message(role="user", content="hi"),
             ],
             "task result",
+            {},
         )
         result = agent.load_session("abc123")
         assert result is True
@@ -307,7 +308,7 @@ class TestSessionManagement:
 
     def test_load_session_returns_none_from_manager(self, agent):
         agent._session_manager = MagicMock()
-        agent._session_manager.load.return_value = (None, None)
+        agent._session_manager.load.return_value = (None, None, None)
         result = agent.load_session("missing")
         assert result is False
 

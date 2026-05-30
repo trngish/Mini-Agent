@@ -1,11 +1,11 @@
-"""Self-Healing Engine for Mini-Agent.
+"""Mini-Agent 的自我修复引擎。
 
-Detects runtime anomalies, diagnoses root causes by analyzing source code,
-and auto-applies fixes to the editable-installed project. Fixes take effect
-on next restart due to `uv tool install -e .`.
+检测运行时异常，通过分析源代码诊断根本原因，
+并自动将修复应用到可编辑安装的项目。由于 `uv tool install -e .`，
+修复在下次重启后生效。
 
-Safety: Backups are created before every fix. Rollback is always available.
-Auto-heal is opt-in via MINI_AGENT_AUTO_HEAL=1 environment variable.
+安全性：每次修复前都会创建备份。始终可以回滚。
+自动修复通过 MINI_AGENT_AUTO_HEAL=1 环境变量选择加入。
 """
 
 from __future__ import annotations
@@ -28,11 +28,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AnomalyRecord:
-    """A detected anomaly event."""
+    """检测到的异常事件。"""
 
     id: str
     category: str
-    severity: float  # 0-1, higher = more severe
+    severity: float  # 0-1，值越高越严重
     details: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
     source_step: int = 0
@@ -44,7 +44,7 @@ class AnomalyRecord:
 
 @dataclass
 class FixRecord:
-    """A record of an applied self-healing fix."""
+    """已应用的自我修复记录的记录。"""
 
     id: str
     anomaly_ids: list[str] = field(default_factory=list)
@@ -62,15 +62,14 @@ class FixRecord:
 
 
 class SelfHealingManager:
-    """Manages anomaly detection, diagnosis, and auto-fix for Mini-Agent.
+    """管理 Mini-Agent 的异常检测、诊断和自动修复。
 
-    Monitors agent execution for patterns indicating bugs or inefficiencies,
-    then diagnoses and applies fixes to its own source code. Since the project
-    is installed via `uv tool install -e .`, source changes take effect
-    on the next agent restart.
+    监控智能体执行以发现表明错误或低效的模式，
+    然后诊断并修复其自身的源代码。由于项目通过 `uv tool install -e .` 安装，
+    源代码更改在下次智能体重启时生效。
     """
 
-    # Anomaly score thresholds by category
+    # 按类别划分的异常分数阈值
     CATEGORY_THRESHOLDS: dict[str, float] = {
         "tool_failure_rate": 0.6,
         "llm_error_pattern": 0.5,
@@ -81,16 +80,16 @@ class SelfHealingManager:
         "summary_degradation": 0.6,
     }
 
-    # Score decay: scores halve every N steps to avoid false accumulation
+    # 分数衰减：每 N 步分数减半以避免误累积
     SCORE_HALF_LIFE_STEPS = 20
 
-    # Minimum steps between heal attempts
+    # 修复尝试之间的最小步数
     MIN_STEPS_BETWEEN_HEALS = 25
 
-    # Maximum concurrent fixes per session
+    # 每次会话的最大并发修复数
     MAX_FIXES_PER_SESSION = 3
 
-    # Default backup directory
+    # 默认备份目录
     DEFAULT_BACKUP_DIR = Path.home() / ".mini-agent" / "heal_backups"
 
     def __init__(
@@ -100,13 +99,13 @@ class SelfHealingManager:
         auto_heal: bool | None = None,
         llm_client: Any = None,
     ):
-        """Initialize self-healing manager.
+        """初始化自我修复管理器。
 
-        Args:
-            source_dir: Mini-Agent source directory (auto-detected if None).
-            backup_dir: Directory for backup files before fixes.
-            auto_heal: Enable automatic healing (env-controlled if None).
-            llm_client: LLM client for diagnosis sub-agent calls.
+        参数:
+            source_dir: Mini-Agent 源代码目录（如果为 None 则自动检测）。
+            backup_dir: 修复前备份文件的目录。
+            auto_heal: 启用自动修复（如果为 None 则由环境变量控制）。
+            llm_client: 用于诊断子智能体调用的 LLM 客户端。
         """
         self._lock = Lock()
         self._scores: dict[str, float] = {}  # category -> accumulated score
@@ -116,11 +115,11 @@ class SelfHealingManager:
         self._last_heal_step: int = -1
         self._step_count: int = 0
 
-        # Source directory for self-modification
+        # 自我修改的源代码目录
         if source_dir:
             self._source_dir = source_dir
         else:
-            # Auto-detect: look for mini_agent package directory
+            # 自动检测：查找 mini_agent 包目录
             try:
                 import mini_agent
                 pkg_dir = Path(mini_agent.__file__).parent
@@ -128,23 +127,23 @@ class SelfHealingManager:
             except ImportError:
                 self._source_dir = Path.cwd()
 
-        # Backup directory
+        # 备份目录
         self._backup_dir = backup_dir or self.DEFAULT_BACKUP_DIR
         self._backup_dir.mkdir(parents=True, exist_ok=True)
 
-        # Auto-heal mode
+        # 自动修复模式
         if auto_heal is None:
             auto_heal = os.environ.get("MINI_AGENT_AUTO_HEAL", "0") == "1"
         self._auto_heal = auto_heal
 
-        # LLM client for diagnosis
+        # 用于诊断的 LLM 客户端
         self._llm_client = llm_client
 
-        # Fix history file
+        # 修复历史文件
         self._history_file = self._backup_dir / "fix_history.json"
         self._load_history()
 
-    # --- Anomaly Recording ---
+    # --- 异常记录 ---
 
     def record_anomaly(
         self,
@@ -153,13 +152,13 @@ class SelfHealingManager:
         details: dict[str, Any] | None = None,
         step: int = 0,
     ) -> None:
-        """Record an anomaly event and update category scores.
+        """记录异常事件并更新类别分数。
 
-        Args:
-            category: Anomaly category (tool_failure_rate, llm_error_pattern, etc.)
-            severity: Severity score 0-1.
-            details: Additional diagnostic details.
-            step: Current agent step number.
+        参数:
+            category: 异常类别（tool_failure_rate、llm_error_pattern 等）。
+            severity: 严重程度分数 0-1。
+            details: 额外的诊断细节。
+            step: 当前智能体步骤编号。
         """
         anomaly = AnomalyRecord(
             id=str(uuid.uuid4())[:12],
@@ -172,10 +171,10 @@ class SelfHealingManager:
         with self._lock:
             self._anomalies.append(anomaly)
             current = self._scores.get(category, 0.0)
-            # Exponential weighted accumulation
+            # 指数加权累积
             self._scores[category] = min(1.0, current + severity * 0.3)
 
-            # Keep only last 100 anomalies
+            # 只保留最近 100 个异常
             if len(self._anomalies) > 100:
                 self._anomalies = self._anomalies[-100:]
 
@@ -186,10 +185,10 @@ class SelfHealingManager:
             )
 
     def tick(self, step: int) -> None:
-        """Called each agent step to decay scores and check thresholds."""
+        """每个智能体步骤调用以衰减分数并检查阈值。"""
         self._step_count = step
         with self._lock:
-            # Decay scores (half-life every SCORE_HALF_LIFE_STEPS)
+            # 衰减分数（每 SCORE_HALF_LIFE_STEPS 步减半）
             decay = 0.5 ** (1.0 / self.SCORE_HALF_LIFE_STEPS)
             for cat in list(self._scores.keys()):
                 self._scores[cat] *= decay
@@ -197,12 +196,12 @@ class SelfHealingManager:
                     del self._scores[cat]
 
     def should_heal(self, step: int) -> tuple[bool, str]:
-        """Check if self-healing should trigger.
+        """检查是否应触发自我修复。
 
-        Returns:
-            Tuple of (should_heal, reason).
+        返回:
+            (should_heal, reason) 的元组。
         """
-        # Rate limiting
+        # 速率限制
         if step - self._last_heal_step < self.MIN_STEPS_BETWEEN_HEALS:
             return False, "too_soon"
 
@@ -218,24 +217,23 @@ class SelfHealingManager:
         return False, "below_threshold"
 
     def get_top_anomaly_categories(self, top_n: int = 3) -> list[tuple[str, float]]:
-        """Get highest-scoring anomaly categories for diagnosis."""
+        """获取评分最高的异常类别以供诊断。"""
         with self._lock:
             sorted_items = sorted(self._scores.items(), key=lambda x: x[1], reverse=True)
             return sorted_items[:top_n]
 
-    # --- Diagnosis ---
+    # --- 诊断 ---
 
     async def diagnose(self, anomaly_categories: list[tuple[str, float]]) -> dict[str, Any]:
-        """Diagnose root causes of accumulated anomalies.
+        """诊断累积异常的根本原因。
 
-        Reads relevant source files based on anomaly categories and analyzes
-        them to identify fixable issues.
+        根据异常类别读取相关源文件并分析它们以识别可修复的问题。
 
-        Args:
-            anomaly_categories: List of (category, score) tuples.
+        参数:
+            anomaly_categories: (category, score) 元组列表。
 
-        Returns:
-            Diagnosis result with suggested fixes and target files.
+        返回:
+            包含建议修复和目标文件的诊断结果。
         """
         diagnosis: dict[str, Any] = {
             "categories": [c for c, _ in anomaly_categories],
@@ -268,7 +266,7 @@ class SelfHealingManager:
 
         diagnosis["files_to_check"] = list(files_to_check)[:10]  # Limit files
 
-        # Try LLM-based diagnosis if client available
+        # 如果有 LLM 客户端则尝试基于 LLM 的诊断
         if self._llm_client and files_to_check:
             try:
                 llm_diagnosis = await self._llm_diagnose(
@@ -287,21 +285,21 @@ class SelfHealingManager:
         anomaly_categories: list[tuple[str, float]],
         files: list[str],
     ) -> list[dict[str, Any]]:
-        """Use LLM to analyze source files and suggest fixes.
+        """使用 LLM 分析源文件并建议修复。
 
-        Args:
-            anomaly_categories: Detected anomaly categories and scores.
-            files: Source files to analyze.
+        参数:
+            anomaly_categories: 检测到的异常类别及其分数。
+            files: 要分析的源文件。
 
-        Returns:
-            List of suggested fix dicts with file, description, and code changes.
+        返回:
+            包含 file、description 和代码更改的建议修复字典列表。
         """
-        # Read relevant source files
+        # 读取相关的源文件
         file_contents: dict[str, str] = {}
-        for f in files[:5]:  # Limit to 5 files to avoid token overflow
+        for f in files[:5]:  # 限制为 5 个文件以避免令牌溢出
             try:
                 content = Path(f).read_text(encoding="utf-8")
-                # Truncate very large files
+                # 截断非常大的文件
                 if len(content) > 8000:
                     content = content[:8000] + "\n... [truncated]"
                 file_contents[Path(f).name] = content
@@ -311,7 +309,7 @@ class SelfHealingManager:
         if not file_contents:
             return []
 
-        # Build diagnosis prompt
+        # 构建诊断提示
         anomaly_desc = "\n".join(
             f"- {cat} (score: {score:.2f})" for cat, score in anomaly_categories
         )
@@ -363,7 +361,7 @@ Only include fixes you are confident about. Skip if unsure."""
 
         return []
 
-    # --- Fix Application ---
+    # --- 修复应用 ---
 
     def apply_fix(
         self,
@@ -373,19 +371,19 @@ Only include fixes you are confident about. Skip if unsure."""
         new_str: str,
         anomaly_ids: list[str] | None = None,
     ) -> FixRecord | None:
-        """Apply a single self-healing fix to a source file.
+        """对源文件应用单个自我修复。
 
-        Creates a backup, applies the edit, and records the fix.
+        创建备份、应用编辑并记录修复。
 
-        Args:
-            file_name: Relative file name in mini_agent/ directory.
-            description: Human-readable fix description.
-            old_str: Text to replace.
-            new_str: Replacement text.
-            anomaly_ids: Related anomaly IDs.
+        参数:
+            file_name: mini_agent/ 目录中的相对文件名。
+            description: 人类可读的修复描述。
+            old_str: 要替换的文本。
+            new_str: 替换文本。
+            anomaly_ids: 相关的异常 ID。
 
-        Returns:
-            FixRecord if successfully applied, None otherwise.
+        返回:
+            如果成功应用则返回 FixRecord，否则返回 None。
         """
         file_path = self._source_dir / "mini_agent" / file_name
 
@@ -442,7 +440,7 @@ Only include fixes you are confident about. Skip if unsure."""
             return None
 
     def _create_backup(self, file_path: Path, fix_id: str) -> str:
-        """Create a timestamped backup of a file before modification."""
+        """在修改前创建文件的时间戳备份。"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"{file_path.name}.{timestamp}_{fix_id}.bak"
         backup_path = self._backup_dir / backup_name
@@ -451,7 +449,7 @@ Only include fixes you are confident about. Skip if unsure."""
 
     @staticmethod
     def _compute_diff(original: str, modified: str) -> str:
-        """Compute a simple diff summary."""
+        """计算简单的差异摘要。"""
         orig_lines = original.split("\n")
         mod_lines = modified.split("\n")
 
@@ -466,13 +464,13 @@ Only include fixes you are confident about. Skip if unsure."""
         return "\n".join(changes[:20])
 
     def rollback(self, fix_id: str) -> bool:
-        """Rollback a previously applied fix.
+        """回滚先前应用的修复。
 
-        Args:
-            fix_id: ID of the fix to rollback.
+        参数:
+            fix_id: 要回滚的修复的 ID。
 
-        Returns:
-            True if rollback successful.
+        返回:
+            如果回滚成功则返回 True。
         """
         with self._lock:
             for fix in self._fixes:
@@ -488,10 +486,10 @@ Only include fixes you are confident about. Skip if unsure."""
                             logger.error("Self-heal rollback failed: %s", e)
         return False
 
-    # --- Persistence ---
+    # --- 持久化 ---
 
     def _load_history(self) -> None:
-        """Load fix history from disk."""
+        """从磁盘加载修复历史。"""
         try:
             if self._history_file.exists():
                 data = json.loads(self._history_file.read_text(encoding="utf-8"))
@@ -501,7 +499,7 @@ Only include fixes you are confident about. Skip if unsure."""
             pass
 
     def _save_history(self) -> None:
-        """Save fix history to disk."""
+        """将修复历史保存到磁盘。"""
         try:
             data = {
                 "fixes": [
@@ -527,10 +525,10 @@ Only include fixes you are confident about. Skip if unsure."""
         except Exception:
             pass
 
-    # --- Status ---
+    # --- 状态 ---
 
     def get_status(self) -> dict[str, Any]:
-        """Get current self-healing status for reporting."""
+        """获取当前自我修复状态以供报告。"""
         with self._lock:
             return {
                 "auto_heal_enabled": self._auto_heal,
@@ -543,7 +541,7 @@ Only include fixes you are confident about. Skip if unsure."""
             }
 
     def get_healing_report(self) -> str:
-        """Generate a human-readable healing report."""
+        """生成人类可读的修复报告。"""
         status = self.get_status()
 
         lines = [

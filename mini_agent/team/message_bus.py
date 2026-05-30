@@ -1,7 +1,6 @@
-"""Message bus for inter-agent communication in Agent Team.
+"""Message Bus - 智能体团队内部通信的消息传递系统。
 
-This module provides a message-passing system for agents to communicate
-within a team, enabling role-boundary isolation and structured dialogue.
+本模块提供智能体在团队内通信的消息传递系统，支持角色边界隔离和结构化对话。
 """
 
 from collections import defaultdict
@@ -12,7 +11,7 @@ from typing import Any
 
 
 class MessagePriority(str, Enum):
-    """Message priority levels."""
+    """消息优先级级别。"""
 
     LOW = "low"
     NORMAL = "normal"
@@ -21,32 +20,32 @@ class MessagePriority(str, Enum):
 
 
 class MessageType(str, Enum):
-    """Types of messages in team communication."""
+    """团队通信中的消息类型。"""
 
-    TASK = "task"  # New task assignment
-    RESULT = "result"  # Task completion result
-    FEEDBACK = "feedback"  # Feedback on work
-    QUESTION = "question"  # Question to another agent
-    ANSWER = "answer"  # Answer to a question
-    APPROVAL = "approval"  # Approval or rejection
-    ESCALATION = "escalation"  # Escalate to higher authority
-    BROADCAST = "broadcast"  # Broadcast to all agents
+    TASK = "task"  # 新任务分配
+    RESULT = "result"  # 任务完成结果
+    FEEDBACK = "feedback"  # 工作反馈
+    QUESTION = "question"  # 向另一个智能体提问
+    ANSWER = "answer"  # 问题回答
+    APPROVAL = "approval"  # 批准或拒绝
+    ESCALATION = "escalation"  # 升级到更高层级
+    BROADCAST = "broadcast"  # 向所有智能体广播
 
 
 @dataclass
 class TeamMessage:
-    """A message passed between agents in a team.
+    """团队中智能体之间传递的消息。
 
     Attributes:
-        id: Unique message identifier
-        type: Message type
-        sender: Name of sending agent (or "coordinator")
-        recipient: Name of receiving agent ("coordinator" or specific agent name)
-                   Use "*" for broadcast messages
-        content: Message content
-        priority: Message priority
-        metadata: Additional metadata (task_id, dependencies, etc.)
-        timestamp: When the message was created
+        id: 唯一消息标识符
+        type: 消息类型
+        sender: 发送智能体的名称（或 "coordinator"）
+        recipient: 接收智能体的名称（"coordinator" 或特定智能体名称）
+                   使用 "*" 进行广播消息
+        content: 消息内容
+        priority: 消息优先级
+        metadata: 附加元数据（task_id、依赖等）
+        timestamp: 消息创建时间
     """
 
     id: str
@@ -59,7 +58,7 @@ class TeamMessage:
     timestamp: datetime = field(default_factory=datetime.now)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for serialization."""
+        """转换为字典以便序列化。"""
         return {
             "id": self.id,
             "type": self.type.value,
@@ -73,49 +72,49 @@ class TeamMessage:
 
 
 class MessageBus:
-    """Message bus for inter-agent communication.
+    """智能体间通信的消息总线。
 
-    Provides:
-    - Point-to-point messaging between agents
-    - Broadcast messaging
-    - Message queuing with priority handling
-    - Subscription-based message delivery
+    提供：
+    - 智能体之间的点对点消息传递
+    - 广播消息
+    - 优先级处理的消息队列
+    - 基于订阅的消息传递
 
     Example:
         bus = MessageBus()
         bus.send(TeamMessage(...))
 
-        # Agent checks its messages
+        # 智能体检查其消息
         messages = bus.receive("my_agent_name")
         bus.receive("my_agent_name", wait=True)
     """
 
     def __init__(self) -> None:
-        # Queue for each recipient: recipient -> list of messages
+        # 每个接收者的队列: recipient -> 消息列表
         self._queues: dict[str, list[TeamMessage]] = defaultdict(list)
-        # All messages for broadcast: list
+        # 所有广播消息: 列表
         self._broadcasts: list[TeamMessage] = []
-        # Message counter for ID generation
+        # 消息计数器，用于生成ID
         self._message_counter = 0
 
     def send(self, message: TeamMessage) -> str:
-        """Send a message through the bus.
+        """通过总线发送消息。
 
         Args:
-            message: The message to send
+            message: 要发送的消息
 
         Returns:
-            The message ID
+            消息ID
         """
         self._message_counter += 1
         if not message.id:
             message.id = f"msg_{self._message_counter}"
 
         if message.recipient == "*":
-            # Broadcast - add to all individual queues
+            # 广播 - 添加到所有单独队列
             self._broadcasts.append(message)
         else:
-            # Point-to-point - add to recipient's queue
+            # 点对点 - 添加到接收者的队列
             self._queues[message.recipient].append(message)
 
         return message.id
@@ -127,30 +126,30 @@ class MessageBus:
         timeout: float = 30.0,  # noqa: ARG002
         max_count: int = 10,
     ) -> list[TeamMessage]:
-        """Receive messages for a recipient.
+        """接收发送给某接收者的消息。
 
         Args:
-            recipient: Name of the receiving agent
-            blocking: If True, wait for messages (not implemented yet)
-            timeout: Maximum time to wait for messages
-            max_count: Maximum messages to return
+            recipient: 接收智能体的名称
+            blocking: 如果为True，则等待消息（尚未实现）
+            timeout: 等待消息的最长时间
+            max_count: 返回的最大消息数
 
         Returns:
-            List of messages for this recipient
+            该接收者的消息列表
         """
         messages = []
 
-        # Get direct messages
+        # 获取直接消息
         direct = self._queues.get(recipient, [])
         messages.extend(direct)
         self._queues[recipient] = []
 
-        # Get broadcasts
+        # 获取广播
         broadcasts = list(self._broadcasts)
         messages.extend(broadcasts)
         self._broadcasts.clear()
 
-        # Sort by priority (critical first)
+        # 按优先级排序（关键消息优先）
         priority_order = {
             MessagePriority.CRITICAL: 0,
             MessagePriority.HIGH: 1,
@@ -162,38 +161,38 @@ class MessageBus:
         return messages[:max_count]
 
     def peek(self, recipient: str, max_count: int = 10) -> list[TeamMessage]:
-        """Peek at messages without removing them.
+        """查看消息但不移除它们。
 
         Args:
-            recipient: Name of the receiving agent
-            max_count: Maximum messages to return
+            recipient: 接收智能体的名称
+            max_count: 返回的最大消息数
 
         Returns:
-            List of messages (still in queue)
+            消息列表（仍在队列中）
         """
         messages = list(self._queues.get(recipient, []))
         messages.extend(self._broadcasts)
         return messages[:max_count]
 
     def has_messages(self, recipient: str) -> bool:
-        """Check if recipient has pending messages.
+        """检查接收者是否有待处理消息。
 
         Args:
-            recipient: Name of the receiving agent
+            recipient: 接收智能体的名称
 
         Returns:
-            True if there are messages waiting
+            如果有消息等待则返回True
         """
         return bool(self._queues.get(recipient) or self._broadcasts)
 
     def clear(self, recipient: str = "*") -> int:
-        """Clear messages for a recipient.
+        """清除某接收者的消息。
 
         Args:
-            recipient: Name of recipient to clear, "*" for all
+            recipient: 要清除的接收者名称，"*" 表示全部
 
         Returns:
-            Number of messages cleared
+            清除的消息数
         """
         if recipient == "*":
             count = sum(len(q) for q in self._queues.values()) + len(self._broadcasts)
@@ -206,7 +205,7 @@ class MessageBus:
             return count
 
     def get_all_recipients(self) -> list[str]:
-        """Get list of all recipients with pending messages."""
+        """获取所有有待处理消息的接收者列表。"""
         return [r for r in self._queues if self._queues[r]]
 
     def send_task(
@@ -217,17 +216,17 @@ class MessageBus:
         priority: MessagePriority = MessagePriority.NORMAL,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        """Convenience method to send a task message.
+        """发送任务消息的便捷方法。
 
         Args:
-            sender: Name of sending agent
-            executor: Name of executor agent
-            task: Task description
-            priority: Message priority
-            metadata: Additional metadata
+            sender: 发送智能体的名称
+            executor: 执行者智能体的名称
+            task: 任务描述
+            priority: 消息优先级
+            metadata: 附加元数据
 
         Returns:
-            Message ID
+            消息ID
         """
         message = TeamMessage(
             id="",
@@ -248,17 +247,17 @@ class MessageBus:
         success: bool = True,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        """Convenience method to send a result message.
+        """发送结果消息的便捷方法。
 
         Args:
-            sender: Name of sending agent
-            recipient: Name of recipient agent
-            result: Result content
-            success: Whether the task was successful
-            metadata: Additional metadata
+            sender: 发送智能体的名称
+            recipient: 接收智能体的名称
+            result: 结果内容
+            success: 任务是否成功
+            metadata: 附加元数据
 
         Returns:
-            Message ID
+            消息ID
         """
         metadata = metadata or {}
         metadata["success"] = success
@@ -279,16 +278,16 @@ class MessageBus:
         priority: MessagePriority = MessagePriority.NORMAL,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        """Convenience method to broadcast a message.
+        """广播消息的便捷方法。
 
         Args:
-            sender: Name of sending agent
-            content: Message content
-            priority: Message priority
-            metadata: Additional metadata
+            sender: 发送智能体的名称
+            content: 消息内容
+            priority: 消息优先级
+            metadata: 附加元数据
 
         Returns:
-            Message ID
+            消息ID
         """
         message = TeamMessage(
             id="",

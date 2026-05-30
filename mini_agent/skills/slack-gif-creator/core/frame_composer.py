@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Frame Composer - Utilities for composing visual elements into frames.
+帧合成器 - 将视觉元素合成到帧中的工具。
 
-Provides functions for drawing shapes, text, emojis, and compositing elements
-together to create animation frames.
+提供用于绘制形状、文本、表情符号和将元素合成在一起来创建动画帧的函数。
 """
 
 import numpy as np
@@ -12,15 +11,15 @@ from PIL import Image, ImageDraw, ImageFont
 
 def create_blank_frame(width: int, height: int, color: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
     """
-    Create a blank frame with solid color background.
+    创建纯色背景的空白帧。
 
     Args:
-        width: Frame width
-        height: Frame height
-        color: RGB color tuple (default: white)
+        width: 帧宽度
+        height: 帧高度
+        color: RGB颜色元组（默认：白色）
 
     Returns:
-        PIL Image
+        PIL图像
     """
     return Image.new("RGB", (width, height), color)
 
@@ -34,18 +33,18 @@ def draw_circle(
     outline_width: int = 1,
 ) -> Image.Image:
     """
-    Draw a circle on a frame.
+    在帧上绘制圆形。
 
     Args:
-        frame: PIL Image to draw on
-        center: (x, y) center position
-        radius: Circle radius
-        fill_color: RGB fill color (None for no fill)
-        outline_color: RGB outline color (None for no outline)
-        outline_width: Outline width in pixels
+        frame: 要绘制的PIL图像
+        center: (x, y) 中心位置
+        radius: 圆半径
+        fill_color: RGB填充颜色（None表示无填充）
+        outline_color: RGB轮廓颜色（None表示无轮廓）
+        outline_width: 轮廓宽度（像素）
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
     x, y = center
@@ -63,18 +62,18 @@ def draw_rectangle(
     outline_width: int = 1,
 ) -> Image.Image:
     """
-    Draw a rectangle on a frame.
+    在帧上绘制矩形。
 
     Args:
-        frame: PIL Image to draw on
-        top_left: (x, y) top-left corner
-        bottom_right: (x, y) bottom-right corner
-        fill_color: RGB fill color (None for no fill)
-        outline_color: RGB outline color (None for no outline)
-        outline_width: Outline width in pixels
+        frame: 要绘制的PIL图像
+        top_left: (x, y) 左上角
+        bottom_right: (x, y) 右下角
+        fill_color: RGB填充颜色（None表示无填充）
+        outline_color: RGB轮廓颜色（None表示无轮廓）
+        outline_width: 轮廓宽度（像素）
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
     draw.rectangle([top_left, bottom_right], fill=fill_color, outline=outline_color, width=outline_width)
@@ -89,17 +88,17 @@ def draw_line(
     width: int = 2,
 ) -> Image.Image:
     """
-    Draw a line on a frame.
+    在帧上绘制线条。
 
     Args:
-        frame: PIL Image to draw on
-        start: (x, y) start position
-        end: (x, y) end position
-        color: RGB line color
-        width: Line width in pixels
+        frame: 要绘制的PIL图像
+        start: (x, y) 起始位置
+        end: (x, y) 结束位置
+        color: RGB线条颜色
+        width: 线条宽度（像素）
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
     draw.line([start, end], fill=color, width=width)
@@ -115,22 +114,22 @@ def draw_text(
     centered: bool = False,
 ) -> Image.Image:
     """
-    Draw text on a frame.
+    在帧上绘制文本。
 
     Args:
-        frame: PIL Image to draw on
-        text: Text to draw
-        position: (x, y) position (top-left unless centered=True)
-        font_size: Font size in pixels
-        color: RGB text color
-        centered: If True, center text at position
+        frame: 要绘制的PIL图像
+        text: 要绘制的文本
+        position: (x, y) 位置（除非centered=True，否则为左上角）
+        font_size: 字体大小（像素）
+        color: RGB文本颜色
+        centered: 如果为True，在位置处居中文本
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
 
-    # Try to use default font, fall back to basic if not available
+    # 尝试使用默认字体，如果不可用则回退到基本字体
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
     except:
@@ -150,24 +149,24 @@ def draw_text(
 
 def draw_emoji(frame: Image.Image, emoji: str, position: tuple[int, int], size: int = 60) -> Image.Image:
     """
-    Draw emoji text on a frame (requires system emoji support).
+    在帧上绘制表情符号文本（需要系统表情符号支持）。
 
     Args:
-        frame: PIL Image to draw on
-        emoji: Emoji character(s)
-        position: (x, y) position
-        size: Emoji size in pixels
+        frame: 要绘制的PIL图像
+        emoji: 表情符号字符
+        position: (x, y) 位置
+        size: 表情符号大小（像素）
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
 
-    # Use Apple Color Emoji font on macOS
+    # 在macOS上使用Apple Color Emoji字体
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Apple Color Emoji.ttc", size)
     except:
-        # Fallback to text-based emoji
+        # 回退到基于文本的表情符号
         font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size)
 
     draw.text(position, emoji, font=font, embedded_color=True)
@@ -178,30 +177,30 @@ def composite_layers(
     base: Image.Image, overlay: Image.Image, position: tuple[int, int] = (0, 0), alpha: float = 1.0
 ) -> Image.Image:
     """
-    Composite one image on top of another.
+    将一幅图像合成到另一幅图像上方。
 
     Args:
-        base: Base image
-        overlay: Image to overlay on top
-        position: (x, y) position to place overlay
-        alpha: Opacity of overlay (0.0 = transparent, 1.0 = opaque)
+        base: 基础图像
+        overlay: 要叠加在最上方的图像
+        position: 放置叠加图像的 (x, y) 位置
+        alpha: 叠加的不透明度 (0.0 = 透明, 1.0 = 不透明)
 
     Returns:
-        Composite image
+        合成后的图像
     """
-    # Convert to RGBA for transparency support
+    # 转换为RGBA以支持透明度
     base_rgba = base.convert("RGBA")
     overlay_rgba = overlay.convert("RGBA")
 
-    # Apply alpha
+    # 应用alpha
     if alpha < 1.0:
         overlay_rgba = overlay_rgba.copy()
         overlay_rgba.putalpha(int(255 * alpha))
 
-    # Paste overlay onto base
+    # 将叠加图像粘贴到基础图像上
     base_rgba.paste(overlay_rgba, position, overlay_rgba)
 
-    # Convert back to RGB
+    # 转换回RGB
     return base_rgba.convert("RGB")
 
 
@@ -213,41 +212,41 @@ def draw_stick_figure(
     line_width: int = 3,
 ) -> Image.Image:
     """
-    Draw a simple stick figure.
+    绘制简单的火柴人。
 
     Args:
-        frame: PIL Image to draw on
-        position: (x, y) center position of head
-        scale: Size multiplier
-        color: RGB line color
-        line_width: Line width in pixels
+        frame: 要绘制的PIL图像
+        position: (x, y) 头部中心位置
+        scale: 大小倍数
+        color: RGB线条颜色
+        line_width: 线条宽度（像素）
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
     x, y = position
 
-    # Scale dimensions
+    # 缩放尺寸
     head_radius = int(15 * scale)
     body_length = int(40 * scale)
     arm_length = int(25 * scale)
     leg_length = int(35 * scale)
     leg_spread = int(15 * scale)
 
-    # Head
+    # 头部
     draw.ellipse([x - head_radius, y - head_radius, x + head_radius, y + head_radius], outline=color, width=line_width)
 
-    # Body
+    # 身体
     body_start = y + head_radius
     body_end = body_start + body_length
     draw.line([(x, body_start), (x, body_end)], fill=color, width=line_width)
 
-    # Arms
+    # 手臂
     arm_y = body_start + int(body_length * 0.3)
     draw.line([(x - arm_length, arm_y), (x + arm_length, arm_y)], fill=color, width=line_width)
 
-    # Legs
+    # 腿
     draw.line([(x, body_end), (x - leg_spread, body_end + leg_length)], fill=color, width=line_width)
     draw.line([(x, body_end), (x + leg_spread, body_end + leg_length)], fill=color, width=line_width)
 
@@ -258,32 +257,32 @@ def create_gradient_background(
     width: int, height: int, top_color: tuple[int, int, int], bottom_color: tuple[int, int, int]
 ) -> Image.Image:
     """
-    Create a vertical gradient background.
+    创建垂直渐变背景。
 
     Args:
-        width: Frame width
-        height: Frame height
-        top_color: RGB color at top
-        bottom_color: RGB color at bottom
+        width: 帧宽度
+        height: 帧高度
+        top_color: 顶部的RGB颜色
+        bottom_color: 底部的RGB颜色
 
     Returns:
-        PIL Image with gradient
+        带渐变的PIL图像
     """
     frame = Image.new("RGB", (width, height))
     draw = ImageDraw.Draw(frame)
 
-    # Calculate color step for each row
+    # 计算每行的颜色步进
     r1, g1, b1 = top_color
     r2, g2, b2 = bottom_color
 
     for y in range(height):
-        # Interpolate color
+        # 插值颜色
         ratio = y / height
         r = int(r1 * (1 - ratio) + r2 * ratio)
         g = int(g1 * (1 - ratio) + g2 * ratio)
         b = int(b1 * (1 - ratio) + b2 * ratio)
 
-        # Draw horizontal line
+        # 绘制水平线
         draw.line([(0, y), (width, y)], fill=(r, g, b))
 
     return frame
@@ -298,38 +297,38 @@ def draw_emoji_enhanced(
     shadow_offset: tuple[int, int] = (2, 2),
 ) -> Image.Image:
     """
-    Draw emoji with optional shadow for better visual quality.
+    绘制带有可选阴影的表情符号以获得更好的视觉效果。
 
     Args:
-        frame: PIL Image to draw on
-        emoji: Emoji character(s)
-        position: (x, y) position
-        size: Emoji size in pixels (minimum 12)
-        shadow: Whether to add drop shadow
-        shadow_offset: Shadow offset
+        frame: 要绘制的PIL图像
+        emoji: 表情符号字符
+        position: (x, y) 位置
+        size: 表情符号大小（像素，最小12）
+        shadow: 是否添加投影
+        shadow_offset: 阴影偏移
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
 
-    # Ensure minimum size to avoid font rendering errors
+    # 确保最小尺寸以避免字体渲染错误
     size = max(12, size)
 
-    # Use Apple Color Emoji font on macOS
+    # 在macOS上使用Apple Color Emoji字体
     try:
         font = ImageFont.truetype("/System/Library/Fonts/Apple Color Emoji.ttc", size)
     except:
-        # Fallback to text-based emoji
+        # 回退到基于文本的表情符号
         try:
             font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size)
         except:
             font = ImageFont.load_default()
 
-    # Draw shadow first if enabled
-    if shadow and size >= 20:  # Only draw shadow for larger emojis
+    # 如果启用则首先绘制阴影
+    if shadow and size >= 20:  # 仅对较大的表情符号绘制阴影
         shadow_pos = (position[0] + shadow_offset[0], position[1] + shadow_offset[1])
-        # Draw semi-transparent shadow (simulated by drawing multiple times)
+        # 通过多次绘制来模拟半透明阴影
         for offset in range(1, 3):
             try:
                 draw.text(
@@ -340,13 +339,13 @@ def draw_emoji_enhanced(
                     fill=(0, 0, 0, 100),
                 )
             except:
-                pass  # Skip shadow if it fails
+                pass  # 如果阴影失败则跳过
 
-    # Draw main emoji
+    # 绘制主表情符号
     try:
         draw.text(position, emoji, font=font, embedded_color=True)
     except:
-        # Fallback to basic drawing if embedded color fails
+        # 如果嵌入颜色失败则回退到基本绘制
         draw.text(position, emoji, font=font, fill=(0, 0, 0))
 
     return frame
@@ -361,23 +360,23 @@ def draw_circle_with_shadow(
     shadow_color: tuple[int, int, int] = (0, 0, 0),
 ) -> Image.Image:
     """
-    Draw a circle with drop shadow.
+    绘制带投影的圆形。
 
     Args:
-        frame: PIL Image to draw on
-        center: (x, y) center position
-        radius: Circle radius
-        fill_color: RGB fill color
-        shadow_offset: (x, y) shadow offset
-        shadow_color: RGB shadow color
+        frame: 要绘制的PIL图像
+        center: (x, y) 中心位置
+        radius: 圆半径
+        fill_color: RGB填充颜色
+        shadow_offset: (x, y) 阴影偏移
+        shadow_color: RGB阴影颜色
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
     x, y = center
 
-    # Draw shadow
+    # 绘制阴影
     shadow_center = (x + shadow_offset[0], y + shadow_offset[1])
     shadow_bbox = [
         shadow_center[0] - radius,
@@ -387,7 +386,7 @@ def draw_circle_with_shadow(
     ]
     draw.ellipse(shadow_bbox, fill=shadow_color)
 
-    # Draw main circle
+    # 绘制主圆形
     bbox = [x - radius, y - radius, x + radius, y + radius]
     draw.ellipse(bbox, fill=fill_color)
 
@@ -404,25 +403,25 @@ def draw_rounded_rectangle(
     outline_width: int = 1,
 ) -> Image.Image:
     """
-    Draw a rectangle with rounded corners.
+    绘制圆角矩形。
 
     Args:
-        frame: PIL Image to draw on
-        top_left: (x, y) top-left corner
-        bottom_right: (x, y) bottom-right corner
-        radius: Corner radius
-        fill_color: RGB fill color (None for no fill)
-        outline_color: RGB outline color (None for no outline)
-        outline_width: Outline width
+        frame: 要绘制的PIL图像
+        top_left: (x, y) 左上角
+        bottom_right: (x, y) 右下角
+        radius: 角半径
+        fill_color: RGB填充颜色（None表示无填充）
+        outline_color: RGB轮廓颜色（None表示无轮廓）
+        outline_width: 轮廓宽度
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     draw = ImageDraw.Draw(frame)
     x1, y1 = top_left
     x2, y2 = bottom_right
 
-    # Draw rounded rectangle using PIL's built-in method
+    # 使用PIL内置方法绘制圆角矩形
     draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=fill_color, outline=outline_color, width=outline_width)
 
     return frame
@@ -430,38 +429,38 @@ def draw_rounded_rectangle(
 
 def add_vignette(frame: Image.Image, strength: float = 0.5) -> Image.Image:
     """
-    Add a vignette effect (darkened edges) to frame.
+    为帧添加晕影效果（边缘变暗）。
 
     Args:
-        frame: PIL Image
-        strength: Vignette strength (0.0-1.0)
+        frame: PIL图像
+        strength: 晕影强度 (0.0-1.0)
 
     Returns:
-        Frame with vignette
+        带晕影的帧
     """
     width, height = frame.size
 
-    # Create radial gradient mask
+    # 创建径向渐变遮罩
     center_x, center_y = width // 2, height // 2
     max_dist = ((width / 2) ** 2 + (height / 2) ** 2) ** 0.5
 
-    # Create overlay
+    # 创建叠加层
     overlay = Image.new("RGB", (width, height), (0, 0, 0))
     pixels = overlay.load()
 
     for y in range(height):
         for x in range(width):
-            # Calculate distance from center
+            # 计算到中心的距离
             dx = x - center_x
             dy = y - center_y
             dist = (dx**2 + dy**2) ** 0.5
 
-            # Calculate vignette value
+            # 计算晕影值
             vignette = min(1, (dist / max_dist) * strength)
             value = int(255 * (1 - vignette))
             pixels[x, y] = (value, value, value)
 
-    # Blend with original using multiply
+    # 使用正片叠底与原始图像混合
     frame_array = np.array(frame, dtype=np.float32) / 255
     overlay_array = np.array(overlay, dtype=np.float32) / 255
 
@@ -480,34 +479,34 @@ def draw_star(
     outline_width: int = 1,
 ) -> Image.Image:
     """
-    Draw a 5-pointed star.
+    绘制五角星。
 
     Args:
-        frame: PIL Image to draw on
-        center: (x, y) center position
-        size: Star size (outer radius)
-        fill_color: RGB fill color
-        outline_color: RGB outline color (None for no outline)
-        outline_width: Outline width
+        frame: 要绘制的PIL图像
+        center: (x, y) 中心位置
+        size: 星星大小（外半径）
+        fill_color: RGB填充颜色
+        outline_color: RGB轮廓颜色（None表示无轮廓）
+        outline_width: 轮廓宽度
 
     Returns:
-        Modified frame
+        修改后的帧
     """
     import math
 
     draw = ImageDraw.Draw(frame)
     x, y = center
 
-    # Calculate star points
+    # 计算星形点
     points = []
     for i in range(10):
-        angle = (i * 36 - 90) * math.pi / 180  # 36 degrees per point, start at top
-        radius = size if i % 2 == 0 else size * 0.4  # Alternate between outer and inner
+        angle = (i * 36 - 90) * math.pi / 180  # 每个点36度，从顶部开始
+        radius = size if i % 2 == 0 else size * 0.4  # 外点和内点交替
         px = x + radius * math.cos(angle)
         py = y + radius * math.sin(angle)
         points.append((px, py))
 
-    # Draw star
+    # 绘制星星
     draw.polygon(points, fill=fill_color, outline=outline_color, width=outline_width)
 
     return frame

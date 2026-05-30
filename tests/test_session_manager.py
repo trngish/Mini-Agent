@@ -20,7 +20,7 @@ class TestSessionManager:
         ]
         session_id = sm.save(messages)
         assert session_id is not None
-        loaded_messages, loaded_result = sm.load(session_id)
+        loaded_messages, loaded_result, loaded_state = sm.load(session_id)
         assert loaded_messages is not None
         assert len(loaded_messages) == 3
         assert loaded_messages[0].role == "system"
@@ -36,14 +36,14 @@ class TestSessionManager:
         ]
         result = "Task completed successfully"
         session_id = sm.save(messages, result=result)
-        loaded_messages, loaded_result = sm.load(session_id)
+        loaded_messages, loaded_result, loaded_state = sm.load(session_id)
         assert loaded_messages is not None
         assert len(loaded_messages) == 2
         assert loaded_result == result
 
     def test_load_nonexistent_session(self, tmp_path):
         sm = SessionManager(session_dir=tmp_path)
-        messages, result = sm.load("nonexistent-id")
+        messages, result, state = sm.load("nonexistent-id")
         assert messages is None
         assert result is None
 
@@ -73,7 +73,7 @@ class TestSessionManager:
         session_id = sm.save(messages)
         result = sm.delete(session_id)
         assert result is True
-        loaded_messages, loaded_result = sm.load(session_id)
+        loaded_messages, loaded_result, loaded_state = sm.load(session_id)
         assert loaded_messages is None
         assert loaded_result is None
 

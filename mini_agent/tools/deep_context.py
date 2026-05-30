@@ -1,4 +1,4 @@
-"""Deep context tool for comprehensive project analysis in one call."""
+"""深度上下文工具，用于一次调用进行全面的项目分析。"""
 
 from pathlib import Path
 from typing import Any
@@ -9,9 +9,9 @@ from .batch_shared import get_git_status_sync, get_tree_sync
 
 
 class DeepContextTool(Tool):
-    """Get deep project context in one call.
+    """一次调用获取深度项目上下文。
 
-    Per-call billing optimization: get complete deep context of the project in one call.
+    每次调用计费优化：一次调用获取项目的完整深度上下文。
     """
 
     def __init__(self, workspace_dir: str = "."):
@@ -57,37 +57,37 @@ class DeepContextTool(Tool):
         read_entry_files: bool = True,
         read_config_files: bool = True,
     ) -> ToolResult:
-        """Get deep project context."""
+        """获取深度项目上下文。"""
         sections = []
 
-        # 1. Directory tree
-        sections.append(f"Directory Tree (depth={max_depth})")
+        # 1. 目录树
+        sections.append(f"目录树 (depth={max_depth})")
         sections.append("=" * 60)
         sections.append(get_tree_sync(self.workspace_dir, max_depth))
 
-        # 2. Git status
-        sections.append("\nGit Status")
+        # 2. Git 状态
+        sections.append("\nGit 状态")
         sections.append("=" * 60)
         sections.append(get_git_status_sync(self.workspace_dir, max_status_lines=50, max_commits=10))
 
-        # 3. Key config files
+        # 3. 关键配置文件
         if read_config_files:
             config_content = self._read_config_files()
             if config_content:
-                sections.append("\nKey Config Files (full content)")
+                sections.append("\n关键配置文件（完整内容）")
                 sections.append("=" * 60)
                 sections.append(config_content)
 
-        # 4. Entry point files
+        # 4. 入口点文件
         if read_entry_files:
             entry_content = self._read_entry_files()
             if entry_content:
-                sections.append("\nEntry Point Files")
+                sections.append("\n入口点文件")
                 sections.append("=" * 60)
                 sections.append(entry_content)
 
-        # 5. Project structure analysis
-        sections.append("\nProject Structure Analysis")
+        # 5. 项目结构分析
+        sections.append("\n项目结构分析")
         sections.append("=" * 60)
         sections.append(self._analyze_structure())
 
@@ -100,7 +100,7 @@ class DeepContextTool(Tool):
         return ToolResult(success=True, content=combined)
 
     def _read_config_files(self) -> str:
-        """Read content of key config files."""
+        """读取关键配置文件的内容。"""
         config_patterns = [
             "pyproject.toml",
             "package.json",
@@ -117,13 +117,13 @@ class DeepContextTool(Tool):
             if path.exists() and path.stat().st_size < 30000:
                 try:
                     content = path.read_text(encoding="utf-8")
-                    sections.append(f"File: {pattern}:\n```\n{content}\n```")
+                    sections.append(f"文件: {pattern}:\n```\n{content}\n```")
                 except Exception:
                     pass
         return "\n\n".join(sections)
 
     def _read_entry_files(self) -> str:
-        """Read common entry point files."""
+        """读取常见的入口点文件。"""
         entry_patterns = [
             "main.py",
             "app.py",
@@ -154,52 +154,52 @@ class DeepContextTool(Tool):
         return "\n\n".join(sections)
 
     def _analyze_structure(self) -> str:
-        """Analyze project structure and provide hints."""
+        """分析项目结构并提供提示。"""
         hints = []
 
-        # Detect project type
+        # 检测项目类型
         if (self.workspace_dir / "pyproject.toml").exists():
-            hints.append("Python project (pyproject.toml)")
+            hints.append("Python 项目 (pyproject.toml)")
         if (self.workspace_dir / "package.json").exists():
-            hints.append("Node.js project (package.json)")
+            hints.append("Node.js 项目 (package.json)")
         if (self.workspace_dir / "Cargo.toml").exists():
-            hints.append("Rust project (Cargo.toml)")
+            hints.append("Rust 项目 (Cargo.toml)")
         if (self.workspace_dir / "go.mod").exists():
-            hints.append("Go project (go.mod)")
+            hints.append("Go 项目 (go.mod)")
 
-        # Detect frameworks
+        # 检测框架
         try:
             for pkg_file in ["package.json", "pyproject.toml", "requirements.txt"]:
                 path = self.workspace_dir / pkg_file
                 if path.exists():
                     content = path.read_text(encoding="utf-8").lower()
                     if "django" in content:
-                        hints.append("Django framework detected")
+                        hints.append("检测到 Django 框架")
                     if "flask" in content:
-                        hints.append("Flask framework detected")
+                        hints.append("检测到 Flask 框架")
                     if "fastapi" in content:
-                        hints.append("FastAPI framework detected")
+                        hints.append("检测到 FastAPI 框架")
                     if "react" in content:
-                        hints.append("React detected")
+                        hints.append("检测到 React")
                     if "vue" in content:
-                        hints.append("Vue.js detected")
+                        hints.append("检测到 Vue.js")
                     if "next" in content:
-                        hints.append("Next.js detected")
+                        hints.append("检测到 Next.js")
         except Exception:
             pass
 
-        # Detect test frameworks
+        # 检测测试框架
         test_dirs = ["tests", "test", "__tests__", "spec"]
         for d in test_dirs:
             if (self.workspace_dir / d).exists():
-                hints.append(f"Test directory found: {d}/")
+                hints.append(f"找到测试目录: {d}/")
                 break
 
-        # Detect CI/CD
+        # 检测 CI/CD
         ci_files = [".github/workflows", ".gitlab-ci.yml", "Jenkinsfile", ".circleci"]
         for ci in ci_files:
             if (self.workspace_dir / ci).exists():
                 hints.append(f"CI/CD: {ci}")
                 break
 
-        return "\n".join(hints) if hints else "Standard project structure"
+        return "\n".join(hints) if hints else "标准项目结构"

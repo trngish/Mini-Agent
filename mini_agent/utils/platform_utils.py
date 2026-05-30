@@ -1,7 +1,7 @@
-"""Platform utilities for cross-platform compatibility.
+"""平台工具，用于跨平台兼容性。
 
-Provides unified platform detection, shell configuration,
-and command translation between platforms.
+提供统一的平台检测、shell 配置，
+以及平台间的命令转换。
 """
 
 import os
@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 
 class PlatformInfo(NamedTuple):
-    """Platform information container."""
+    """平台信息容器。"""
 
     is_windows: bool
     is_linux: bool
@@ -22,23 +22,23 @@ class PlatformInfo(NamedTuple):
 
 
 class PlatformUtils:
-    """Unified platform utilities.
+    """统一的平台工具。
 
-    Single source of truth for platform detection and configuration,
-    replacing scattered platform checks across the codebase.
+    平台检测和配置的单一数据源，
+    替代代码库中分散的平台检查。
     """
 
     _cached_info: PlatformInfo | None = None
 
     @classmethod
     def get_info(cls, platform_mode: str = "auto") -> PlatformInfo:
-        """Get platform information.
+        """获取平台信息。
 
         Args:
-            platform_mode: "windows", "linux", "auto" (auto-detect from OS)
+            platform_mode: "windows"、"linux"、"auto"（从操作系统自动检测）
 
         Returns:
-            PlatformInfo with platform-specific settings
+            包含平台特定设置的 PlatformInfo
         """
         if cls._cached_info is not None:
             return cls._cached_info
@@ -73,12 +73,12 @@ class PlatformUtils:
 
     @classmethod
     def _detect_powershell(cls) -> str:
-        """Detect the best available PowerShell executable.
+        """检测可用的最佳 PowerShell 可执行文件。
 
-        Prefers pwsh (PowerShell 7+) over powershell.exe (Windows PowerShell 5.1).
+        优先使用 pwsh（PowerShell 7+）而非 powershell.exe（Windows PowerShell 5.1）。
 
         Returns:
-            Path to PowerShell executable
+            PowerShell 可执行文件路径
         """
         for candidate in ("pwsh.exe", "pwsh", "powershell.exe"):
             path = cls._which(candidate)
@@ -88,13 +88,13 @@ class PlatformUtils:
 
     @classmethod
     def _which(cls, name: str) -> str | None:
-        """Find executable in PATH (cross-platform).
+        """在 PATH 中查找可执行文件（跨平台）。
 
         Args:
-            name: Executable name to find
+            name: 要查找的可执行文件名
 
         Returns:
-            Full path if found, None otherwise
+            如果找到则返回完整路径，否则返回 None
         """
         import shutil
 
@@ -102,48 +102,48 @@ class PlatformUtils:
 
     @classmethod
     def reset_cache(cls) -> None:
-        """Reset cached platform info (mainly for testing)."""
+        """重置缓存的平台信息（主要用于测试）。"""
         cls._cached_info = None
 
     @classmethod
     def is_windows(cls, platform_mode: str = "auto") -> bool:
-        """Check if running on Windows."""
+        """检查是否在 Windows 上运行。"""
         return cls.get_info(platform_mode).is_windows
 
     @classmethod
     def is_linux(cls, platform_mode: str = "auto") -> bool:
-        """Check if running on Linux."""
+        """检查是否在 Linux 上运行。"""
         return cls.get_info(platform_mode).is_linux
 
     @classmethod
     def is_macos(cls, platform_mode: str = "auto") -> bool:
-        """Check if running on macOS."""
+        """检查是否在 macOS 上运行。"""
         return cls.get_info(platform_mode).is_macos
 
     @classmethod
     def get_shell_config(cls, platform_mode: str = "auto") -> tuple[str, list[str], str]:
-        """Get shell configuration for subprocess.
+        """获取子进程的 shell 配置。
 
         Args:
-            platform_mode: Target platform mode
+            platform_mode: 目标平台模式
 
         Returns:
-            Tuple of (executable, shell_args, shell_name)
+            (executable, shell_args, shell_name) 元组
         """
         info = cls.get_info(platform_mode)
         return info.executable, info.shell_args, info.shell_name
 
     @classmethod
     def get_path_separator(cls, platform_mode: str = "auto") -> str:
-        """Get path separator for target platform."""
+        """获取目标平台的路径分隔符。"""
         return cls.get_info(platform_mode).path_separator
 
     @classmethod
     def get_subprocess_env(cls) -> dict[str, str]:
-        """Get platform-appropriate environment for subprocess.
+        """获取适合平台的子进程环境。
 
         Returns:
-            Environment dict with proper encoding settings
+            带有正确编码设置的环境字典
         """
         env = dict(os.environ)
 
@@ -162,10 +162,10 @@ class PlatformUtils:
 
     @classmethod
     def get_platform_command_tips(cls) -> list[str]:
-        """Get platform-specific command tips for the current platform.
+        """获取当前平台的特定命令提示。
 
         Returns:
-            List of tip strings for common command translations
+            常用命令转换提示字符串列表
         """
         if cls.get_info().is_windows:
             return [
@@ -197,35 +197,35 @@ class PlatformUtils:
 
 
 def get_platform_shell_args(platform_mode: str = "auto") -> tuple[str, list[str], str]:
-    """Compatibility wrapper for bash_shared module.
+    """bash_shared 模块的兼容性包装器。
 
     Args:
-        platform_mode: Platform mode - "windows", "linux", or "auto"
+        platform_mode: 平台模式 - "windows"、"linux" 或 "auto"
 
     Returns:
-        Tuple of (executable, shell_args, shell_name)
+        (executable, shell_args, shell_name) 元组
     """
     return PlatformUtils.get_shell_config(platform_mode)
 
 
 def get_subprocess_env() -> dict[str, str]:
-    """Compatibility wrapper for subprocess environment.
+    """子进程环境的兼容性包装器。
 
     Returns:
-        Platform-appropriate environment dict
+        适合平台的環境字典
     """
     return PlatformUtils.get_subprocess_env()
 
 
 def normalize_path_separators(path: str, platform_mode: str = "auto") -> str:
-    """Normalize path separators for the target platform.
+    """为目标平台规范化路径分隔符。
 
     Args:
-        path: Path string that may contain mixed separators
-        platform_mode: Target platform mode - "windows", "linux", or "auto"
+        path: 可能包含混合分隔符的路径字符串
+        platform_mode: 目标平台模式 - "windows"、"linux" 或 "auto"
 
     Returns:
-        Normalized path string
+        规范化后的路径字符串
     """
     info = PlatformUtils.get_info(platform_mode)
     if info.is_windows:

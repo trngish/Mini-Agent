@@ -1,37 +1,37 @@
-"""Terminal color and display formatting utilities.
+"""终端颜色和显示格式化工具。
 
-This module provides a unified Colors class for terminal output formatting,
-replacing duplicate implementations across agent.py and cli.py.
+本模块提供统一的 Colors 类，用于终端输出格式化，
+可替代 agent.py 和 cli.py 中的重复实现。
 """
 
 from typing import Final
 
 
 class Colors:
-    """Terminal color definitions with ANSI escape codes.
+    """终端颜色定义，使用 ANSI 转义码。
 
-    This class provides consistent color formatting across the entire application.
-    All colors use standard ANSI escape codes supported by most modern terminals.
+    本类为整个应用程序提供一致的颜色格式化。
+    所有颜色使用大多数现代终端支持的 标准 ANSI 转义码。
 
-    Usage:
+    用法:
         from mini_agent.utils.display import Colors
 
-        print(f"{Colors.RED}Error message{Colors.RESET}")
-        print(f"{Colors.BRIGHT_GREEN}Success!{Colors.RESET}")
+        print(f"{Colors.RED}错误消息{Colors.RESET}")
+        print(f"{Colors.BRIGHT_GREEN}成功！{Colors.RESET}")
 
-    Color Categories:
-        - Basic: Standard 8 colors (black, red, green, yellow, blue, magenta, cyan, white)
-        - Bright: High-intensity versions of basic colors
-        - Background: Background color variants
-        - Style: Text styling (bold, dim, reset)
+    颜色分类:
+        - Basic: 标准 8 种颜色（黑、红、绿、黄、蓝、品红、青、白）
+        - Bright: 基本颜色的高强度版本
+        - Background: 背景颜色变体
+        - Style: 文本样式（粗体、暗色、重置）
     """
 
-    # Style modifiers
+    # 样式修饰符
     RESET: Final[str] = "\033[0m"
     BOLD: Final[str] = "\033[1m"
     DIM: Final[str] = "\033[2m"
 
-    # Basic foreground colors
+    # 基本前景色
     BLACK: Final[str] = "\033[30m"
     RED: Final[str] = "\033[31m"
     GREEN: Final[str] = "\033[32m"
@@ -41,7 +41,7 @@ class Colors:
     CYAN: Final[str] = "\033[36m"
     WHITE: Final[str] = "\033[37m"
 
-    # Bright foreground colors
+    # 明亮前景色
     BRIGHT_BLACK: Final[str] = "\033[90m"
     BRIGHT_RED: Final[str] = "\033[91m"
     BRIGHT_GREEN: Final[str] = "\033[92m"
@@ -51,58 +51,58 @@ class Colors:
     BRIGHT_CYAN: Final[str] = "\033[96m"
     BRIGHT_WHITE: Final[str] = "\033[97m"
 
-    # Background colors
+    # 背景色
     BG_RED: Final[str] = "\033[41m"
     BG_GREEN: Final[str] = "\033[42m"
     BG_YELLOW: Final[str] = "\033[43m"
     BG_BLUE: Final[str] = "\033[44m"
 
-    # Convenience combined styles
-    # Note: Combined styles like BOLD + COLOR need to be used together
+    # 便捷组合样式
+    # 注意: 组合样式如 BOLD + COLOR 需要一起使用
     @staticmethod
     def bold(text: str) -> str:
-        """Apply bold styling to text."""
+        """为文本应用粗体样式。"""
         return f"{Colors.BOLD}{text}{Colors.RESET}"
 
     @staticmethod
     def dim(text: str) -> str:
-        """Apply dim styling to text."""
+        """为文本应用暗色样式。"""
         return f"{Colors.DIM}{text}{Colors.RESET}"
 
     @staticmethod
     def success(text: str) -> str:
-        """Apply success color (green) to text."""
+        """为文本应用成功颜色（绿色）。"""
         return f"{Colors.BRIGHT_GREEN}{text}{Colors.RESET}"
 
     @staticmethod
     def warning(text: str) -> str:
-        """Apply warning color (yellow) to text."""
+        """为文本应用警告颜色（黄色）。"""
         return f"{Colors.BRIGHT_YELLOW}{text}{Colors.RESET}"
 
     @staticmethod
     def error(text: str) -> str:
-        """Apply error color (red) to text."""
+        """为文本应用错误颜色（红色）。"""
         return f"{Colors.BRIGHT_RED}{text}{Colors.RESET}"
 
     @staticmethod
     def info(text: str) -> str:
-        """Apply info color (cyan) to text."""
+        """为文本应用信息颜色（青色）。"""
         return f"{Colors.BRIGHT_CYAN}{text}{Colors.RESET}"
 
     @staticmethod
     def header(text: str) -> str:
-        """Apply header styling (bold + cyan) to text."""
+        """为文本应用标题样式（粗体 + 青色）。"""
         return f"{Colors.BOLD}{Colors.CYAN}{text}{Colors.RESET}"
 
 
 class BoxDrawing:
-    """Box drawing characters for terminal UI elements.
+    """终端 UI 元素的框线字符。
 
-    Provides consistent box drawing characters that work across platforms.
-    Falls back to ASCII alternatives on platforms with limited Unicode support.
+    提供跨平台一致工作的框线字符。
+    在 Unicode 支持有限的平台上回退到 ASCII 替代方案。
     """
 
-    # Box characters (using Unicode for better visuals, ASCII fallbacks available)
+    # 框线字符（使用 Unicode 以获得更好的视觉效果，可用的 ASCII 替代方案）
     HORIZONTAL: Final[str] = "─"
     VERTICAL: Final[str] = "│"
     TOP_LEFT: Final[str] = "┌"
@@ -115,7 +115,7 @@ class BoxDrawing:
     LEFT_T: Final[str] = "├"
     RIGHT_T: Final[str] = "┤"
 
-    # Thick variants
+    # 粗线变体
     THICK_HORIZONTAL: Final[str] = "═"
     THICK_VERTICAL: Final[str] = "║"
     THICK_TOP_LEFT: Final[str] = "╔"
@@ -125,24 +125,24 @@ class BoxDrawing:
 
     @classmethod
     def horizontal_line(cls, width: int) -> str:
-        """Generate a horizontal line of specified width."""
+        """生成指定宽度的水平线。"""
         return cls.HORIZONTAL * width
 
     @classmethod
     def thick_horizontal_line(cls, width: int) -> str:
-        """Generate a thick horizontal line of specified width."""
+        """生成指定宽度的粗水平线。"""
         return cls.THICK_HORIZONTAL * width
 
     @classmethod
     def box(cls, width: int, height: int = 1) -> list[str]:
-        """Generate a simple box of specified dimensions.
+        """生成指定尺寸的简单框。
 
         Args:
-            width: Width of the box in characters
-            height: Height of the box in lines
+            width: 框的宽度（字符数）
+            height: 框的高度（行数）
 
         Returns:
-            List of strings representing each line of the box
+            表示框每一行的字符串列表
         """
         lines = []
         if height >= 1:
@@ -155,15 +155,15 @@ class BoxDrawing:
 
 
 def colorize(text: str, color: str, bold: bool = False) -> str:
-    """Apply color to text with optional bold styling.
+    """为文本应用颜色，可选择是否添加粗体样式。
 
     Args:
-        text: Text to colorize
-        color: Color name (e.g., "red", "green", "bright_yellow")
-        bold: Whether to apply bold styling
+        text: 要着色的文本
+        color: 颜色名称（例如 "red"、"green"、"bright_yellow"）
+        bold: 是否应用粗体样式
 
     Returns:
-        Colorized text with reset code appended
+        着色后的文本，末尾附加重置代码
     """
     color_code = getattr(Colors, color.upper().replace("-", "_"), Colors.WHITE)
     prefix = Colors.BOLD if bold else ""
@@ -177,19 +177,19 @@ def create_progress_bar(
     prefix: str = "",
     show_percentage: bool = True,
 ) -> str:
-    """Create a text-based progress bar.
+    """创建基于文本的进度条。
 
     Args:
-        current: Current progress value
-        total: Total value (100%)
-        width: Width of the progress bar in characters
-        prefix: Text to display before the progress bar
-        show_percentage: Whether to show percentage
+        current: 当前进度值
+        total: 总值（100%）
+        width: 进度条的宽度（字符数）
+        prefix: 进度条前显示的文本
+        show_percentage: 是否显示百分比
 
     Returns:
-        Formatted progress bar string
+        格式化的进度条字符串
 
-    Example:
+    示例:
         >>> create_progress_bar(75, 100, width=20)
         '███████░░░░░░░░░░░ 75%'
     """
@@ -213,15 +213,15 @@ def format_table_row(
     widths: list[int],
     alignments: list[str] | None = None,
 ) -> str:
-    """Format a table row with proper column widths and alignment.
+    """格式化表格行，具有适当的列宽和对齐方式。
 
     Args:
-        columns: List of column values
-        widths: List of column widths (must match columns length)
-        alignments: List of alignments ("left", "right", "center"), defaults to "left"
+        columns: 列值列表
+        widths: 列宽列表（必须与列数匹配）
+        alignments: 对齐方式列表（"left"、"right"、"center"），默认为 "left"
 
     Returns:
-        Formatted table row string
+        格式化的表格行字符串
     """
     from mini_agent.utils.terminal_utils import calculate_display_width
 
@@ -249,13 +249,13 @@ def format_table_row(
 
 
 def create_divider(char: str = "─", width: int = 60) -> str:
-    """Create a horizontal divider line.
+    """创建水平分隔线。
 
     Args:
-        char: Character to use for the line
-        width: Total width of the divider
+        char: 用于绘制线的字符
+        width: 分隔线的总宽度
 
     Returns:
-        Divider string
+        分隔线字符串
     """
     return char * width

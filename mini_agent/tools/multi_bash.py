@@ -1,4 +1,4 @@
-"""Multi-bash tool for executing multiple commands in one call."""
+"""Multi-bash工具，用于在一次调用中执行多个命令"""
 
 import asyncio
 import json
@@ -9,9 +9,9 @@ from .base import Tool, ToolResult
 
 
 class MultiBashTool(Tool):
-    """Execute multiple independent commands in one tool call.
+    """在一次工具调用中执行多个独立命令。
 
-    Per-call billing optimization: merge multiple bash calls into one.
+    按调用计费优化：将多个bash调用合并为一个。
     """
 
     def __init__(self, workspace_dir: str = ".", platform_mode: str = "auto"):
@@ -53,7 +53,7 @@ class MultiBashTool(Tool):
         }
 
     async def execute(self, commands: list[dict[str, Any]]) -> ToolResult:
-        """Execute multiple commands in parallel."""
+        """并行执行多个命令"""
         commands = _ensure_list(commands)
 
         async def run_single(cmd: dict[str, Any]) -> str:
@@ -111,7 +111,7 @@ class MultiBashTool(Tool):
 
 
 def _ensure_list(data: list[Any] | str | None) -> list[Any]:
-    """Ensure input is a list, parsing JSON string if needed."""
+    """确保输入是列表，必要时解析JSON字符串"""
     if data is None:
         return []
     if isinstance(data, list):

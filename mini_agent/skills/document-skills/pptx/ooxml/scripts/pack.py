@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Tool to pack a directory into a .docx, .pptx, or .xlsx file with XML formatting undone.
+将目录打包为 .docx、.pptx 或 .xlsx 文件的工具，同时撤销 XML 格式化。
 
-Example usage:
+用法示例：
     python pack.py <input_directory> <office_file> [--force]
 """
 
@@ -18,19 +18,19 @@ import defusedxml.minidom
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pack a directory into an Office file")
-    parser.add_argument("input_directory", help="Unpacked Office document directory")
-    parser.add_argument("output_file", help="Output Office file (.docx/.pptx/.xlsx)")
-    parser.add_argument("--force", action="store_true", help="Skip validation")
+    parser = argparse.ArgumentParser(description="将目录打包为 Office 文件")
+    parser.add_argument("input_directory", help="解压后的 Office 文档目录")
+    parser.add_argument("output_file", help="输出 Office 文件 (.docx/.pptx/.xlsx)")
+    parser.add_argument("--force", action="store_true", help="跳过验证")
     args = parser.parse_args()
 
     try:
         success = pack_document(args.input_directory, args.output_file, validate=not args.force)
 
-        # Show warning if validation was skipped
+        # 如果跳过验证则显示警告
         if args.force:
             print("Warning: Skipped validation, file may be corrupt", file=sys.stderr)
-        # Exit with error if validation failed
+        # 如果验证失败则退出并报错
         elif not success:
             print("Contents would produce a corrupt file.", file=sys.stderr)
             print("Please validate XML before repacking.", file=sys.stderr)
@@ -42,15 +42,15 @@ def main():
 
 
 def pack_document(input_dir, output_file, validate=False):
-    """Pack a directory into an Office file (.docx/.pptx/.xlsx).
+    """将目录打包为 Office 文件（.docx/.pptx/.xlsx）。
 
-    Args:
-        input_dir: Path to unpacked Office document directory
-        output_file: Path to output Office file
-        validate: If True, validates with soffice (default: False)
+    参数:
+        input_dir: 解压后的 Office 文档目录路径
+        output_file: 输出 Office 文件路径
+        validate: 如果为 True，则使用 soffice 进行验证（默认：False）
 
-    Returns:
-        bool: True if successful, False if validation failed
+    返回:
+        bool: 成功返回 True，验证失败返回 False
     """
     input_dir = Path(input_dir)
     output_file = Path(output_file)
@@ -60,34 +60,34 @@ def pack_document(input_dir, output_file, validate=False):
     if output_file.suffix.lower() not in {".docx", ".pptx", ".xlsx"}:
         raise ValueError(f"{output_file} must be a .docx, .pptx, or .xlsx file")
 
-    # Work in temporary directory to avoid modifying original
+    # 在临时目录中操作以避免修改原始文件
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_content_dir = Path(temp_dir) / "content"
         shutil.copytree(input_dir, temp_content_dir)
 
-        # Process XML files to remove pretty-printing whitespace
+        # 处理 XML 文件以移除美化打印的空白符
         for pattern in ["*.xml", "*.rels"]:
             for xml_file in temp_content_dir.rglob(pattern):
                 condense_xml(xml_file)
 
-        # Create final Office file as zip archive
+        # 将最终的 Office 文件创建为 zip 存档
         output_file.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output_file, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in temp_content_dir.rglob("*"):
                 if f.is_file():
                     zf.write(f, f.relative_to(temp_content_dir))
 
-        # Validate if requested
+        # 如果请求验证则进行验证
         if validate and not validate_document(output_file):
-            output_file.unlink()  # Delete the corrupt file
+            output_file.unlink()  # 删除损坏的文件
             return False
 
     return True
 
 
 def validate_document(doc_path):
-    """Validate document by converting to HTML with soffice."""
-    # Determine the correct filter based on file extension
+    """通过转换为 HTML 来验证文档。"""
+    # 根据文件扩展名确定正确的过滤器
     match doc_path.suffix.lower():
         case ".docx":
             filter_name = "html:HTML"
@@ -131,24 +131,24 @@ def validate_document(doc_path):
 
 
 def condense_xml(xml_file):
-    """Strip unnecessary whitespace and remove comments."""
+    """去除不必要的空白符并移除注释。"""
     with open(xml_file, encoding="utf-8") as f:
         dom = defusedxml.minidom.parse(f)
 
-    # Process each element to remove whitespace and comments
+    # 处理每个元素以移除空白符和注释
     for element in dom.getElementsByTagName("*"):
-        # Skip w:t elements and their processing
+        # 跳过 w:t 元素及其处理
         if element.tagName.endswith(":t"):
             continue
 
-        # Remove whitespace-only text nodes and comment nodes
+        # 移除仅含空白符的文本节点和注释节点
         for child in list(element.childNodes):
             if (
                 child.nodeType == child.TEXT_NODE and child.nodeValue and child.nodeValue.strip() == ""
             ) or child.nodeType == child.COMMENT_NODE:
                 element.removeChild(child)
 
-    # Write back the condensed XML
+    # 写回压缩后的 XML
     with open(xml_file, "wb") as f:
         f.write(dom.toxml(encoding="UTF-8"))
 

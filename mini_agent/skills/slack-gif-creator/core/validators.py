@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Validators - Check if GIFs meet Slack's requirements.
+验证器 - 检查GIF是否符合Slack的要求。
 
-These validators help ensure your GIFs meet Slack's size and dimension constraints.
+这些验证器有助于确保您的GIF符合Slack的大小和尺寸限制。
 """
 
 from pathlib import Path
@@ -10,14 +10,14 @@ from pathlib import Path
 
 def check_slack_size(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dict]:
     """
-    Check if GIF meets Slack size limits.
+    检查GIF是否符合Slack的大小限制。
 
-    Args:
-        gif_path: Path to GIF file
-        is_emoji: True for emoji GIF (64KB limit), False for message GIF (2MB limit)
+    参数:
+        gif_path: GIF文件路径
+        is_emoji: True表示表情GIF（64KB限制），False表示消息GIF（2MB限制）
 
-    Returns:
-        Tuple of (passes: bool, info: dict with details)
+    返回:
+        (passes: bool, info: dict) 元组，包含详情的字典
     """
     gif_path = Path(gif_path)
 
@@ -43,35 +43,35 @@ def check_slack_size(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool,
         "type": "emoji" if is_emoji else "message",
     }
 
-    # Print feedback
+    # 打印反馈信息
     if passes:
-        print(f"✓ {size_kb:.1f} KB - within {limit_kb} KB limit")
+        print(f"✓ {size_kb:.1f} KB - 在 {limit_kb} KB 限制内")
     else:
-        print(f"✗ {size_kb:.1f} KB - exceeds {limit_kb} KB limit")
+        print(f"✗ {size_kb:.1f} KB - 超过 {limit_kb} KB 限制")
         overage_kb = size_kb - limit_kb
         overage_percent = (overage_kb / limit_kb) * 100
-        print(f"  Over by: {overage_kb:.1f} KB ({overage_percent:.1f}%)")
-        print("  Try: fewer frames, fewer colors, or simpler design")
+        print(f"  超出了: {overage_kb:.1f} KB ({overage_percent:.1f}%)")
+        print("  尝试: 更少的帧数、更少的颜色或更简单的设计")
 
     return passes, info
 
 
 def validate_dimensions(width: int, height: int, is_emoji: bool = True) -> tuple[bool, dict]:
     """
-    Check if dimensions are suitable for Slack.
+    检查尺寸是否适合Slack。
 
-    Args:
-        width: Frame width in pixels
-        height: Frame height in pixels
-        is_emoji: True for emoji GIF, False for message GIF
+    参数:
+        width: 帧宽度（像素）
+        height: 帧高度（像素）
+        is_emoji: True表示表情GIF，False表示消息GIF
 
-    Returns:
-        Tuple of (passes: bool, info: dict with details)
+    返回:
+        (passes: bool, info: dict) 元组，包含详情的字典
     """
     info = {"width": width, "height": height, "is_square": width == height, "type": "emoji" if is_emoji else "message"}
 
     if is_emoji:
-        # Emoji GIFs should be 128x128
+        # 表情GIF应该是128x128
         optimal = width == height == 128
         acceptable = width == height and 64 <= width <= 128
 
@@ -79,36 +79,36 @@ def validate_dimensions(width: int, height: int, is_emoji: bool = True) -> tuple
         info["acceptable"] = acceptable
 
         if optimal:
-            print(f"✓ {width}x{height} - optimal for emoji")
+            print(f"✓ {width}x{height} - 表情的最佳尺寸")
             passes = True
         elif acceptable:
-            print(f"⚠ {width}x{height} - acceptable but 128x128 is optimal")
+            print(f"⚠ {width}x{height} - 可接受但128x128是最佳尺寸")
             passes = True
         else:
-            print(f"✗ {width}x{height} - emoji should be square, 128x128 recommended")
+            print(f"✗ {width}x{height} - 表情应该是正方形，推荐128x128")
             passes = False
     else:
-        # Message GIFs should be square-ish and reasonable size
+        # 消息GIF应该是近似正方形且尺寸合理
         aspect_ratio = max(width, height) / min(width, height) if min(width, height) > 0 else float("inf")
         reasonable_size = 320 <= min(width, height) <= 640
 
         info["aspect_ratio"] = aspect_ratio
         info["reasonable_size"] = reasonable_size
 
-        # Check if roughly square (within 2:1 ratio)
+        # 检查是否大致为正方形（在2:1比例内）
         is_square_ish = aspect_ratio <= 2.0
 
         if is_square_ish and reasonable_size:
-            print(f"✓ {width}x{height} - good for message GIF")
+            print(f"✓ {width}x{height} - 适合消息GIF")
             passes = True
         elif is_square_ish:
-            print(f"⚠ {width}x{height} - square-ish but unusual size")
+            print(f"⚠ {width}x{height} - 近似正方形但尺寸不常见")
             passes = True
         elif reasonable_size:
-            print(f"⚠ {width}x{height} - good size but not square-ish")
+            print(f"⚠ {width}x{height} - 尺寸合适但不是近似正方形")
             passes = True
         else:
-            print(f"✗ {width}x{height} - unusual dimensions for Slack")
+            print(f"✗ {width}x{height} - Slack尺寸不寻常")
             passes = False
 
     return passes, info
@@ -116,14 +116,14 @@ def validate_dimensions(width: int, height: int, is_emoji: bool = True) -> tuple
 
 def validate_gif(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dict]:
     """
-    Run all validations on a GIF file.
+    对GIF文件运行所有验证。
 
-    Args:
-        gif_path: Path to GIF file
-        is_emoji: True for emoji GIF, False for message GIF
+    参数:
+        gif_path: GIF文件路径
+        is_emoji: True表示表情GIF，False表示消息GIF
 
-    Returns:
-        Tuple of (all_pass: bool, results: dict)
+    返回:
+        (all_pass: bool, results: dict) 元组
     """
     from PIL import Image
 
@@ -132,19 +132,19 @@ def validate_gif(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dic
     if not gif_path.exists():
         return False, {"error": f"File not found: {gif_path}"}
 
-    print(f"\nValidating {gif_path.name} as {'emoji' if is_emoji else 'message'} GIF:")
+    print(f"\n验证 {gif_path.name} 作为 {'emoji' if is_emoji else 'message'} GIF:")
     print("=" * 60)
 
-    # Check file size
+    # 检查文件大小
     size_pass, size_info = check_slack_size(gif_path, is_emoji)
 
-    # Check dimensions
+    # 检查尺寸
     try:
         with Image.open(gif_path) as img:
             width, height = img.size
             dim_pass, dim_info = validate_dimensions(width, height, is_emoji)
 
-            # Count frames
+            # 统计帧数
             frame_count = 0
             try:
                 while True:
@@ -153,7 +153,7 @@ def validate_gif(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dic
             except EOFError:
                 pass
 
-            # Get duration if available
+            # 获取持续时间（如果可用）
             try:
                 duration_ms = img.info.get("duration", 100)
                 total_duration = (duration_ms * frame_count) / 1000
@@ -166,9 +166,9 @@ def validate_gif(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dic
     except Exception as e:
         return False, {"error": f"Failed to read GIF: {e}"}
 
-    print(f"\nFrames: {frame_count}")
+    print(f"\n帧数: {frame_count}")
     if total_duration:
-        print(f"Duration: {total_duration:.1f}s @ {fps:.1f} fps")
+        print(f"持续时间: {total_duration:.1f}s @ {fps:.1f} fps")
 
     all_pass = size_pass and dim_pass
 
@@ -184,9 +184,9 @@ def validate_gif(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dic
 
     print("=" * 60)
     if all_pass:
-        print("✓ All validations passed!")
+        print("✓ 所有验证通过！")
     else:
-        print("✗ Some validations failed")
+        print("✗ 部分验证失败")
     print()
 
     return all_pass, results
@@ -194,13 +194,13 @@ def validate_gif(gif_path: str | Path, is_emoji: bool = True) -> tuple[bool, dic
 
 def get_optimization_suggestions(results: dict) -> list[str]:
     """
-    Get suggestions for optimizing a GIF based on validation results.
+    根据验证结果获取优化GIF的建议。
 
-    Args:
-        results: Results dict from validate_gif()
+    参数:
+        results: 来自validate_gif()的结果字典
 
-    Returns:
-        List of suggestion strings
+    返回:
+        建议字符串列表
     """
     suggestions = []
 
@@ -208,49 +208,49 @@ def get_optimization_suggestions(results: dict) -> list[str]:
         size_info = results.get("size", {})
         dim_info = results.get("dimensions", {})
 
-        # Size suggestions
+        # 大小建议
         if not size_info.get("passes", True):
             overage = size_info["size_kb"] - size_info["limit_kb"]
             if size_info["type"] == "emoji":
-                suggestions.append(f"Reduce file size by {overage:.1f} KB:")
-                suggestions.append("  - Limit to 10-12 frames")
-                suggestions.append("  - Use 32-40 colors maximum")
-                suggestions.append("  - Remove gradients (solid colors compress better)")
-                suggestions.append("  - Simplify design")
+                suggestions.append(f"减少 {overage:.1f} KB 文件大小:")
+                suggestions.append("  - 限制在10-12帧")
+                suggestions.append("  - 使用最多32-40种颜色")
+                suggestions.append("  - 移除渐变（纯色压缩更好）")
+                suggestions.append("  - 简化设计")
             else:
-                suggestions.append(f"Reduce file size by {overage:.1f} KB:")
-                suggestions.append("  - Reduce frame count or FPS")
-                suggestions.append("  - Use fewer colors (128 → 64)")
-                suggestions.append("  - Reduce dimensions")
+                suggestions.append(f"减少 {overage:.1f} KB 文件大小:")
+                suggestions.append("  - 减少帧数或FPS")
+                suggestions.append("  - 使用更少的颜色（128 → 64）")
+                suggestions.append("  - 减小尺寸")
 
-        # Dimension suggestions
+        # 尺寸建议
         if not dim_info.get("optimal", True) and dim_info.get("type") == "emoji":
-            suggestions.append("For optimal emoji GIF:")
-            suggestions.append("  - Use 128x128 dimensions")
-            suggestions.append("  - Ensure square aspect ratio")
+            suggestions.append("最佳表情GIF:")
+            suggestions.append("  - 使用128x128尺寸")
+            suggestions.append("  - 确保宽高比为正方形")
 
     return suggestions
 
 
-# Convenience function for quick checks
+# 快速检查的便捷函数
 def is_slack_ready(gif_path: str | Path, is_emoji: bool = True, verbose: bool = True) -> bool:
     """
-    Quick check if GIF is ready for Slack.
+    快速检查GIF是否已准备好用于Slack。
 
-    Args:
-        gif_path: Path to GIF file
-        is_emoji: True for emoji GIF, False for message GIF
-        verbose: Print detailed feedback
+    参数:
+        gif_path: GIF文件路径
+        is_emoji: True表示表情GIF，False表示消息GIF
+        verbose: 打印详细反馈
 
-    Returns:
-        True if ready, False otherwise
+    返回:
+        如果已准备好则返回True，否则返回False
     """
     if verbose:
         passes, results = validate_gif(gif_path, is_emoji)
         if not passes:
             suggestions = get_optimization_suggestions(results)
             if suggestions:
-                print("\nSuggestions:")
+                print("\n建议:")
                 for suggestion in suggestions:
                     print(suggestion)
         return passes

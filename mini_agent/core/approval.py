@@ -1,8 +1,8 @@
-"""Approval manager for tool call authorization.
+"""工具调用授权审批管理器。
 
-Handles user approval flow for tool calls in AGENT mode,
-with configurable timeout and security defaults.
-Thread-safe implementation with proper locking.
+处理 AGENT 模式下工具调用的用户审批流程，
+支持可配置的超时时间和安全默认值。
+线程安全的实现，带有正确的锁机制。
 """
 
 from __future__ import annotations
@@ -17,16 +17,16 @@ from ..utils import Colors
 
 
 class ApprovalManager:
-    """Manages tool call approval in AGENT mode.
+    """管理 AGENT 模式下的工具调用审批。
 
-    In AGENT mode, each tool call requires explicit user approval.
-    In YOLO mode, all calls are auto-approved.
-    In PLAN mode, write operations are blocked entirely.
+    在 AGENT 模式下，每个工具调用都需要用户明确审批。
+    在 YOLO 模式下，所有调用都会被自动批准。
+    在 PLAN 模式下，写操作会被完全阻止。
 
-    Security default: if approval cannot be obtained (timeout, error),
-    the tool call is REJECTED (deny by default).
+    安全默认值：如果无法获得审批（超时、错误），
+    则该工具调用将被拒绝（默认拒绝）。
 
-    Thread-safe: uses Lock for concurrent access protection.
+    线程安全：使用锁来保护并发访问。
     """
 
     DEFAULT_TIMEOUT = 10
@@ -35,7 +35,7 @@ class ApprovalManager:
         self._mode = mode
         self._write_tools = write_tools or set()
         self._timeout = int(os.environ.get("MINI_AGENT_APPROVAL_TIMEOUT", str(self.DEFAULT_TIMEOUT)))
-        self._lock = Lock()  # Instance-level lock for thread safety
+        self._lock = Lock()  # 实例级锁，用于保证线程安全
 
     @property
     def mode(self) -> AgentMode:
@@ -47,13 +47,13 @@ class ApprovalManager:
             self._mode = value
 
     def is_approved(self, function_name: str) -> bool:
-        """Check if a tool call is approved (thread-safe).
+        """检查工具调用是否已批准（线程安全）。
 
-        Args:
-            function_name: Name of the tool being called
+        参数:
+            function_name: 被调用工具的名称
 
-        Returns:
-            True if approved, False if rejected
+        返回:
+            True 表示已批准，False 表示被拒绝
         """
         if self._mode != AgentMode.AGENT:
             return True
@@ -62,13 +62,13 @@ class ApprovalManager:
             return self._get_approval_sync(function_name)
 
     def _get_approval_sync(self, function_name: str) -> bool:
-        """Synchronous approval check (must be called with lock held).
+        """同步审批检查（必须在持有锁的情况下调用）。
 
-        Args:
-            function_name: Name of the tool being called
+        参数:
+            function_name: 被调用工具的名称
 
-        Returns:
-            True if approved, False if rejected
+        返回:
+            True 表示已批准，False 表示被拒绝
         """
         try:
             result: list[str | None] = [None]
@@ -93,28 +93,28 @@ class ApprovalManager:
             return False
 
     async def is_approved_async(self, function_name: str) -> bool:
-        """Async version of approval check using executor.
+        """使用执行器的异步审批检查版本。
 
-        Args:
-            function_name: Name of the tool being called
+        参数:
+            function_name: 被调用工具的名称
 
-        Returns:
-            True if approved, False if rejected
+        返回:
+            True 表示已批准，False 表示被拒绝
         """
         if self._mode != AgentMode.AGENT:
             return True
 
         loop = asyncio.get_running_loop()
-        # P1 FIX: self._lock is a threading.Lock, not an Executor.
-        # Use None to default to the thread pool executor.
+        # P1 修复: self._lock 是 threading.Lock，不是 Executor。
+        # 使用 None 来使用默认的线程池执行器。
         return await loop.run_in_executor(None, self._get_approval_sync, function_name)
 
     def is_write_tool(self, function_name: str) -> bool:
-        """Check if a tool is a write operation."""
+        """检查工具是否为写操作。"""
         with self._lock:
             return function_name in self._write_tools
 
     def set_write_tools(self, write_tools: set[str] | frozenset[str]) -> None:
-        """Update the set of write tools (thread-safe)."""
+        """更新写工具集合（线程安全）。"""
         with self._lock:
             self._write_tools = write_tools

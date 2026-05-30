@@ -20,7 +20,7 @@ def create_morph_animation(
     object1_data: dict,
     object2_data: dict,
     num_frames: int = 30,
-    morph_type: str = "crossfade",  # 'crossfade', 'scale', 'spin_morph'
+    morph_type: str = "crossfade",  # 'crossfade': 交叉淡入淡出, 'scale': 缩放过渡, 'spin_morph': 旋转变形
     easing: str = "ease_in_out",
     object_type: str = "emoji",
     center_pos: tuple[int, int] = (240, 240),
@@ -29,22 +29,22 @@ def create_morph_animation(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list[Image.Image]:
     """
-    Create morphing animation between two objects.
+    创建两个物体之间的变形动画。
 
-    Args:
-        object1_data: First object configuration
-        object2_data: Second object configuration
-        num_frames: Number of frames
-        morph_type: Type of morph effect
-        easing: Easing function
-        object_type: Type of objects
-        center_pos: Center position
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        object1_data: 第一个物体配置
+        object2_data: 第二个物体配置
+        num_frames: 帧数
+        morph_type: 变形效果类型
+        easing: 缓动函数
+        object_type: 物体类型
+        center_pos: 中心位置
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     frames = []
 
@@ -53,12 +53,12 @@ def create_morph_animation(
         frame = create_blank_frame(frame_width, frame_height, bg_color)
 
         if morph_type == "crossfade":
-            # Simple crossfade between two objects
+            # 两个物体之间的简单交叉淡入淡出
             opacity1 = interpolate(1, 0, t, easing)
             opacity2 = interpolate(0, 1, t, easing)
 
             if object_type == "emoji":
-                # Create first emoji
+                # 创建第一个 emoji
                 emoji1_canvas = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
                 size1 = object1_data["size"]
                 draw_emoji_enhanced(
@@ -69,12 +69,12 @@ def create_morph_animation(
                     shadow=False,
                 )
 
-                # Apply opacity
+                # 应用不透明度
                 from templates.fade import apply_opacity
 
                 emoji1_canvas = apply_opacity(emoji1_canvas, opacity1)
 
-                # Create second emoji
+                # 创建第二个 emoji
                 emoji2_canvas = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
                 size2 = object2_data["size"]
                 draw_emoji_enhanced(
@@ -87,32 +87,32 @@ def create_morph_animation(
 
                 emoji2_canvas = apply_opacity(emoji2_canvas, opacity2)
 
-                # Composite both
+                # 合成两者
                 frame_rgba = frame.convert("RGBA")
                 frame_rgba = Image.alpha_composite(frame_rgba, emoji1_canvas)
                 frame_rgba = Image.alpha_composite(frame_rgba, emoji2_canvas)
                 frame = frame_rgba.convert("RGB")
 
             elif object_type == "circle":
-                # Morph between two circles
+                # 在两个圆之间变形
                 radius1 = object1_data["radius"]
                 radius2 = object2_data["radius"]
                 color1 = object1_data["color"]
                 color2 = object2_data["color"]
 
-                # Interpolate properties
+                # 插值属性
                 current_radius = int(interpolate(radius1, radius2, t, easing))
                 current_color = tuple(int(interpolate(color1[i], color2[i], t, easing)) for i in range(3))
 
                 draw_circle(frame, center_pos, current_radius, fill_color=current_color)
 
         elif morph_type == "scale":
-            # First object scales down as second scales up
+            # 第一个物体缩小，第二个物体放大
             if object_type == "emoji":
                 scale1 = interpolate(1.0, 0.0, t, easing)
                 scale2 = interpolate(0.0, 1.0, t, easing)
 
-                # Draw first emoji (shrinking)
+                # 绘制第一个 emoji（正在缩小）
                 if scale1 > 0.05:
                     size1 = int(object1_data["size"] * scale1)
                     size1 = max(12, size1)
@@ -129,7 +129,7 @@ def create_morph_animation(
                     frame = Image.alpha_composite(frame_rgba, emoji1_canvas)
                     frame = frame.convert("RGB")
 
-                # Draw second emoji (growing)
+                # 绘制第二个 emoji（正在放大）
                 if scale2 > 0.05:
                     size2 = int(object2_data["size"] * scale2)
                     size2 = max(12, size2)
@@ -147,17 +147,17 @@ def create_morph_animation(
                     frame = frame.convert("RGB")
 
         elif morph_type == "spin_morph":
-            # Spin while morphing (flip-like)
+            # 旋转同时变形（类似翻转）
             import math
 
-            # Calculate rotation (0 to 180 degrees)
+            # 计算旋转角度（0 到 180 度）
             angle = interpolate(0, 180, t, easing)
             scale_factor = abs(math.cos(math.radians(angle)))
 
-            # Determine which object to show
+            # 判断显示哪个物体
             current_object = object1_data if angle < 90 else object2_data
 
-            # Skip when edge-on
+            # 侧面朝前时跳过
             if scale_factor < 0.05:
                 frames.append(frame)
                 continue
@@ -175,7 +175,7 @@ def create_morph_animation(
                     shadow=False,
                 )
 
-                # Scale horizontally for spin effect
+                # 为旋转效果水平缩放
                 new_width = max(1, int(canvas_size * scale_factor))
                 emoji_scaled = emoji_canvas.resize((new_width, canvas_size), Image.LANCZOS)
 
@@ -195,16 +195,16 @@ def create_reaction_morph(
     emoji_start: str, emoji_end: str, num_frames: int = 20, frame_size: int = 128
 ) -> list[Image.Image]:
     """
-    Create quick emoji reaction morph (for emoji GIFs).
+    创建快速 emoji 反应变形（用于 emoji GIF）。
 
-    Args:
-        emoji_start: Starting emoji
-        emoji_end: Ending emoji
-        num_frames: Number of frames
-        frame_size: Frame size (square)
+    参数:
+        emoji_start: 起始 emoji
+        emoji_end: 结束 emoji
+        num_frames: 帧数
+        frame_size: 帧大小（正方形）
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     return create_morph_animation(
         object1_data={"emoji": emoji_start, "size": 80},
@@ -229,39 +229,39 @@ def create_shape_morph(
     bg_color: tuple[int, int, int] = (255, 255, 255),
 ) -> list[Image.Image]:
     """
-    Morph through a sequence of shapes.
+    在一系列形状之间变形。
 
-    Args:
-        shapes: List of shape dicts with 'radius' and 'color'
-        num_frames: Total number of frames
-        frames_per_shape: Frames to spend on each morph
-        frame_width: Frame width
-        frame_height: Frame height
-        bg_color: Background color
+    参数:
+        shapes: 形状字典列表，包含 'radius' 和 'color'
+        num_frames: 总帧数
+        frames_per_shape: 每个变形的帧数
+        frame_width: 帧宽度
+        frame_height: 帧高度
+        bg_color: 背景颜色
 
-    Returns:
-        List of frames
+    返回:
+        帧列表
     """
     frames = []
     center = (frame_width // 2, frame_height // 2)
 
     for i in range(num_frames):
-        # Determine which shapes we're morphing between
+        # 确定我们正在变形的形状
         cycle_progress = (i % (frames_per_shape * len(shapes))) / frames_per_shape
         shape_idx = int(cycle_progress) % len(shapes)
         next_shape_idx = (shape_idx + 1) % len(shapes)
 
-        # Progress between these two shapes
+        # 这两个形状之间的进度
         t = cycle_progress - shape_idx
 
         shape1 = shapes[shape_idx]
         shape2 = shapes[next_shape_idx]
 
-        # Interpolate properties
+        # 插值属性
         radius = int(interpolate(shape1["radius"], shape2["radius"], t, "ease_in_out"))
         color = tuple(int(interpolate(shape1["color"][j], shape2["color"][j], t, "ease_in_out")) for j in range(3))
 
-        # Draw frame
+        # 绘制帧
         frame = create_blank_frame(frame_width, frame_height, bg_color)
         draw_circle(frame, center, radius, fill_color=color)
 
@@ -270,13 +270,13 @@ def create_shape_morph(
     return frames
 
 
-# Example usage
+# 示例用法
 if __name__ == "__main__":
-    print("Creating morph animations...")
+    print("正在创建变形动画...")
 
     builder = GIFBuilder(width=480, height=480, fps=20)
 
-    # Example 1: Crossfade morph
+    # 示例 1: 交叉淡入淡出变形
     frames = create_morph_animation(
         object1_data={"emoji": "😊", "size": 100},
         object2_data={"emoji": "😂", "size": 100},
@@ -287,7 +287,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("morph_crossfade.gif", num_colors=128)
 
-    # Example 2: Scale morph
+    # 示例 2: 缩放变形
     builder.clear()
     frames = create_morph_animation(
         object1_data={"emoji": "🌙", "size": 100},
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("morph_scale.gif", num_colors=128)
 
-    # Example 3: Shape morph cycle
+    # 示例 3: 形状变形循环
     builder.clear()
     from core.color_palettes import get_palette
 
@@ -315,4 +315,4 @@ if __name__ == "__main__":
     builder.add_frames(frames)
     builder.save("morph_shapes.gif", num_colors=64)
 
-    print("Created morph animations!")
+    print("变形动画创建完成!")

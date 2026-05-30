@@ -3,14 +3,14 @@ import sys
 
 from pdf2image import convert_from_path
 
-# Converts each page of a PDF to a PNG image.
+# 将 PDF 的每一页转换为 PNG 图像。
 
 
 def convert(pdf_path, output_dir, max_dim=1000):
     images = convert_from_path(pdf_path, dpi=200)
 
     for i, image in enumerate(images):
-        # Scale image if needed to keep width/height under `max_dim`
+        # 根据需要缩放图像，使宽度/高度不超过 `max_dim`
         width, height = image.size
         if width > max_dim or height > max_dim:
             scale_factor = min(max_dim / width, max_dim / height)

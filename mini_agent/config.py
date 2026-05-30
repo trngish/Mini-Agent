@@ -1,10 +1,10 @@
-"""Configuration management module
+"""配置管理模块
 
-Provides unified configuration loading and management functionality with support for:
-- YAML configuration files
-- Environment variable overrides
-- CLI argument merging
-- Config validation
+提供统一的配置加载和管理功能，支持:
+- YAML配置文件
+- 环境变量覆盖
+- CLI参数合并
+- 配置验证
 """
 
 import contextlib
@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 
 class RetryConfig(BaseModel):
-    """Retry configuration for YAML config file."""
+    """YAML配置文件的重试配置"""
 
     enabled: bool = True
     max_retries: int = 3
@@ -27,30 +27,43 @@ class RetryConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """LLM configuration"""
+    """LLM配置"""
 
     api_key: str
     api_base: str = "https://api.minimax.io"
     model: str = "MiniMax-M2.5"
-    provider: str = "anthropic"  # "anthropic" or "openai"
+    provider: str = "anthropic"  # 可选值: "anthropic" 或 "openai"
     retry: RetryConfig = Field(default_factory=RetryConfig)
+
+    @model_serializer(mode="wrap")
+    def serialize_model(self, handler):
+        """Serialize model with api_key masked for安全."""
+        data = handler(self)
+        if data.get("api_key"):
+            # Mask API key: show first 4 and last 4 chars
+            key = data["api_key"]
+            if len(key) > 8:
+                data["api_key"] = f"{key[:4]}***{key[-4:]}"
+            else:
+                data["api_key"] = "****"
+        return data
 
     @field_validator("api_key")
     @classmethod
     def validate_api_key(cls, v: str) -> str:
         if not v or v == "YOUR_API_KEY_HERE":
             raise ValueError(
-                "API key not configured. Set MINIMAX_API_KEY environment variable or configure api_key in config.yaml"
+                "API密钥未配置。请设置 MINIMAX_API_KEY 环境变量或在 config.yaml 中配置 api_key"
             )
         if len(v) < 8:
             raise ValueError(
-                f"Invalid API Key format: expected at least 8 characters, got {repr(v[:4])}... (length={len(v)})"
+                f"API密钥格式无效: 期望至少8个字符，实际得到 {repr(v[:4])}... (长度={len(v)})"
             )
         return v
 
 
 class AgentConfig(BaseModel):
-    """Agent configuration"""
+    """Agent配置"""
 
     max_steps: int = 50
     workspace_dir: str = "./workspace"
@@ -58,54 +71,53 @@ class AgentConfig(BaseModel):
 
 
 class MCPConfig(BaseModel):
-    """MCP (Model Context Protocol) timeout configuration"""
+    """MCP (Model Context Protocol) 超时配置"""
 
-    connect_timeout: float = 10.0  # Connection timeout (seconds)
-    execute_timeout: float = 60.0  # Tool execution timeout (seconds)
-    sse_read_timeout: float = 120.0  # SSE read timeout (seconds)
+    connect_timeout: float = 10.0  # 连接超时时间（秒）
+    execute_timeout: float = 60.0  # 工具执行超时时间（秒）
+    sse_read_timeout: float = 120.0  # SSE读取超时时间（秒）
 
 
 class ToolsConfig(BaseModel):
-    """ "Tools configuration"""
+    """ "工具配置"""
 
-    # Basic tools (file operations, bash)
+    # 基础工具（文件操作、bash）
     enable_file_tools: bool = True
     enable_bash: bool = True
     enable_note: bool = True
 
-    # Skills
+    # 技能（Skills）
     enable_skills: bool = True
     skills_dir: str = "./skills"
 
-    # MCP tools
+    # MCP工具
     enable_mcp: bool = True
     mcp_config_path: str = "mcp.json"
     mcp: MCPConfig = Field(default_factory=MCPConfig)
 
-    # Tool timeouts (in seconds)
+    # 工具超时时间（秒）
     bash_timeout: int = Field(
-        default=120, description="Default timeout for bash tool execution (default: 120, max: 600)"
+        default=120, description="bash工具执行的默认超时时间（默认: 120, 最大: 600）"
     )
 
     def get_skills_search_paths(self) -> list[Path]:
-        """ "Get skills directories to search, in priority order.
+        """ "获取技能目录搜索列表，按优先级排序。
 
-
-        Priority:
-        1. User config directory: ~/.mini-agent/skills/
-        2. Project directory: {project_root}/mini_agent/skills/
+        优先级:
+        1. 用户配置目录: ~/.mini-agent/skills/
+        2. 项目目录: {project_root}/mini_agent/skills/
 
         Returns:
-            List of skills directory paths to search
+            技能目录路径列表
         """
         paths = []
 
-        # Priority 1: User config directory skills (~/.mini-agent/skills/)
+        # 优先级1: 用户配置目录的技能 (~/.mini-agent/skills/)
         user_skills_dir = Path.home() / ".mini-agent" / "skills"
         if user_skills_dir.exists():
             paths.append(user_skills_dir)
 
-        # Priority 2: Project directory skills (./mini_agent/skills/)
+        # 优先级2: 项目目录的技能 (./mini_agent/skills/)
         project_skills_dir = Path("mini_agent") / "skills"
         if project_skills_dir.exists():
             paths.append(project_skills_dir)
@@ -113,23 +125,23 @@ class ToolsConfig(BaseModel):
         return paths
 
     def get_mcp_config_paths(self) -> list[Path]:
-        """Get MCP config file paths to search, in priority order.
+        """获取MCP配置文件搜索路径，按优先级排序。
 
-        Priority:
-        1. User config directory: ~/.mini-agent/config/mcp.json
-        2. Project directory: ./mcp.json
+        优先级:
+        1. 用户配置目录: ~/.mini-agent/config/mcp.json
+        2. 项目目录: ./mcp.json
 
         Returns:
-            List of MCP config file paths to search
+            MCP配置文件路径列表
         """
         paths = []
 
-        # Priority 1: User config directory MCP config (~/.mini-agent/config/mcp.json)
+        # 优先级1: 用户配置目录的MCP配置 (~/.mini-agent/config/mcp.json)
         user_mcp_config = Path.home() / ".mini-agent" / "config" / "mcp.json"
         if user_mcp_config.exists():
             paths.append(user_mcp_config)
 
-        # Priority 2: Project directory MCP config (./mcp.json)
+        # 优先级2: 项目目录的MCP配置 (./mcp.json)
         project_mcp_config = Path("mcp.json")
         if project_mcp_config.exists():
             paths.append(project_mcp_config)
@@ -138,39 +150,39 @@ class ToolsConfig(BaseModel):
 
 
 class PlatformConfig(BaseModel):
-    """Platform-specific configuration"""
+    """平台相关配置"""
 
-    mode: str = Field(default="auto", description="Platform mode: 'windows', 'linux', or 'auto' (auto-detect from OS)")
+    mode: str = Field(default="auto", description="平台模式: 'windows', 'linux', 或 'auto'（自动检测操作系统）")
 
 
 class SecurityConfig(BaseModel):
-    """Security configuration for path access control"""
+    """路径访问控制的安全配置"""
 
     extra_blocked_dirs: list[str] = Field(
         default_factory=list,
-        description="Additional directories to block (beyond built-in system directories)",
+        description="要阻止的额外目录（除内置系统目录外）",
     )
     extra_blocked_home_subdirs: list[str] = Field(
         default_factory=list,
-        description="Additional home subdirectories to block (beyond .ssh, .gnupg, .config/ssh)",
+        description="要阻止的额外主目录子目录（除 .ssh, .gnupg, .config/ssh 外）",
     )
 
 
 class M27Config(BaseModel):
-    """MiniMax M2.7 specific configuration"""
+    """MiniMax M2.7特定配置"""
 
     enable_extended_thinking: bool = True
-    thinking_budget_tokens: int = 32768  # Per-call billing: full 32K budget, deeper = more accurate = fewer calls
-    thinking_budget_adaptive: bool = True  # Adaptive thinking budget
+    thinking_budget_tokens: int = 32768  # 按调用计费: 完整32K预算，越深越准确=调用次数越少
+    thinking_budget_adaptive: bool = True  # 自适应思考预算
     enable_message_cache: bool = True
     enable_parallel_tool_calls: bool = True
-    max_concurrent_tools: int = 20  # M2.7 supports 20+ parallel, more per call = fewer calls
-    token_limit: int = 800_000  # 800K tokens for 1M context window
-    max_output_tokens: int = 32768  # M2.7 supports up to 32K output
+    max_concurrent_tools: int = 20  # M2.7支持20+并行调用，单次调用越多=调用次数越少
+    token_limit: int = 800_000  # 800K tokens对应1M上下文窗口
+    max_output_tokens: int = 32768  # M2.7支持最多32K输出
 
 
 class CLIOverrideConfig(BaseModel):
-    """CLI override configuration for runtime parameter passing"""
+    """运行时参数传递的CLI覆盖配置"""
 
     api_key: str | None = None
     api_base: str | None = None
@@ -184,7 +196,7 @@ class CLIOverrideConfig(BaseModel):
 
 
 class Config(BaseModel):
-    """Main configuration class with environment and CLI override support"""
+    """支持环境和CLI覆盖的主配置类"""
 
     llm: LLMConfig
     agent: AgentConfig
@@ -195,54 +207,54 @@ class Config(BaseModel):
 
     @classmethod
     def load(cls) -> "Config":
-        """Load configuration from the default search path."""
+        """从默认搜索路径加载配置。"""
         config_path = cls.get_default_config_path()
         if not config_path.exists():
             raise FileNotFoundError(
-                "Configuration file not found. Run scripts/setup-config.sh or place config.yaml in mini_agent/config/."
+                "未找到配置文件。请运行 scripts/setup-config.sh 或将 config.yaml 放置在 mini_agent/config/ 目录中。"
             )
         return cls.from_yaml(config_path)
 
     @classmethod
     def from_yaml(cls, config_path: str | Path) -> "Config":
-        """Load configuration from YAML file with environment variable overrides
+        """从YAML文件加载配置，并应用环境变量覆盖
 
-        Environment variables take precedence over YAML file values:
-        - MINI_AGENT_API_KEY: overrides api_key
-        - MINI_AGENT_API_BASE: overrides api_base
-        - MINI_AGENT_MODEL: overrides model
-        - MINI_AGENT_PROVIDER: overrides provider
-        - MINI_AGENT_MAX_STEPS: overrides max_steps
-        - MINI_AGENT_PLATFORM_MODE: overrides platform.mode
+        环境变量优先于YAML文件中的值:
+        - MINI_AGENT_API_KEY: 覆盖 api_key
+        - MINI_AGENT_API_BASE: 覆盖 api_base
+        - MINI_AGENT_MODEL: 覆盖 model
+        - MINI_AGENT_PROVIDER: 覆盖 provider
+        - MINI_AGENT_MAX_STEPS: 覆盖 max_steps
+        - MINI_AGENT_PLATFORM_MODE: 覆盖 platform.mode
 
         Args:
-            config_path: Configuration file path
+            config_path: 配置文件路径
 
         Returns:
-            Config instance
+            Config实例
 
         Raises:
-            FileNotFoundError: Configuration file does not exist
-            ValueError: Invalid configuration format or missing required fields
+            FileNotFoundError: 配置文件不存在
+            ValueError: 配置格式无效或缺少必需字段
         """
         config_path = Path(config_path)
 
         if not config_path.exists():
-            raise FileNotFoundError(f"Configuration file does not exist: {config_path}")
+            raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         if not data:
-            raise ValueError("Configuration file is empty")
+            raise ValueError("配置文件为空")
 
-        # Apply environment variable overrides first
+        # 首先应用环境变量覆盖
         data = cls._apply_env_overrides(data)
 
-        # Parse all config sections
+        # 解析所有配置节
         config = cls._parse_config(data, config_path)
 
-        # Validate configuration with ConfigValidator
+        # 使用ConfigValidator验证配置
         from .utils.config_validator import ConfigValidator
 
         ConfigValidator.validate_or_raise(config)
@@ -251,14 +263,14 @@ class Config(BaseModel):
 
     @classmethod
     def _parse_config(cls, data: dict[str, Any], config_path: Path) -> "Config":
-        """Parse all configuration sections from data dictionary.
+        """从数据字典解析所有配置节。
 
         Args:
-            data: Configuration dictionary from YAML
-            config_path: Original config file path for resolving relative paths
+            data: 来自YAML的配置字典
+            config_path: 用于解析相对路径的原始配置文件路径
 
         Returns:
-            Config instance
+            Config实例
         """
         llm_config = cls._parse_llm_config(data)
         agent_config = cls._parse_agent_config(data)
@@ -278,7 +290,7 @@ class Config(BaseModel):
 
     @classmethod
     def _parse_llm_config(cls, data: dict[str, Any]) -> LLMConfig:
-        """Parse LLM configuration section."""
+        """解析LLM配置节。"""
         retry_data = data.get("retry", {})
         retry_config = RetryConfig(
             enabled=retry_data.get("enabled", True),
@@ -291,7 +303,7 @@ class Config(BaseModel):
         api_key = data.get("api_key")
         if not api_key:
             raise ValueError(
-                "api_key is required but not found. Set MINIMAX_API_KEY env var or add api_key to config.yaml"
+                "api_key 是必需的但未找到。请设置 MINIMAX_API_KEY 环境变量或在 config.yaml 中添加 api_key"
             )
 
         return LLMConfig(
@@ -304,7 +316,7 @@ class Config(BaseModel):
 
     @classmethod
     def _parse_agent_config(cls, data: dict[str, Any]) -> AgentConfig:
-        """Parse Agent configuration section."""
+        """解析Agent配置节。"""
         return AgentConfig(
             max_steps=data.get("max_steps", AgentConfig().max_steps),
             workspace_dir=data.get("workspace_dir", "./workspace"),
@@ -313,10 +325,10 @@ class Config(BaseModel):
 
     @classmethod
     def _parse_tools_config(cls, data: dict[str, Any], config_path: Path) -> ToolsConfig:
-        """Parse Tools configuration section."""
+        """解析Tools配置节。"""
         tools_data = data.get("tools", {})
 
-        # Parse MCP configuration
+        # 解析MCP配置
         mcp_data = tools_data.get("mcp", {})
         mcp_config = MCPConfig(
             connect_timeout=mcp_data.get("connect_timeout", 10.0),
@@ -324,7 +336,7 @@ class Config(BaseModel):
             sse_read_timeout=mcp_data.get("sse_read_timeout", 120.0),
         )
 
-        # Resolve skills_dir relative to project root (config is in mini_agent/config/)
+        # 相对于项目根目录解析skills_dir（配置文件位于 mini_agent/config/）
         skills_dir_raw = tools_data.get("skills_dir", "./mini_agent/skills")
         skills_dir_path = Path(skills_dir_raw)
         if not skills_dir_path.is_absolute():
@@ -345,14 +357,14 @@ class Config(BaseModel):
 
     @classmethod
     def _parse_platform_config(cls, data: dict[str, Any]) -> PlatformConfig:
-        """Parse Platform configuration section."""
+        """解析Platform配置节。"""
         platform_data = data.get("platform", {})
         platform_mode = platform_data.get("mode", "auto")
         return PlatformConfig(mode=platform_mode)
 
     @classmethod
     def _parse_security_config(cls, data: dict[str, Any]) -> SecurityConfig:
-        """Parse Security configuration section."""
+        """解析Security配置节。"""
         security_data = data.get("security", {})
         return SecurityConfig(
             extra_blocked_dirs=security_data.get("extra_blocked_dirs", []),
@@ -361,7 +373,7 @@ class Config(BaseModel):
 
     @classmethod
     def _parse_m27_config(cls, data: dict[str, Any]) -> M27Config:
-        """Parse M2.7 configuration section."""
+        """解析M2.7配置节。"""
         m27_data = data.get("m27", {})
         return M27Config(
             enable_extended_thinking=m27_data.get("enable_extended_thinking", True),
@@ -375,34 +387,34 @@ class Config(BaseModel):
 
     @classmethod
     def _apply_env_overrides(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Apply environment variable overrides to configuration data.
+        """应用环境变量覆盖到配置数据。
 
-        SECURITY NOTE: Environment variables have the HIGHEST priority and
-        will override any values in the YAML configuration file.
+        安全注意: 环境变量具有最高优先级，
+        会覆盖YAML配置文件中的任何值。
 
-        Supported env vars:
-        - MINIMAX_API_KEY: API key (required, min 8 chars)
-        - MINI_AGENT_API_KEY: Legacy alias for API key
-        - MINI_AGENT_API_BASE: API base URL
-        - MINI_AGENT_MODEL: Model name
-        - MINI_AGENT_PROVIDER: Provider type
-        - MINI_AGENT_MAX_STEPS: Max execution steps
-        - MINI_AGENT_WORKSPACE_DIR: Workspace directory
-        - MINI_AGENT_PLATFORM_MODE: Platform mode (windows/linux/auto)
+        支持的环境变量:
+        - MINIMAX_API_KEY: API密钥（必需，最少8个字符）
+        - MINI_AGENT_API_KEY: API密钥（兼容性别名）
+        - MINI_AGENT_API_BASE: API基础URL
+        - MINI_AGENT_MODEL: 模型名称
+        - MINI_AGENT_PROVIDER: 提供商类型
+        - MINI_AGENT_MAX_STEPS: 最大执行步骤
+        - MINI_AGENT_WORKSPACE_DIR: 工作目录
+        - MINI_AGENT_PLATFORM_MODE: 平台模式（windows/linux/auto）
 
-        For production deployments, it is recommended to:
-        1. Set API_KEY via environment variable only
-        2. Use read-only config files in production
-        3. Validate all overrides through ConfigValidator
+        对于生产部署，建议:
+        1. 仅通过环境变量设置API_KEY
+        2. 生产环境使用只读配置文件
+        3. 通过ConfigValidator验证所有覆盖
 
         Args:
-            data: Configuration dictionary from YAML
+            data: 来自YAML的配置字典
 
         Returns:
-            Updated configuration dictionary with environment overrides
+            更新后的配置字典（包含环境覆盖）
         """
-        # LLM configuration overrides
-        # Support both MINIMAX_API_KEY (conventional) and MINI_AGENT_API_KEY (legacy)
+        # LLM配置覆盖
+        # 同时支持 MINIMAX_API_KEY（常规）和 MINI_AGENT_API_KEY（兼容）
         if api_key := (os.environ.get("MINIMAX_API_KEY") or os.environ.get("MINI_AGENT_API_KEY")):
             data["api_key"] = api_key
 
@@ -415,7 +427,7 @@ class Config(BaseModel):
         if provider := os.environ.get("MINI_AGENT_PROVIDER"):
             data["provider"] = provider
 
-        # Agent configuration overrides
+        # Agent配置覆盖
         if max_steps := os.environ.get("MINI_AGENT_MAX_STEPS"):
             with contextlib.suppress(ValueError):
                 data["max_steps"] = int(max_steps)
@@ -423,13 +435,13 @@ class Config(BaseModel):
         if workspace_dir := os.environ.get("MINI_AGENT_WORKSPACE_DIR"):
             data["workspace_dir"] = workspace_dir
 
-        # Platform configuration overrides
+        # Platform配置覆盖
         if platform_mode := os.environ.get("MINI_AGENT_PLATFORM_MODE"):
             if "platform" not in data:
                 data["platform"] = {}
             data["platform"]["mode"] = platform_mode
 
-        # Tools configuration overrides
+        # Tools配置覆盖
         if enable_skills := os.environ.get("MINI_AGENT_ENABLE_SKILLS"):
             if "tools" not in data:
                 data["tools"] = {}
@@ -443,15 +455,15 @@ class Config(BaseModel):
         return data
 
     def merge_cli_overrides(self, cli_overrides: CLIOverrideConfig) -> None:
-        """Merge CLI overrides into existing configuration.
+        """合并CLI覆盖到现有配置。
 
-        CLI overrides have the highest priority and will override
-        both YAML file values and environment variables.
+        CLI覆盖具有最高优先级，会覆盖
+        YAML文件值和环境变量。
 
         Args:
-            cli_overrides: CLI override configuration object
+            cli_overrides: CLI覆盖配置对象
         """
-        # LLM configuration overrides
+        # LLM配置覆盖
         if cli_overrides.api_key:
             self.llm.api_key = cli_overrides.api_key
         if cli_overrides.api_base:
@@ -461,17 +473,17 @@ class Config(BaseModel):
         if cli_overrides.provider:
             self.llm.provider = cli_overrides.provider
 
-        # Agent configuration overrides
+        # Agent配置覆盖
         if cli_overrides.max_steps is not None:
             self.agent.max_steps = cli_overrides.max_steps
         if cli_overrides.workspace_dir:
             self.agent.workspace_dir = cli_overrides.workspace_dir
 
-        # Platform configuration overrides
+        # Platform配置覆盖
         if cli_overrides.platform_mode:
             self.platform.mode = cli_overrides.platform_mode
 
-        # Tools configuration overrides
+        # Tools配置覆盖
         if cli_overrides.enable_skills is not None:
             self.tools.enable_skills = cli_overrides.enable_skills
         if cli_overrides.enable_mcp is not None:
@@ -482,49 +494,49 @@ class Config(BaseModel):
         ConfigValidator.validate_or_raise(self)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert configuration to dictionary for serialization.
+        """将配置转换为字典用于序列化。
 
         Returns:
-            Dictionary representation of the configuration
+            配置的字典表示
         """
         return self.model_dump()
 
     @staticmethod
     def get_package_dir() -> Path:
-        """Get the package installation directory
+        """获取包安装目录
 
         Returns:
-            Path to the mini_agent package directory
+            mini_agent包目录的路径
         """
-        # Get the directory where this config.py file is located
+        # 获取config.py文件所在目录
         return Path(__file__).parent
 
     @classmethod
     def find_config_file(cls, filename: str) -> Path | None:
-        """Find configuration file with priority order
+        """按优先级顺序查找配置文件
 
-        Search for config file in the following order of priority:
-        1) mini_agent/config/{filename} in current directory (development mode)
-        2) ~/.mini-agent/config/{filename} in user home directory
-        3) {package}/mini_agent/config/{filename} in package installation directory
+        按以下优先级搜索配置文件:
+        1) 当前目录的 mini_agent/config/{filename}（开发模式）
+        2) 用户主目录的 ~/.mini-agent/config/{filename}
+        3) 包安装目录的 {package}/mini_agent/config/{filename}
 
         Args:
-            filename: Configuration file name (e.g., "config.yaml", "mcp.json", "system_prompt.md")
+            filename: 配置文件名（例如 "config.yaml", "mcp.json", "system_prompt.md"）
 
         Returns:
-            Path to found config file, or None if not found
+            找到的配置文件的路径，若未找到则返回None
         """
-        # Priority 1: Development mode - current directory's config/ subdirectory
+        # 优先级1: 开发模式 - 当前目录的config/子目录
         dev_config = Path.cwd() / "mini_agent" / "config" / filename
         if dev_config.exists():
             return dev_config
 
-        # Priority 2: User config directory
+        # 优先级2: 用户配置目录
         user_config = Path.home() / ".mini-agent" / "config" / filename
         if user_config.exists():
             return user_config
 
-        # Priority 3: Package installation directory's config/ subdirectory
+        # 优先级3: 包安装目录的config/子目录
         package_config = cls.get_package_dir() / "config" / filename
         if package_config.exists():
             return package_config
@@ -533,38 +545,38 @@ class Config(BaseModel):
 
     @classmethod
     def get_default_config_path(cls) -> Path:
-        """Get the default config file path with priority search
+        """获取默认配置文件路径，按优先级搜索
 
         Returns:
-            Path to config.yaml (prioritizes: dev config/ > user config/ > package config/)
+            config.yaml的路径（优先级: 开发配置/ > 用户配置/ > 包配置/）
         """
         config_path = cls.find_config_file("config.yaml")
         if config_path:
             return config_path
 
-        # Fallback to package config directory for error message purposes
+        # 为错误信息提供后备的包配置目录
         return cls.get_package_dir() / "config" / "config.yaml"
 
     @classmethod
     def get_env_var_help(cls) -> str:
-        """Generate help text for environment variable configuration.
+        """生成环境变量配置的帮助文本。
 
         Returns:
-            Formatted help string for available environment variables
+            可用环境变量的格式化帮助字符串
         """
         return """
-Environment Variable Configuration:
-  MINIMAX_API_KEY          - Override API key (recommended)
-  MINI_AGENT_API_KEY       - Override API key (legacy alias)
-  MINI_AGENT_API_BASE      - Override API base URL
-  MINI_AGENT_MODEL         - Override model name
-  MINI_AGENT_PROVIDER      - Override provider (anthropic/openai)
-  MINI_AGENT_MAX_STEPS     - Override maximum execution steps
-  MINI_AGENT_WORKSPACE_DIR - Override workspace directory
-  MINI_AGENT_PLATFORM_MODE - Override platform mode (windows/linux/auto)
-  MINI_AGENT_ENABLE_SKILLS - Override skills enable (true/false)
-  MINI_AGENT_ENABLE_MCP    - Override MCP enable (true/false)
+环境变量配置:
+  MINIMAX_API_KEY          - 覆盖API密钥（推荐）
+  MINI_AGENT_API_KEY       - 覆盖API密钥（兼容性别名）
+  MINI_AGENT_API_BASE      - 覆盖API基础URL
+  MINI_AGENT_MODEL         - 覆盖模型名称
+  MINI_AGENT_PROVIDER      - 覆盖提供商（anthropic/openai）
+  MINI_AGENT_MAX_STEPS     - 覆盖最大执行步骤
+  MINI_AGENT_WORKSPACE_DIR - 覆盖工作目录
+  MINI_AGENT_PLATFORM_MODE - 覆盖平台模式（windows/linux/auto）
+  MINI_AGENT_ENABLE_SKILLS - 覆盖技能启用（true/false）
+  MINI_AGENT_ENABLE_MCP    - 覆盖MCP启用（true/false）
 
-Environment variables take precedence over config.yaml values.
-MINIMAX_API_KEY is the recommended variable; MINI_AGENT_API_KEY is a legacy alias.
+环境变量优先于config.yaml中的值。
+MINIMAX_API_KEY是推荐的变量；MINI_AGENT_API_KEY是兼容性别名。
 """

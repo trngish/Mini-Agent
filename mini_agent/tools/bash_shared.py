@@ -4,7 +4,7 @@ This module is kept for backwards compatibility. New code should use
 mini_agent.utils.platform_utils.PlatformUtils instead.
 """
 
-# Re-export from new location for backwards compatibility
+# 从新位置重新导出以保持向后兼容性
 from ..utils.platform_utils import (
     get_platform_shell_args as _get_platform_shell_args,
 )

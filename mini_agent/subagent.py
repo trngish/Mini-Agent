@@ -1,4 +1,4 @@
-"""Sub-agent for concurrent background task execution."""
+"""用于并发后台任务执行的子代理。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class SubAgentSecurityPolicy(str, Enum):
 
 
 class SubAgentResult:
-    """Result from a sub-agent execution."""
+    """子代理执行结果。"""
 
     def __init__(self, task: str, content: str, success: bool, elapsed: float, error: str = ""):
         self.task = task
@@ -35,10 +35,10 @@ class SubAgentResult:
 
 
 class SubAgent:
-    """Standalone agent for background sub-tasks.
+    """用于后台子任务的独立代理。
 
-    Has its own LLM client and tool set, runs independently from the parent agent.
-    Supports M2.7 parallel tool execution when enabled.
+    拥有自己的LLM客户端和工具集，与父代理独立运行。
+    支持M2.7并行工具执行（启用时）。
     """
 
     def __init__(
@@ -70,12 +70,12 @@ class SubAgent:
         self.write_tools = WRITE_TOOLS
 
     async def run(self, task: str) -> SubAgentResult:
-        """Execute a sub-task and return the result (A2 FIX: added output)."""
+        """执行子任务并返回结果。"""
         start = perf_counter()
         task_short = task[:80] + "..." if len(task) > 80 else task
         print(f"  {Colors.DIM}🔄 SubAgent: {task_short}{Colors.RESET}")
 
-        # Configure M2.7 thinking budget if available
+        # 如果M2.7可用，配置思考预算
         if self.is_m27 and self.m27_config:
             thinking_budget = self.m27_config.get("thinking_budget_tokens", 16384)
             if hasattr(self.llm, "configure_m27"):
@@ -100,7 +100,7 @@ class SubAgent:
                 )
 
             if response.tool_calls:
-                # M2.7: execute tools in parallel if enabled and multiple tools
+                # M2.7：如果启用且有多个工具，并行执行工具
                 parallel_enabled = self.m27_config.get("enable_parallel_tool_calls", True)
                 max_concurrent = self.m27_config.get("max_concurrent_tools", 10)
 
@@ -109,8 +109,8 @@ class SubAgent:
                 else:
                     results = await self._execute_tools_sequential(response.tool_calls)
 
-                # CRITICAL: Add assistant message with tool_calls BEFORE tool result
-                # This is required for the API to match tool results to their calls
+                # 关键：在工具结果之前添加带tool_calls的助手消息
+                # 这是API将工具结果与其调用匹配所必需的
                 assistant_msg = Message(
                     role="assistant",
                     content=response.content or "",
@@ -144,7 +144,7 @@ class SubAgent:
         )
 
     async def _execute_tools_sequential(self, tool_calls: list[ToolCall]) -> list[tuple[ToolCall, Message]]:
-        """Execute tools one at a time."""
+        """一次执行一个工具。"""
         results: list[tuple[ToolCall, Message]] = []
         for tc in tool_calls:
             result = await self._execute_single_tool(tc)
@@ -154,7 +154,7 @@ class SubAgent:
     async def _execute_tools_parallel(
         self, tool_calls: list[ToolCall], max_concurrent: int = 5
     ) -> list[tuple[ToolCall, Message]]:
-        """Execute tools in parallel using a semaphore to limit concurrency."""
+        """使用信号量限制并发来并行执行工具。"""
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def bounded_execute(tc: ToolCall) -> tuple[ToolCall, Message]:
@@ -228,17 +228,17 @@ class SubAgent:
         return (tool_call, tool_msg)
 
     def cleanup(self) -> None:
-        """Clean up resources held by the sub-agent.
+        """清理子代理持有的资源。
 
-        Should be called when sub-agent is no longer needed.
+        当子代理不再需要时应调用此方法。
         """
-        # Clear tool references to free memory
+        # 清除工具引用以释放内存
         self.tools.clear()
         self.tool_list.clear()
 
-        # Clean up background shells if any were created
+        # 清理后台shell（如果创建了的话）
         try:
-            # Schedule cleanup without blocking
+            # 调度清理而不阻塞
             import asyncio
 
             from .tools.bash_background import BackgroundShellManager
@@ -256,23 +256,23 @@ async def run_sub_agents(
     max_concurrent: int = 3,
     security_policy: SubAgentSecurityPolicy = SubAgentSecurityPolicy.YOLO,
 ) -> list[SubAgentResult]:
-    """Run multiple sub-agents concurrently.
+    """并发运行多个子代理。
 
     Args:
-        llm_client: LLM client (will be cloned for each subagent to avoid tool_call id conflicts)
-        tasks: List of task descriptions
-        tools: Available tools
-        max_concurrent: Maximum concurrent sub-agents
+        llm_client: LLM客户端（将为每个子代理克隆以避免tool_call id冲突）
+        tasks: 任务描述列表
+        tools: 可用工具
+        max_concurrent: 最大并发子代理数
 
     Returns:
-        List of SubAgentResult in the same order as tasks
+        与tasks相同顺序的SubAgentResult列表
     """
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def run_one(task: str) -> SubAgentResult:
         async with semaphore:
-            # Clone the LLMClient for each subagent to avoid tool_call id conflicts
-            # Sharing a client causes API errors: "tool result's tool id not found"
+            # 为每个子代理克隆LLMClient以避免tool_call id冲突
+            # 共享客户端会导致API错误："tool result's tool id not found"
             agent_llm = llm_client.clone() if hasattr(llm_client, "clone") else llm_client
             agent = SubAgent(llm_client=agent_llm, tools=tools, security_policy=security_policy)
             try:

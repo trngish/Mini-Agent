@@ -16,9 +16,9 @@ class TestOnRetry:
         on_retry(exception, 3)
 
         captured = capsys.readouterr()
-        assert "attempt 3" in captured.out
+        assert "尝试 3" in captured.out or "attempt 3" in captured.out
         assert "timeout" in captured.out
-        assert "Retrying in 2.0s" in captured.out
+        assert "重试" in captured.out or "Retrying" in captured.out
         mock_config.calculate_delay.assert_called_once_with(2)
 
     @patch("mini_agent.retry.RetryConfig")
@@ -30,7 +30,7 @@ class TestOnRetry:
         on_retry(ValueError("bad request"), 1)
 
         captured = capsys.readouterr()
-        assert "attempt 1" in captured.out
+        assert "尝试 1" in captured.out or "attempt 1" in captured.out
         assert "bad request" in captured.out
         mock_config.calculate_delay.assert_called_once_with(0)
 
