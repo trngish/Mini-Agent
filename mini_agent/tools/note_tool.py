@@ -77,7 +77,8 @@ class SessionNoteTool(Tool):
             return []
 
         try:
-            return json.loads(self.memory_file.read_text())  # type: ignore[no-any-return]
+            # Use utf-8-sig to handle BOM and ensure consistent encoding
+            return json.loads(self.memory_file.read_text(encoding="utf-8-sig"))  # type: ignore[no-any-return]
         except Exception:
             return []
 
@@ -88,7 +89,10 @@ class SessionNoteTool(Tool):
         """
         # Ensure parent directory exists when actually saving
         self.memory_file.parent.mkdir(parents=True, exist_ok=True)
-        self.memory_file.write_text(json.dumps(notes, indent=2, ensure_ascii=False))
+        # Use utf-8-sig for consistent encoding (BOM ensures Windows compatibility)
+        self.memory_file.write_text(
+            json.dumps(notes, indent=2, ensure_ascii=False), encoding="utf-8-sig"
+        )
 
     # Maximum content length for a single note (prevents disk exhaustion)
     MAX_NOTE_CONTENT_LENGTH = 10000
@@ -192,7 +196,7 @@ class RecallNoteTool(Tool):
                     content="No notes recorded yet.",
                 )
 
-            notes = json.loads(self.memory_file.read_text())
+            notes = json.loads(self.memory_file.read_text(encoding="utf-8-sig"))
 
             if not notes:
                 return ToolResult(
